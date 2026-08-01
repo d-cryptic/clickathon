@@ -103,10 +103,16 @@ deployed database. Until ADR 0009/0011/0014 are promoted, every wave-1-based bra
 skew, and `main` is not independently releasable in the sense this document requires. Promote wave 2
 next, and do not let other waves overtake it.
 
-**5 · Cross-model validation.** A **`claude-fable-5`** agent — a different model from the one that
-built and the one that merged — independently verifies the feature's claims against the live
-database and the repo. Its brief is adversarial: *find the claim that does not hold.* Its verdict is
-committed alongside the feature.
+**5 · Cross-model validation — by a different LINEAGE, not just a different checkpoint.** A **Codex**
+agent (`--provider codex`) independently verifies the feature's claims against the live database and
+the repo. Its brief is adversarial: *find the claim that does not hold.* Its verdict is committed
+alongside the feature.
+
+Codex rather than another Claude model deliberately: the failure this check exists to catch is a
+**shared blind spot**, and two checkpoints of the same family share more of those than two families
+do. Codex audits already found real defects here — the split-generation incident in
+`docs/codex-validation/002.md` and four P0s in `003.md`, including the unguarded write path that
+later corrupted the graded database.
 
 **6 · Docs current.** Every doc the feature touches states what is true **after** it, and no doc
 elsewhere contradicts it. This is the check that failed most often today: five files still asserted
