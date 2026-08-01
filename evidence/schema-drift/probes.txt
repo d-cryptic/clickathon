@@ -1,4 +1,4 @@
-ADR 0024 schema-drift evidence · commit e8cfda4 · pre-change ref 7c74581
+ADR 0024 schema-drift evidence · commit b076645 · pre-change ref 7c74581
 local ClickHouse 26.7.1.1315 · 905559 lines in the raw file (incl. header)
 
 == 0  probe files — every shape change the judges could send
@@ -6,7 +6,7 @@ local ClickHouse 26.7.1.1315 · 905559 lines in the raw file (incl. header)
   drift-missing / drift-reordered / drift-straight (100k), 3 refusal headers
 
 == 1  BASELINE — pre-0024 loader + pre-0024 schema, the real file
-  rows=905558  fp13=13118056588632894114  content_fp=2411304201289235929  compressed=6873584  load_s=2.4
+  rows=905558  fp13=13118056588632894114  content_fp=2411304201289235929  compressed=6873584  load_s=2.0
 
 == 2  IDENTITY — new loader + new schema, same file, same fingerprint
   | header shape: ev_raw <- data/ch-hackathon-raw-data.csv
@@ -17,11 +17,11 @@ local ClickHouse 26.7.1.1315 · 905559 lines in the raw file (incl. header)
   PASS  13-column fingerprint = 13118056588632894114
   PASS  content_dim fingerprint = 2411304201289235929
   PASS  rows with a non-empty extra map = 0
-  load_s=1.9  table compressed: 6873584 -> 6906258 (empty maps cost 32674 bytes, 0.48%)
+  load_s=1.7  table compressed: 6873584 -> 6906258 (empty maps cost 32674 bytes, 0.48%)
 
 == 3  NEW COLUMNS (the judge scenario) — announced, carried, known 13 untouched
   | target=local  database=adr0024cap_drift  (from --database)  mode=refuse
-  | header shape: ev_raw <- /var/folders/t_/jldctg2j6ld41g83gms5n7ww0000gn/T/tmp.y78EDqBSlX/drift-new.csv
+  | header shape: ev_raw <- /var/folders/t_/jldctg2j6ld41g83gms5n7ww0000gn/T/tmp.UAjZaAVarq/drift-new.csv
   |   NEW columns (2): device_type, network_type
   |     -> carried into the `extra` Map — queryable today as extra['device_type']
   | header shape: content_dim <- data/ch-hackathon-content-data.csv
@@ -29,7 +29,7 @@ local ClickHouse 26.7.1.1315 · 905559 lines in the raw file (incl. header)
   PASS  rows = 905558
   PASS  13-column fingerprint STILL = 13118056588632894114
   PASS  rows carrying both new columns = 905558
-  load_s=2.7  populated 2-key map: 244238 bytes compressed (3.6% of the 13-col table)
+  load_s=2.1  populated 2-key map: 244238 bytes compressed (3.6% of the 13-col table)
      ┌─device_type─┬─users─┬─events─┐
   1. │ mobile      │  7298 │ 707666 │
   2. │ tv          │  2077 │ 168705 │
@@ -84,18 +84,18 @@ local ClickHouse 26.7.1.1315 · 905559 lines in the raw file (incl. header)
   5. │   1 │ per-device │ web                   │ peak=72      │ avg=42.3    │         │
      └─────┴────────────┴───────────────────────┴──────────────┴─────────────┴─────────┘
   PASS  worked example verdict = PASS
-  elapsed_s=0.41
+  elapsed_s=0.43
 
   9b  the SERVING TIER serves it too, when the new dim is a function of a key:
   PASS  delta-tier peak (platform -> device_type mapping) = raw peak = 645
-  elapsed_s=0.10   <- the tier path, no rebuild, no new key
+  elapsed_s=0.15   <- the tier path, no rebuild, no new key
 
   9c  the honest boundary — network_type is a function of NOTHING in the tier key,
       so its only no-migration path is the raw recompute:
      ┌─peak_wifi─┬─active_minutes─┐
   1. │      1027 │           2245 │
      └───────────┴────────────────┘
-  elapsed_s=0.20   <- acceptable ad hoc; a first-class dimension needs the tier rebuilt with it as a key
+  elapsed_s=0.21   <- acceptable ad hoc; a first-class dimension needs the tier rebuilt with it as a key
 
 ------------------------------------------------------------
 schema-drift evidence PASSED · 30 assertions
