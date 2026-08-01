@@ -6,7 +6,9 @@
 > the easy half and **discrimination is the deliverable**. Detector: below 80% of a 15-minute trailing
 > median, lagged 3 min, floored at 100 concurrent and 50 sessions — **28 firing minutes** on the
 > delivered file where a naive "down 20% in 5 minutes" fires **962**. Classifier: `end_coverage` and
-> heartbeats-per-session, both anchored to measured semantics, not fitted. Live in hosted HyperDX as
+> heartbeats-per-session — **both thresholds are FITTED to a 46× separation in the delivered file, not
+> derived from measured semantics.** This document claimed otherwise until 2026-08-02; the claim was
+> false and §3.1 shows why. Live in hosted HyperDX as
 > 3 alerts over 7 tiles. **We deliberately did not put an LLM in the detection path** — see §6.
 > Regenerate every number here: `tools/clickstack-alerts.sh --validate`.
 
@@ -84,14 +86,61 @@ The delivered data cannot justify one, so we did not ship one.
 
 Evaluated **only** on minutes the detector fired. Two features carry it:
 
-- **`end_coverage` = `ends / (net_drop + starts)`** — the share of this minute's departures explained
-  by an explicit `VideoSessionEnd`. It is a ratio whose *meaning* fixes its own thresholds: **1.0 =
-  every departure accounted for**, **0.0 = sessions vanished without closing**.
-- **`hb_per_session` = heartbeats / concurrent** — [ADR 0007](adr/0007-gate-answers-pause-needs-explicit-handling.md)
-  measured **4.72**/min while actively watching, **0.756**/min while **paused**, **0.047**/min while
-  backgrounded. So a threshold of **1.0 sits above the fully-paused rate**: tripping it means the
-  fleet is quieter than it would be *if every remaining viewer had hit pause*, which no viewer
-  behaviour explains — only ingestion or the players stopping.
+- **`end_coverage` = `ends / (net_drop + starts)`** — roughly, how much of this minute's departure is
+  explained by explicit `VideoSessionEnd` events. **It is not a share and does not top out at 1.0** —
+  measured, it exceeds 1.0 on **81 of the file's 6,195 minutes and reaches 3.0** (§3.1).
+- **`hb_per_session` = heartbeats / concurrent** — how loud the stream is per active viewer. Note the
+  two halves come from different populations: the numerator counts **every** `VideoHeartbeat` in the
+  wall-clock minute, including from paused and backgrounded sessions; the denominator is **active**
+  concurrency, which excludes the paused.
+
+### 3.1 · The thresholds are fitted, and this document used to claim they were not
+
+Until 2026-08-02 the text above read: *"a threshold of **1.0 sits above the fully-paused rate**
+(0.756/min, [ADR 0007](adr/0007-gate-answers-pause-needs-explicit-handling.md)): tripping it means the
+fleet is quieter than it would be if every remaining viewer had hit pause."* **That argument is
+backwards, and it was repeated in a merge commit without being checked.** Measured evidence:
+[`evidence/alerting/anchor-audit-2026-08-02.txt`](../evidence/alerting/anchor-audit-2026-08-02.txt).
+
+**ADR 0007's rates are fine** — re-derived live, they reproduce to the digit: **0.756**/min paused
+(21,068 closed pairs, 3,002,604 s, 37,854 beats) and **0.047**/min backgrounded. The fault is in the
+inference drawn from them, twice over:
+
+1. **The inequality is the wrong way round.** The trip condition is `hb_per_session < 1.0`, and the
+   fully-paused reference is 0.756. Since **0.756 < 1.0, a fully-paused fleet *satisfies* the trip
+   condition** — it does not sit safely above it. For "quieter than fully paused" to follow from
+   tripping, the threshold would have to be **below** 0.756.
+2. **The two numbers are not comparable.** ADR 0007's 0.756 is beats per *paused session-minute*; the
+   alert's ratio divides *all* heartbeats in a minute by *active* concurrency. Different populations,
+   so no threshold on the second is justified by a rate measured on the first. The hypothetical is not
+   even representable: if every viewer paused, active concurrency → 0, `greatest(concurrent,1)` floors
+   the denominator at 1, and the ratio reads **high**, not low.
+
+**What is actually true, and is enough.** The two observed classes are separated by a factor of **46**
+— the worst outage minute reads 0.071, the best ending minute 3.248 — and **every threshold from 1.00
+down to 0.25 classifies the delivered file identically** (11 OUTAGE, 17 ENDING, measured). So the
+threshold is *fitted to a very wide gap*, which is a defensible thing to ship and an indefensible
+thing to dress up as a derivation.
+
+**Recommended, not applied: move the OUTAGE threshold to 0.5.** It costs nothing on this file and puts
+the number below the fully-paused rate, which is what the original sentence needed. It would make the
+anchor *directional* — reason 2 above still stands, so it would never be exact. The change lives in
+`tools/clickstack-alerts.sh`, which this task does not own; it is recorded here as the fix.
+
+> ⚠ **The same false claim is still printed by the tool.** `tools/clickstack-alerts.sh --validate`
+> emits *"Anchors (NOT fitted) … The OUTAGE threshold of 1.0/session/min sits ABOVE the fully-paused
+> rate"* in its own output. That file is not owned by this task; until it is corrected, **trust this
+> section over the banner the script prints.**
+
+Likewise the `end_coverage` boundaries of 0.2/0.7 are fitted, not meaning-fixed. The ratio runs above
+1.0 because its numerator counts **raw** `VideoSessionEnd` rows — **14 sessions emit more than one** —
+while its denominator is **modelled** net concurrency loss, whose minute is tail-adjusted and does not
+line up with the raw event's minute.
+
+**One thing the audit did not find: a false positive.** Across every minute where heartbeats were
+still arriving, only **3 of 3,816** read below 1.0, and those 3 are in the truncation tail. Normal
+viewer behaviour was never shown to trip OUTAGE. The threshold is not demonstrably unsafe — it is
+demonstrably not justified by the argument that was given for it.
 
 | class | condition | response |
 |---|---|---|
@@ -107,8 +156,8 @@ ambiguous, and saying so is more useful than forcing it into a bucket. The 0.2/0
 edges of that ambiguous band, chosen for margin: the observed ending minutes range 0.92–1.70 and the
 observed outage minutes 0.00–0.03, so nothing in the delivered file sits anywhere near either edge.
 
-Feature separation by phase of the delivered day — the thresholds must split these *without* being
-fitted to them:
+Feature separation by phase of the delivered day — this is the gap the thresholds are fitted to, and
+the margin is what makes fitting them acceptable (§3.1):
 
 | phase | minutes | `hb_per_session` | `end_coverage` | `pausebg_per_session` |
 |---|---:|---:|---:|---:|
@@ -280,11 +329,16 @@ because then the alert's correctness becomes a function of a sampling temperatur
    failure, and correctly classified as one, but not a validated *playback* outage (§4).
 3. **No seasonal baseline.** A trailing median under-reacts to a scheduled daily ramp-down. The
    delivered file has no daily seasonality to fit one against (§2).
-4. **Thresholds are validated against one episode.** 17 ending minutes and 11 outage minutes from a
-   single day. The margins are wide (§3) but the sample is one event.
-5. **Cost is bounded but not small on this file.** The 120-minute lookback reads ~6.3 MiB / ~21 ms,
+4. **Thresholds are validated against one episode, and they are fitted to it.** 17 ending minutes and
+   11 outage minutes from a single day. The margins are wide — 46× between the classes — but the
+   sample is one event, and the claim that the thresholds were derived from ADR 0007's measured rates
+   rather than fitted to this gap was **false and is withdrawn** (§3.1). The recommended
+   `hb_per_session` threshold of **0.5** is not applied; the shipped value is still **1.0**.
+5. **`end_coverage` is not a share.** It exceeds 1.0 on 81 of 6,195 minutes and reaches 3.0, so the
+   documented reading "1.0 = every departure accounted for" does not hold (§3.1).
+6. **Cost is bounded but not small on this file.** The 120-minute lookback reads ~6.3 MiB / ~21 ms,
    which is ~89% of `ev_raw` — because the file *is* a two-hour live spike. On a day with events
    spread evenly the same predicate reads 2h of 24h. It looks like a full scan; it is not one.
-6. **The three-way split is the statement's taxonomy, not an exhaustive one.** A CDN failure in one
+7. **The three-way split is the statement's taxonomy, not an exhaustive one.** A CDN failure in one
    region, a paywall bug, or a client-version regression would each present as `UNCLASSIFIED` — which
    is the correct behaviour, and also an admission that the taxonomy has only three boxes.
