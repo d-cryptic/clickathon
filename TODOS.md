@@ -150,7 +150,9 @@
 
 ## Then
 
-- [ ] `/bench` on the full benchmark shapes; capture bytes read
+- [x] `/bench` on the full benchmark shapes; capture bytes read — `tools/bench.sh` over the
+      13-query reconstructed matrix (`evidence/benchmark/`), evidence in `evidence/bench.txt`:
+      bytes/rows read, median-of-3 latency, query_ids, granule pruning, all query-log-auditable
 - [x] Minimal concurrency chart — ClickStack/HyperDX over `v_concurrency_minute_total`, no custom
       frontend. Freshness panel added: `tools/clickstack-observability.sh` — watermark lag tile, see
       docs/OBSERVABILITY.md.
