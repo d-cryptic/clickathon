@@ -33,9 +33,16 @@ silent-wrong on the unseen day if missed.**
       variable: identical 30,769 intervals, **0 of 3,725 minutes differ**; re-run restricted to only
       the 863 duplicate-bearing sessions so it could not wash out — 834 minutes, 0 differing.
       "We proved the step unnecessary" is a stronger defence than "we added the step."
-      Evidence: [`evidence/dedup.txt`](evidence/dedup.txt).
-- [x] **Non-summability measured, not asserted** — summing per-platform peaks over the 10:00 hour
-      gives 2,945 vs a true 2,887 (+2.0%); per-content peaks give 4,433 vs 2,887 (**+53.6%**). This
+      Evidence: [`evidence/dedup.txt`](evidence/dedup.txt). *(Counts as measured at `4a89399`; the
+      current model is 30,323 intervals over 3,732 minutes. Not re-run — but both arms of that
+      experiment share whatever pause rule is in force, so ADR 0009 moves them together and cannot
+      turn a 0-row difference into a non-zero one.)*
+- [x] **Non-summability measured, not asserted** — **re-measured 2026-08-01** on the post-ADR-0009
+      model: summing per-platform peaks gives **2,988** vs a true **2,917** (+2.4%); per-content peaks
+      give **5,680** vs 2,917 (**+94.7%**). *(Was 2,945 / 4,433 against a true 2,887 before the tie
+      fix. Per-content moved far more than the headline because it sums 3,357 independent maxima,
+      2,827 of them peaking at exactly 1 — restoring active time to a long tail bumps many by +1 at
+      once; mean per-content peak went 1.32 → 1.69.)* This
       was my biggest silent-wrong worry and it is now a defended number.
 - [ ] **Unclosed-pause rule decided and recorded** in ADR 0007. Conservative is the shipped default
       and the safer bet against an exact ground truth; v0 needs the *decision written down*, not
@@ -46,18 +53,23 @@ silent-wrong on the unseen day if missed.**
 ### B1. Both defects are fixed ✅
 
 - [x] `session_intervals` → `ReplacingMergeTree(build_version)`. Applied to the graded database,
-      gate re-run green, delta layer vs interval expansion 0 mismatches over 3,725 minutes.
+      gate re-run green, delta layer vs interval expansion 0 mismatches over **3,732** minutes
+      (re-run 2026-08-01; it was 3,725 before ADR 0009).
 - [x] `cc_minute_delta.starts`/`ends` → `Int64`. Counters verified sane post-rebuild
       (20,035 starts / 16,895 ends, max single-row 231 — no wrap).
-- [x] `cc_user_minute` survived the source-table recreate — `uniqExactMerge` 9,517 = 9,517 distinct
-      users. `uniqExact` state is idempotent under re-insertion, so the MV re-firing cannot double count.
+- [x] `cc_user_minute` survived the source-table recreate — `uniqExactMerge` **9,531** = 9,531 distinct
+      users (re-measured 2026-08-01; 9,517 before ADR 0009). `uniqExact` state is idempotent under
+      re-insertion, so the MV re-firing cannot double count. ⚠️ Idempotent on the *user set* only —
+      ADR 0009 records that `cc_user_minute` is never truncated by `tools/build-model.sh`, so stale
+      intervals accumulate and the user **peak** drifts up across rebuilds (2,953 after five, against
+      a true 2,844). The equality above is exactly the check that cannot see it.
 
 ### B2. …but the evidence file still says they aren't 🔴
 
 - [ ] **Re-run `tools/truncation-test.sh` and commit the result.**
       [`evidence/truncation.txt`](evidence/truncation.txt) was last written by `5db36ed`
       — *"finds a real convergence bug (not yet fixed)"* — and `388a845` did not regenerate it. Its
-      RESULT table still reads `2924 | 2887 | 37` and its **VERDICT still reads "Incremental
+      RESULT table still reads `2924 | 2887 | 37` (pre-ADR-0009 figures) and its **VERDICT still reads "Incremental
       absorption as the schema stands today does NOT converge."**
       WALKTHROUGH now claims absorption converges; that claim currently rests on the *simulation arm*
       inside the old run, not on a post-fix execution.
@@ -129,8 +141,8 @@ only defect is that nothing runs it.
       `80_content` and `85_windows`, the three newest tiers. §3's diagram *does* show them, so the
       file contradicts itself. Small, but §2 is the map a judge follows.
 - [ ] `evidence/` fully regenerated — see **B2**, which is the one file that is not.
-- [ ] Deck: 15 slides mapped to C1–C5, including the **business framing** (34.5% of apparent watch
-      time is backgrounded or paused; 3,708 naive vs 2,887 actual at the peak).
+- [ ] Deck: 15 slides mapped to C1–C5, including the **business framing** (33.6% of apparent watch
+      time is backgrounded or paused; 3,708 naive vs 2,917 actual at the peak).
 - [ ] Demo rehearsed twice.
 - [ ] **Team Captain confirmed and awake before the freeze.**
 
