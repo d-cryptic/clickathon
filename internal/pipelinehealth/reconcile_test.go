@@ -67,8 +67,9 @@ func TestReadReconcileEvidence_GreenFixture(t *testing.T) {
 	}
 
 	// The five derived sample rows — and ONLY those. Section 2 (MODEL
-	// COMPARISON) rows share the box-drawing shape and carry parseable
-	// minutes; if the section fence broke they would leak in here.
+	// COMPARISON) rows in THIS fixture carry no PASS/MISMATCH verdict, so the
+	// verdict requirement alone keeps them out here; the section fence itself
+	// is pinned separately by TestReadReconcileEvidence_SectionFence.
 	if len(ev.Minutes) != 5 {
 		t.Fatalf("len(Minutes) = %d, want 5", len(ev.Minutes))
 	}
@@ -311,6 +312,44 @@ func TestReadReconcileEvidence_SurvivesAddedColumn(t *testing.T) {
 	}
 	if len(ev.Minutes) != 5 {
 		t.Errorf("len(Minutes) = %d, want 5 — detail rows must survive an added column too", len(ev.Minutes))
+	}
+}
+
+// TestReadReconcileEvidence_SectionFence pins the fence itself: a row OUTSIDE
+// section 1 that has the full gate-row shape — timestamp, three integers, a
+// PASS verdict — must not be parsed as a gate minute. Without this file the
+// fence was untested (an audit probe removed it and every test stayed green,
+// because no fixture had a verdict-bearing row outside the gate section); a
+// future gate section that DOES emit verdicts elsewhere would silently pollute
+// Minutes.
+func TestReadReconcileEvidence_SectionFence(t *testing.T) {
+	t.Parallel()
+	fixture := `RECONCILE — serving layer vs ev_raw
+target: cloud   commit: d6c85e2
+
+== 1. THE GATE — truth recomputed from ev_raw, five minutes
+
+   ┌─ord─┬─scope───┬─c1─────────────────────┬─c2───────────┬─c3─────────────┬─c4────────┬─verdict─┐
+1. │   0 │ SUMMARY │ minutes_compared=17028 │ mismatched=0 │ max_abs_diff=0 │ peak=2887 │ PASS    │
+2. │   2 │ sample  │ 2026-07-26 10:56:00    │ 2887         │ 2887           │ 0         │ PASS    │
+   └─────┴─────────┴────────────────────────┴──────────────┴────────────────┴───────────┴─────────┘
+
+== 2. PER-MINUTE SPOT CHECK — informational, NOT part of the gate
+
+1. │ 2026-07-26 11:10:00 │ 2450 │ 2450 │ 0 │ PASS │
+`
+	path := writeFixture(t, fixture)
+
+	ev, _, err := pipelinehealth.ReadReconcileEvidence(path)
+	if err != nil {
+		t.Fatalf("ReadReconcileEvidence() error = %v, want nil", err)
+	}
+	if len(ev.Minutes) != 1 {
+		t.Fatalf("len(Minutes) = %d, want 1 — the section-2 row leaked past the fence: %+v", len(ev.Minutes), ev.Minutes)
+	}
+	want := time.Date(2026, 7, 26, 10, 56, 0, 0, time.UTC)
+	if !ev.Minutes[0].Minute.Equal(want) {
+		t.Errorf("Minutes[0] = %v, want the section-1 sample %v", ev.Minutes[0].Minute, want)
 	}
 }
 

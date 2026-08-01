@@ -109,6 +109,59 @@ func TestLoadLocalResolvesItsOwnDatabase(t *testing.T) {
 	}
 }
 
+// TestLoadCloudDefaults pins what an all-defaults cloud load resolves to:
+// port 8443 and TLS ON. An audit probe flipped Secure to false and changed
+// the default port with no test noticing — and a plaintext connection to the
+// graded Cloud endpoint fails with an opaque protocol error, not a clear one.
+func TestLoadCloudDefaults(t *testing.T) {
+	t.Setenv("CH_HOST", "abc.gcp.clickhouse.cloud")
+	t.Setenv("CH_PASSWORD", "secret")
+	t.Setenv("CH_DATABASE", "sonyliv")
+	// Blank out everything optional so the defaults themselves are under test,
+	// regardless of what the surrounding shell exports.
+	t.Setenv("CH_PORT", "")
+	t.Setenv("CH_USER", "")
+	t.Setenv("CH_SECURE", "")
+
+	got, err := config.Load(config.TargetCloud)
+	if err != nil {
+		t.Fatalf("Load(cloud) = %v, want nil", err)
+	}
+	if got.Port != 8443 {
+		t.Errorf("Port = %d, want the Cloud HTTPS default 8443", got.Port)
+	}
+	if !got.Secure {
+		t.Error("Secure = false, want true — Cloud connections default to TLS")
+	}
+	if got.User != "default" {
+		t.Errorf("User = %q, want %q", got.User, "default")
+	}
+}
+
+// TestLoadLocalDefaults: the local target must stay plaintext on
+// localhost:8123 with the container's `app` user when only the required
+// variables are set.
+func TestLoadLocalDefaults(t *testing.T) {
+	t.Setenv("CH_DATABASE_LOCAL", "default")
+	t.Setenv("CH_PASSWORD_LOCAL", "secret")
+	t.Setenv("CH_LOCAL_URL", "")
+	t.Setenv("CH_LOCAL_USER", "")
+
+	got, err := config.Load(config.TargetLocal)
+	if err != nil {
+		t.Fatalf("Load(local) = %v, want nil", err)
+	}
+	if want := "localhost:8123"; got.Addr() != want {
+		t.Errorf("Addr() = %q, want %q", got.Addr(), want)
+	}
+	if got.Secure {
+		t.Error("Secure = true, want false for the local Docker container")
+	}
+	if got.User != "app" {
+		t.Errorf("User = %q, want %q", got.User, "app")
+	}
+}
+
 // Cloud symmetrically requires its own database variable: an unset CH_DATABASE
 // must fail at Load time, not produce a confident query against the server
 // default database.

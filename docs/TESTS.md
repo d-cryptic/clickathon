@@ -137,11 +137,13 @@ Both are `Int64` now.
 
 **The Go unit suite is database-free by construction.** Every test runs against fixtures, fakes of
 the `driver.Conn` interface, `httptest` collectors, or loopback ports nothing listens on — `make ci`
-never opens a connection to any ClickHouse, least of all the graded `sonyliv` database. Coverage as
-of 2026-08-01: `pipelinehealth` 90.8%, `otelemit` 95.7%, `chdb` 93.1%, `config` 79.6%,
-`cmd/sonyliv` 58.7% (the remainder is `main`/`cli` and the live-connection halves of
-`verify`/`observe`, which cannot be unit-tested without a server and are exercised by `make verify`
-instead), 76.1% total.
+never opens a connection to any ClickHouse, least of all the graded `sonyliv` database. Coverage
+after the 2026-08-01 audit: `pipelinehealth` 90.8%, `otelemit` 95.7%, `chdb` 93.1%, `config` 91.4%
+(was 79.6% — the default-resolution paths were unexercised), `cmd/sonyliv` 58.7% (the remainder is
+`main`/`cli` and the live-connection halves of `verify`/`observe`, which cannot be unit-tested
+without a server and are exercised by `make verify` instead), 77.6% total. Treat these numbers as a
+ceiling on ignorance, not proof of coverage — the audit below found eight breaks the pre-audit
+suite could not see at almost identical percentages.
 
 | Test | Proves |
 |---|---|
@@ -152,20 +154,22 @@ instead), 76.1% total.
 | `TestReadReconcileEvidence_EmptyFileIsNotAPass` / `_MalformedFileIsNotAPass` | an empty or garbage evidence file cannot read as "everything passed" |
 | `TestReadReconcileEvidence_SurvivesAddedColumn` | the regression the 2026-08-01 rewrite exists for: adding a column to the gate's table must not silently zero the parse — SUMMARY tokens are key=value, detail rows anchor on the timestamp |
 | `TestPass_SummaryGuards` | `Pass()` requires all of: summary present, verdict PASS, ≥1 minute compared, 0 mismatched — a self-contradictory summary fails |
+| `TestReadReconcileEvidence_SectionFence` | the `== 1.`/`== 2.` section fence itself: a fully gate-shaped row (timestamp, three ints, PASS) placed outside section 1 must NOT parse into `Minutes`. Added by the 2026-08-01 audit — removing the fence previously survived every test, because no fixture had a verdict-bearing row outside the gate section |
 | `TestIntAttrEncodesAsJSONString` | OTLP/HTTP JSON's int64-as-decimal-string mapping is actually followed — a bare `int64` JSON field would lose precision above 2^53 |
 | `TestSeverityConstantsAreLowerCase` | `severity:error` saved searches keep matching — HyperDX stores `SeverityText` lower-cased (VERIFIED.md), and this is the one constant a careless edit would recapitalize |
 | `TestNewTraceID` / `TestNewSpanID` / `TestNewTraceIDIsRandom` | id shape (16/8 random bytes, lower-case hex) and that two runs do not collide |
-| `TestQueryWatermark_*` (`health_test.go`) | the v_cc_watermark sign convention survives the code path: **negative lag is healthy**, positive lag is not; an all-NULL row (fresh database) scans to zero values instead of panicking; a scan failure names the view |
-| `TestQueryBuildStages_*` | stage rows come typed off `system.query_log`; a stage with no recorded run is `Found=false`, **not** an error and not a fabricated row; a real query failure names which stage died |
+| `TestQueryWatermark_*` (`health_test.go`) | the v_cc_watermark sign convention survives the code path: **negative lag is healthy**, positive lag is not; an all-NULL row (fresh database) scans to zero values instead of panicking; a scan failure names the view. Since the audit, all seven columns scan with **distinct** fixture values asserted field-by-field — swapping two scan destinations (raw↔sealed) previously survived a not-zero check |
+| `TestQueryBuildStages_*` | stage rows come typed off `system.query_log`; a stage with no recorded run is `Found=false`, **not** an error and not a fabricated row; a real query failure names which stage died. Since the audit, the two queries' load-bearing fragments are pinned (`has(tables, 'db.…')` per stage, `NOT has(…ev_raw)`, `type = 'QueryFinish'`, `query_kind = 'Insert'`) — corrupting a table name in the predicate previously survived, because the fake routed on `NOT has` alone |
 | `TestClientPostsEachSignalToItsPath` / `TestClientMetricsWireShape` (`otelemit/client_test.go`) | each signal POSTs to its `/v1/<signal>` path with the ingestion key in `authorization` and the OTLP JSON field names actually on the wire (`asDouble`, `timeUnixNano` as a decimal string) |
 | `TestClientNon2xxIsAnError` / `TestClientUnreachableCollectorIsAnError` | a 401 (wrong key) or a dead collector is a loud error carrying the status and response body — not a silent drop |
 | `TestClientUnmarshalablePayloadFailsBeforePosting` | a NaN gauge fails at marshal time, before any bytes reach the collector |
 | `TestAttrConstructorsEncodeTheTaggedUnion` / `TestSeverityNumberMapsPerOTLPSpec` / `TestLogRecordCarriesBodySeverityAndTraceCorrelation` / `TestGaugeMetricShape` | every constructor sets exactly one arm of the OTLP AnyValue union (`boolValue:false` survives `omitempty`), severity text↔number stay in sync, logs keep their trace correlation |
-| `TestTables` / `TestTablesErrors` / `TestServerVersion*` (`chdb_test.go`) | the inventory reads `system.tables` (never per-table `count()`), binds the database as a parameter, closes its rows, and each of the three failure points names itself |
+| `TestTables` / `TestTablesErrors` / `TestServerVersion*` (`chdb_test.go`) | the inventory reads `system.tables` (never per-table `count()`) **with `ORDER BY name`** (deterministic verify output), binds the database as a parameter, closes its rows, and each of the three failure points names itself |
 | `TestOpenUnreachable` | a dead endpoint fails **at Open** (via the ping), naming the address and user — for both plain and TLS configs. Target is a loopback port nothing listens on |
 | `TestRunDispatch` / `TestVerifyAndObserveRejectBadInputBeforeConnecting` (`cmd/sonyliv`) | CLI dispatch, and that both subcommands reject bad flags / an unknown target **before** any connection attempt |
 | `TestObserveRunLifecycle` / `TestNewChildSpanStatus` / `TestObserve*` | one trace per observe run: children parented to the root, a query failure still yields a `StatusError` span, missing reconcile evidence is a legitimate state |
-| `TestBuildMetrics` / `TestBuildLogsSeverities` | metric families with no data behind them are **absent, not zero** (a fabricated 0 reads as healthy on a dashboard); unhealthy watermark and failing/unattested gate log at `error`, missing evidence and never-run stages at `warn` |
+| `TestBuildMetrics` / `TestBuildLogsSeverities` | every gauge **value** (not just its name): lag −90 emits −90, `gate_pass` is 1 on a green gate and 0 with `max_abs_delta=39` on the captured drift failure; metric families with no data behind them are **absent, not zero** (a fabricated 0 reads as healthy on a dashboard); unhealthy watermark and failing/unattested gate log at `error`, missing evidence and never-run stages at `warn`. Before the audit only metric NAMES were asserted — an inverted `gate_pass` and a zeroed lag gauge both survived |
+| `TestLoadCloudDefaults` / `TestLoadLocalDefaults` (`config_test.go`) | an all-defaults cloud load resolves to port 8443 with **TLS on** and user `default`; local stays plaintext `localhost:8123` as `app`. Added by the audit — flipping `Secure` to false or the default port to 9000 previously survived, because every test set those variables explicitly |
 | `TestPrintSummary` / `TestClampUint64ToInt64` | the human summary names what it could not find; `uint64→int64` clamps at MaxInt64 instead of wrapping negative |
 
 **Anti-pattern avoided:** re-deriving build-stage duration or benchmark-query latency by wrapping a
@@ -185,3 +189,31 @@ fakes were modeled on.
 (`cmdVerify`/`cmdObserve` past config validation) and the `chdb.Open` success path — all need a live
 ClickHouse and are exercised by `make verify` / `sonyliv observe -dry-run` against the local stack
 instead.
+
+## False-confidence audit — 2026-08-01
+
+Method (rule 14): for each suspect test, deliberately break the code it claims to cover and confirm
+whether the suite notices. A test that stays green through a real break is confirmed false
+confidence. Every sabotage was reverted; the fixes below are test-side only.
+
+**10 probes run · 2 caught by the original suite (controls) · 8 survived · all 8 now fixed and
+re-probed as caught.** No test reaches a live database — verified by reading every fake/fixture and
+by the loopback/`httptest` designs above.
+
+| # | Sabotage | Original result | Fix |
+|---|---|---|---|
+| A | invert `Watermark.Healthy()` sign | **caught** (control) | — |
+| B | drop the `Mismatched == 0` guard from `Pass()` | **caught** (control) | — |
+| 1 | invert the `gate_pass` gauge value | survived | `TestBuildMetrics` asserts gauge **values**, both green and failing-gate cases |
+| 2 | emit 0 for `sealed_lag_seconds` | survived | same |
+| 3 | corrupt `ev_raw` table name in the build-stage `query_log` predicate | survived | `TestQueryBuildStages_BothStagesFound` pins each query's predicate fragments |
+| 4 | swap raw/sealed watermark scan destinations | survived | distinct per-column fixture values, asserted field-by-field |
+| 5 | flip cloud `Secure` default to false | survived | `TestLoadCloudDefaults` |
+| 6 | change cloud default port 8443→9000 | survived | same |
+| 7 | remove the reconcile `== 1.`/`== 2.` section fence | survived | `TestReadReconcileEvidence_SectionFence` |
+| 8 | drop `ORDER BY name` from `chdb.Tables` | survived | query-content assertion in `TestTables` |
+
+Packages probed and found sound without changes: `otelemit` (wire-level `httptest` assertions pin
+paths, headers, exact JSON), `cmd/sonyliv` dispatch, the reconcile fixtures (byte-for-byte captures
+whose format matches what `tools/reconcile.sh` writes today — verified by diff against
+`evidence/reconcile.txt`; only data values differ, post-model-change).
