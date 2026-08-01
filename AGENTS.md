@@ -16,6 +16,9 @@ released in the final hours. Full statement: [docs/PROBLEM.md](docs/PROBLEM.md).
 
 ## Where to go
 
+**New here, or resuming after a break? Read [WALKTHROUGH.md](WALKTHROUGH.md) first** — what is built,
+what is verified, what is broken, and what is still missing, in one page.
+
 | I need to… | Go to |
 |---|---|
 | Understand how work flows here (gates, reviews, worksheets) | [AGENT_WORKFLOW.md](AGENT_WORKFLOW.md) |
