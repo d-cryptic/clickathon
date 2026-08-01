@@ -250,6 +250,51 @@ the same class of error as the incomplete cherry-picks, one level up.
 98/98 hours with no bare live-view `argMax`; the 2,887 → 2,917 and 1,949.3 → 1,978.1 h headline; and
 ADR 0018's "every layer" claim now explicitly withdrawn and replaced with a measured per-layer table.
 
+## 🔴 Wave A rejected — and it settles the wave question for good
+
+Codex validated the first file-state promotion and found three things. Two are fixed; the third
+changes the plan.
+
+**1 · A newline defeated every destructive-SQL pattern — including plain `DROP`.** Ordinary DDL
+formatting evades a line-oriented grep:
+
+```sql
+DROP
+  TABLE ev_raw;
+```
+
+The guard looked thorough and caught **nothing that spanned a line break**, which is how most people
+write DDL. Fixed: comments stripped, all whitespace collapsed, matched against one flat stream.
+Re-tested — `DROP`, `DELETE FROM` and `ALTER … DROP COLUMN` split across lines are all caught, and
+benign SQL still passes.
+
+**2 · The file-state-copy claim did not hold for one file.** Nine of ten were byte-identical to
+`dev`; `tools/load.sh` differed by 353 insertions. Cause: I copied at time T and `dev` moved —
+Y1's landing table and my own `--replace` guard both landed afterwards. **A copy is only as good as
+its timestamp**, so a wave must be rebuilt from `dev` immediately before validation, not once at
+the start.
+
+**3 · Tooling is NOT separable from SQL, and this is the structural finding.** The promoted
+`tools/build-model.sh` unconditionally applies `sql/15_normalise.sql`, which wave A does not carry;
+`dev`'s loader requires `sql/05_landing.sql`, likewise absent. **Wave A alone is not a runnable
+state.**
+
+### So the partition question is now closed, in both directions
+
+- **By ADR** — impossible: `sql/50_hour_agg.sql` implements 0003, 0006, 0014, 0016 and 0022.
+- **By file** — impossible: `tools/` executes `sql/`, so a tooling wave without its SQL cannot run.
+
+**`tools/` and `sql/` promote together or not at all.** That is not a retreat to the wholesale merge:
+it is one validated increment containing the model and the tooling that runs it, with evidence, docs
+and the Go layer following as genuinely separable waves. The candidate branches `promo/w12-fileset`
+and `promo/waveB-model` should be combined and re-validated as one.
+
+**Check 6 also failed:** `docs/RUNBOOK_UNSEEN.md` still says the caller environment is ignored, which
+contradicts all four promoted environment-capture scripts.
+
+**What held:** `make ci`, all four target-resolution probes, both ordinary graded guards, check 4a at
+17,028 / 0 / 0 / 2,917, and the expected 4b skew.
+
 ## ✅ The method changes: promote FILES to `dev`'s state, not COMMITS onto `main`
 
 All three rejections share one cause, and it is the method rather than the agents.

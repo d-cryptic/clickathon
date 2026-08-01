@@ -184,8 +184,19 @@ if [ "$DB" = "$GRADED_DB" ] && [ "${APPLY_GRADED_DESTRUCTIVE:-}" != yes ]; then
     # LIGHTWEIGHT delete, which is ordinary SQL somebody would write without
     # thinking of it as an ALTER. That one is a real accident risk; the rest are
     # rarer but equally destructive.
-    if sed 's/--.*//' "$f" | grep -qiE '(^|[[:space:];])(DROP|TRUNCATE|DETACH|RENAME[[:space:]]+TABLE|EXCHANGE[[:space:]]+TABLES|REPLACE[[:space:]]+TABLE|DELETE[[:space:]]+FROM|OPTIMIZE)[[:space:]]' \
-       || sed 's/--.*//' "$f" | grep -qiE 'ALTER[[:space:]]+TABLE[^;]*(DELETE|UPDATE|DROP[[:space:]]+(COLUMN|PARTITION)|CLEAR[[:space:]]+COLUMN|MOVE[[:space:]]+PARTITION|REPLACE[[:space:]]+PARTITION|MATERIALIZE[[:space:]]+TTL|MODIFY[[:space:]]+COLUMN)'; then
+    # NORMALISE FIRST, then match. Codex found that every pattern below — including
+    # plain DROP and TRUNCATE — was defeated by ordinary SQL formatting:
+    #
+    #     DROP
+    #       TABLE ev_raw;
+    #
+    # A line-oriented grep never sees "DROP TABLE" there. The guard looked
+    # thorough and caught nothing that spanned a line break, which is how most
+    # people write DDL. So: strip comments, collapse ALL whitespace to single
+    # spaces, and match against one flat stream.
+    NORM="$(sed -e 's/--.*//' "$f" | tr '\n\t' '  ' | tr -s ' ')"
+    if printf '%s' "$NORM" | grep -qiE '(^| |;)(DROP|TRUNCATE|DETACH|RENAME TABLE|EXCHANGE TABLES|REPLACE TABLE|DELETE FROM|OPTIMIZE) ' \
+       || printf '%s' "$NORM" | grep -qiE 'ALTER TABLE[^;]*(DELETE|UPDATE|DROP (COLUMN|PARTITION)|CLEAR COLUMN|MOVE PARTITION|REPLACE PARTITION|MATERIALIZE TTL|MODIFY COLUMN)'; then
       die "$f contains DROP or TRUNCATE and '$DB' is the GRADED database.
 
 Applying it destroys answers we are scored on, and there is no undo. If that is
