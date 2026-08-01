@@ -13,6 +13,27 @@ The judges said the unseen day will be *"more real and cruel"*. `tools/unseen-ge
 in the edge-case register at [codex-validation/003.md §11](codex-validation/003.md) and in measured
 behaviour (`doubts/11` fail-open vocabulary, ADR 0009 same-second ties, ADR 0022 sentinel collision).
 
+## Verified: the source-contract gate catches the worst hazard here
+
+Checked after both landed, because they were built in separate lanes and nobody had confirmed they
+connect. **They do.**
+
+The most dangerous finding in this catalogue is the **seconds-vs-milliseconds** session: `load.sh`
+divides `event_timestamp` by 1000, so a seconds-valued input lands in **1970**, the model happily
+derives intervals there, and **the gate stays green** — truth and serving agree, both in the wrong
+year. We would submit a confidently wrong answer with a passing correctness gate.
+
+`queries/validate_source_contract.sql` probe 3 catches it: `toYear(event_timestamp) NOT BETWEEN 2020
+AND 2035`, reported as *"epoch-zero or millis-not-divided"*. It is a **FAIL**, not a warning.
+
+And the ordering is right, which is the part that could easily have been wrong. The gate queries
+`ev_raw`, so it can only run after a load — but `docs/RUNBOOK_UNSEEN.md` loads the unseen file into a
+**throwaway contract database** first, validates there, drops it, and only then does the real run.
+So the check happens before we trust the file, not after we have built the answer on it.
+
+**The residual risk is procedural, not technical:** this only protects us if the runbook is followed
+in order under time pressure. That is precisely the scenario the unseen day creates.
+
 ## How to use it
 
 ```bash
