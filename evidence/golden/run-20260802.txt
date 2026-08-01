@@ -1,0 +1,85 @@
+GOLDEN COHORTS — db=golden_v1 seed=20260802 generated 2026-08-01 21:23 UTC
+expectations: closed form / stated-tolerance statistics / reference interpreter — NEVER the SQL under test
+
+== closed-staircase — 60 sessions x 600 s, staggered 60 s — ramp/plateau/ramp, peak 12
+  1260 events, 60 sessions
+  expected: 60 iv · 39600 s · peak 12 · avg 10.14 over 71 min
+  model:    60 iv · 39600 s · peak 12 · avg 10.14 over 71 min
+  verdict: PASS
+
+== closed-blocks — 8 sessions x 1800 s, staggered 300 s — coarse overlap, peak 7
+  368 events, 8 sessions
+  expected: 8 iv · 14880 s · peak 7 · avg 3.82 over 67 min
+  model:    8 iv · 14880 s · peak 7 · avg 3.82 over 67 min
+  verdict: PASS
+
+== closed-pause — 10 sessions, pause@300 resume@600 — exclusion window + 4-minute hole
+  650 events, 10 sessions
+  expected: 20 iv · 15600 s · peak 10 · avg 8.75 over 32 min
+  model:    20 iv · 15600 s · peak 10 · avg 8.75 over 32 min
+  verdict: PASS
+
+== stat-exponential — Poisson 2/min x 6 h, D~5+Exp(1200 s) — N·E[span] and Little's law
+  22149 events, 682 sessions
+  N=682 sessions; expected watch 239.6±35.0 h; λ·E[span]=42.2±9.7
+  model: watch 246.2 h (+6.55 h); mean concurrency 43.54 (+1.37); peak 58 (not asserted)
+  verdict: PASS
+
+== stat-uniform — Poisson 1/min x 4 h, D~U(600,1800) — bounded tails, same assertions
+  7691 events, 237 sessions
+  N=237 sessions; expected watch 83.0±6.0 h; λ·E[span]=21.0±8.2
+  model: watch 85.4 h (+2.43 h); mean concurrency 21.83 (+0.82); peak 30 (not asserted)
+  verdict: PASS
+
+== degen-empty — zero sessions
+  0 events, 0 sessions
+  expected: 0 iv · 0 s · peak 0 · avg None over 0 min
+  model:    0 iv · 0 s · peak 0 · avg None over 0 min
+  verdict: PASS
+
+== degen-one — exactly one session
+  6 events, 1 sessions
+  expected: 1 iv · 360 s · peak 1 · avg 1.0 over 7 min
+  model:    1 iv · 360 s · peak 1 · avg 1.0 over 7 min
+  verdict: PASS
+
+== degen-same-start — 200 identical sessions, one instant
+  4200 events, 200 sessions
+  expected: 200 iv · 132000 s · peak 200 · avg 200.0 over 12 min
+  model:    200 iv · 132000 s · peak 200 · avg 200.0 over 12 min
+  verdict: PASS
+
+== degen-dup-rows — one session duplicated x5
+  30 events, 1 sessions
+  expected: 1 iv · 360 s · peak 1 · avg 1.0 over 7 min
+  model:    1 iv · 360 s · peak 1 · avg 1.0 over 7 min
+  verdict: PASS
+
+== degen-lone-event — one event — the point-activity drop
+  1 events, 1 sessions
+  expected: 1 iv · 60 s · peak 1 · avg 1.0 over 2 min
+  model:    0 iv · 0 s · peak 0 · avg None over 0 min
+  KNOWN DIVERGENCE (expected to differ): shipped sql/30 drops point activity (zero-length segment filter) — expect 0 intervals from the model; the SPEC expectation is shown. Open finding, do not 'fix' here.
+  DIFF: intervals: model 0 != expected 1
+  DIFF: watch_s: model 0 != expected 60
+  DIFF: curve: 2 minutes differ — 00:00=0(exp 1), 00:01=0(exp 1)
+  verdict: KNOWN-DIVERGENCE
+
+== organiser-file — the delivered CSV as the regression cohort
+  interpreting /Users/barun/Developers/personal/clickathon-project/data/ch-hackathon-raw-data.csv (reference_interpreter, model_compat)…
+  reference: 30323 intervals, 1978.1 h, peak 2917 @ 2026-07-26 10:56:00  → pins CONFIRMED
+  loading the file into the scratch database (tools/load.sh)…
+  model:     30323 intervals, 1978.1 h, peak 2917 @ 2026-07-26 10:56:00
+
+SUMMARY
+  closed-staircase     PASS
+  closed-blocks        PASS
+  closed-pause         PASS
+  stat-exponential     PASS
+  stat-uniform         PASS
+  degen-empty          PASS
+  degen-one            PASS
+  degen-same-start     PASS
+  degen-dup-rows       PASS
+  degen-lone-event     KNOWN-DIVERGENCE
+  organiser-file       PASS
