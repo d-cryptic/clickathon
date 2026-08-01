@@ -23,16 +23,16 @@ touched ten files.
 | # | Branch | Owns | ADR |
 |---|---|---|---|
 | ~~Q2~~ | ~~`fix/incremental-publisher-tiers`~~ | **MERGED** — all four tiers converge | 0016 |
-| Q12 | `feat/benchmark-evidence-bundle` | `evidence/benchmark/`, `.claude/commands/bench.md` | — |
+| ~~Q12~~ | ~~`feat/benchmark-evidence-bundle`~~ | **MERGED** — 13 answers, bytes read, query ids | — |
 | ~~Q4·Q7~~ | ~~`docs/scope-claims`~~ | **MERGED** cf8f1f6 — also converged dev with main (6 commits) | — |
-| Q3·Q5 | `docs/validation-dossiers-grain` | `doubts/05-*.md`, `evidence/dedup.txt` | **0017** ⚠ moved from 0016 |
+| ~~Q3·Q5~~ | ~~`docs/validation-dossiers-grain`~~ | **MERGED** — dossiers 05 + 06 | none written |
 | Q13 | `feat/clickstack-dashboards-sources` | `tools/clickstack-*.sh`, `docs/CLICKSTACK*.md`, `evidence/clickstack/` | — |
-| Q14 | `feat/demo-rehearsal` | `demo/`, `evidence/demo/` | — |
-| Q15 | `fix/ci-and-coverage` | `Makefile`, `.golangci.yml`, Go **test** files | — |
-| Q16 | `fix/target-resolution` | `internal/config/`, `tools/ch`, `.env.example` | **0018** |
+| ~~Q14~~ | ~~`feat/demo-rehearsal`~~ | **MERGED** — rehearsed live twice, 11 s machine time | — |
+| ~~Q15~~ | ~~`fix/ci-and-coverage`~~ | **MERGED** — `make ci` green, coverage 58.7–95.7% | — |
+| ~~Q16~~ | ~~`fix/target-resolution`~~ | **MERGED** + follow-up: `tools/ch` now reads `TARGET` from the env | 0018 |
 | Q18 | `chore/unseen-day-rehearsal` | `docs/RUNBOOK_UNSEEN.md`, `tools/unseen-*.sh`, `evidence/unseen/` | — |
 | Q8–Q11 | `docs/publisher-state-machine-safety` | `tools/publish*.sh`, `sql/12_publish.sql` — crash window, publisher lease, insert identity, retention bound | **0019** |
-| Q19 | `docs/headline-assumption-audit` | `evidence/adversarial/`, `doubts/06+` — attack assumptions the gate shares with the model | — |
+| Q19 | `docs/headline-assumption-audit` | `evidence/adversarial/`, **`doubts/07+`** ⚠ moved from 06 — the grain agent used 05 AND 06 | — |
 | — | `feat/problem-space-research` | idle · 9 unmerged commits · **competing design, needs a human call** | — |
 
 **Unblocked 2026-08-01.** Q8–Q11 were queued behind Q2 because they share `tools/publish.sh` and
