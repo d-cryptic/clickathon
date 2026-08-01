@@ -1,0 +1,15 @@
+CRUEL VERIFY · knob vocab · database cruel_scratch · 2026-08-01T19:22:23Z
+minutes compared 60 · TRUTH mismatches 0 · SPEC_ONLY divergences 0
+VERDICT: PASS — every TRUTH minute matches
+
+vocabulary probe (pairs in ev_raw missing from evidence/liveness/vocabulary.tsv):
+  4 UNKNOWN pairs granted liveness silently (fail-open):
+    SystemSleep	SystemSleep	120
+    VideoHeartbeat	PAUSE	1
+    VideoPause	pause	1
+    WidgetPing	WidgetPing	5
+
+fail-open exposure — open-spec truth vs allow-list truth (designed):
+  minutes moved by unknown vocabulary: 21 · max delta 4 of peak 4 (100%)
+
+verify verdict: PASS · full detail above · evidence/cruel/vocab.verify.txt

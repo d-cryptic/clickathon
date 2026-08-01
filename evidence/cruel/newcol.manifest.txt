@@ -1,0 +1,6 @@
+CRUEL knob 'newcol' · seed 20260822 · day 2026-08-22 UTC · data/cruel-newcol-raw.csv
+events 128 (+header) · sessions 4 · truth minutes 22 (0 SPEC_ONLY)
+designed peak 4 @ 2026-08-22 09:00 UTC (spec projection; SPEC_ONLY minutes are a policy, not a truth)
+
+hazards:
+  - 4 plain sessions; the hazard is the FILE SHAPE, not the values

@@ -1,0 +1,29 @@
+Row 1:
+──────
+name:         lang_class
+origin:       SQLUserDefined
+create_query: CREATE FUNCTION lang_class AS s -> multiIf((norm_lang(s) IN ('', 'unk', 'und', 'nil', 'null', 'na', 'n/a', 'undefined', 'unknown')), 'unknown', (norm_lang(s) IN ('off', 'non', 'none', 'disabled')), 'off', (norm_lang(s) IN ('aut', 'auto')), 'auto', 'named')
+
+Row 2:
+──────
+name:         norm_app_version
+origin:       SQLUserDefined
+create_query: CREATE FUNCTION norm_app_version AS s -> replaceRegexpOne(norm_case(s), '^([0-9]+\\.[0-9]+\\.[0-9]+)(\\.0+)+$', '\\1')
+
+Row 3:
+──────
+name:         norm_version
+origin:       SQLUserDefined
+create_query: CREATE FUNCTION norm_version AS s -> norm_case(s)
+
+Row 4:
+──────
+name:         norm_lang
+origin:       SQLUserDefined
+create_query: CREATE FUNCTION norm_lang AS s -> if(position(norm_case(s), '-') > 0, substring(norm_case(s), 1, position(norm_case(s), '-') - 1), norm_case(s))
+
+Row 5:
+──────
+name:         norm_case
+origin:       SQLUserDefined
+create_query: CREATE FUNCTION norm_case AS s -> lower(trimBoth(toString(s)))

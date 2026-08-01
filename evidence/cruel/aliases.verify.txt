@@ -1,0 +1,22 @@
+CRUEL VERIFY · knob aliases · database cruel_scratch · 2026-08-01T19:18:31Z
+minutes compared 60 · TRUTH mismatches 0 · SPEC_ONLY divergences 0
+VERDICT: PASS — every TRUTH minute matches
+
+vocabulary probe (pairs in ev_raw missing from evidence/liveness/vocabulary.tsv):
+  none — every pair is inside the committed vocabulary
+
+dimension survival (length shows what invisible strings really are):
+   ┌─platform──────┬─len─┬─ivals─┐
+1. │ ANDROID_PHONE │  13 │     8 │
+2. │ Android_Phone │  13 │     1 │
+3. │ android_phone │  13 │     1 │
+   └───────────────┴─────┴───────┘
+   ┌─audio_language─┬─len─┬─ivals─┐
+1. │ hin            │   3 │     6 │
+2. │ HIN            │   3 │     1 │
+3. │ HINDI          │   5 │     1 │
+4. │ Hindi          │   5 │     1 │
+5. │ hindi          │   5 │     1 │
+   └────────────────┴─────┴───────┘
+
+verify verdict: PASS · full detail above · evidence/cruel/aliases.verify.txt

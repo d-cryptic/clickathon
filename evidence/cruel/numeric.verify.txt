@@ -1,0 +1,21 @@
+CRUEL VERIFY · knob numeric · database cruel_scratch · 2026-08-01T19:19:32Z
+minutes compared 60 · TRUTH mismatches 0 · SPEC_ONLY divergences 0
+VERDICT: PASS — every TRUTH minute matches
+
+vocabulary probe (pairs in ev_raw missing from evidence/liveness/vocabulary.tsv):
+  none — every pair is inside the committed vocabulary
+
+sentinel probe (ADR 0022) — REAL content_id=-1 vs the all-content rollup:
+   ┌─cube_level─┬─platform──────┬─country─┬─content_id─┬─peak─┐
+1. │          0 │ *             │ *       │         -1 │    5 │
+2. │          1 │ ANDROID_PHONE │ *       │         -1 │    5 │
+3. │          2 │ *             │ india   │         -1 │    5 │
+4. │          3 │ ANDROID_PHONE │ india   │         -1 │    5 │
+5. │          4 │ *             │ *       │         -1 │    1 │
+6. │          5 │ ANDROID_PHONE │ *       │         -1 │    1 │
+7. │          6 │ *             │ india   │         -1 │    1 │
+8. │          7 │ ANDROID_PHONE │ india   │         -1 │    1 │
+   └────────────┴───────────────┴─────────┴────────────┴──────┘
+extreme ids reached serving: [-9223372036854775808,-987654399,-1,0,9223372036854775807]
+
+verify verdict: PASS · full detail above · evidence/cruel/numeric.verify.txt

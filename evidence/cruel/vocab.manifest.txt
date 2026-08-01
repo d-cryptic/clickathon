@@ -1,0 +1,20 @@
+CRUEL knob 'vocab' · seed 20260822 · day 2026-08-22 UTC · data/cruel-vocab-raw.csv
+events 221 (+header) · sessions 6 · truth minutes 50 (44 SPEC_ONLY)
+designed peak 4 @ 2026-08-22 18:00 UTC (spec projection; SPEC_ONLY minutes are a policy, not a truth)
+
+hazards:
+  - v00-v02 kept alive 20 min PURELY by unknown 'SystemSleep' (fail-open, doubts/11): open-spec counts it, allow-list does not — the delta is the measured exposure
+  - v5 unknown 'WidgetPing' every 100s bridges a 600s heartbeat gap
+  - v3 uppercase 'PAUSE' silently NOT a pause (SPEC_ONLY)
+  - v4 unknown type + event='pause' silently IS a pause (SPEC_ONLY)
+  - companion file cruel-vocab.truth-closed.tsv = the allow-list reading
+
+UNDEFINED — spec projection recorded, needs an organiser ruling:
+  - session 'vs_cr_v3': 'PAUSE' (uppercase) at +300s is ignored by the exact-lowercase match; if it MEANT pause, active time ends there
+  - session 'vs_cr_v4': unknown event_type 'VideoPause' carrying event='pause' opens a real pause window by accident of the event-only predicate
+
+questions for the organisers:
+  - If a new event type appears on the unseen day, does it extend activity by default (fail open) or is it excluded until reviewed (fail closed)? On this file the two readings differ by 4 sessions for 20 minutes each (doubts/11 measured -1.3% on the provided file).
+
+expected breakage when run:
+  - the 47-pair vocabulary contract (evidence/liveness/vocabulary.tsv) must flag SystemSleep/WidgetPing/PAUSE/VideoPause — nothing in the pipeline does today (fail-open)

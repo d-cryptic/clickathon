@@ -1,0 +1,70 @@
+CRUEL knob 'worst' · seed 20260822 · day 2026-08-22 UTC · data/cruel-worst-raw.csv
+events 46924 (+header) · sessions 1666 · truth minutes 451 (104 SPEC_ONLY)
+designed peak 1200 @ 2026-08-22 20:00 UTC (spec projection; SPEC_ONLY minutes are a policy, not a truth)
+
+hazards:
+  - m00 empty platform, whitespace country, 'NULL' audio — must load and stay distinct buckets
+  - m01 platform \N (CSV NULL -> non-Nullable String default '') , audio 'null', sub 'NaN'
+  - m02 500-char platform · app_version with embedded commas · country with embedded quote
+  - m03 EMPTY user_id — user tier must not lose or merge it silently
+  - m04+m05 EMPTY video_session_id from two devices -> spec merges (SPEC_ONLY)
+  - m06 empty event_type/event rows bridge gaps as anonymous timestamps (fail-open)
+  - u00 RTL mark prefixing platform · Devanagari country
+  - u01 ZWJ family-emoji platform · flag-emoji country
+  - u02/u03 NFD vs NFC 'éng' — two DISTINCT strings that render identically; the model must NOT merge them (raw-string policy) and dashboards will show two rows
+  - u04 zero-width space inside platform · Tamil subtitle
+  - five spellings of Hindi, three of ANDROID_PHONE, two of india — totals are defined; every FILTERED query fragments across raw variants (ADR 0011 / doubts/04)
+  - x00 content_id = -1 IN THE EVENT STREAM — collides with the '*'/-1 sentinel convention (ADR 0022): cube separates by cube_level, sql/85_windows.sql p_* paths do NOT
+  - x01 planted poison id -987654399 · x02 zero · x03 Int64 max · x04 Int64 min
+  - none of the five exist in content_dim -> dictGet must serve blanks, not errors
+  - t_ebs* END before START (hour 02, SPEC_ONLY)
+  - t_pre events 30 min before session_start_epoch — spec ignores the epoch column
+  - t_rb clock rollback mid-session; sorted timestamps stay continuous
+  - t_bnd* 5 sessions whose tail ends EXACTLY at 15:40:00.000 — inclusive-vs-half-open boundary delta is 5 at minute 15:40 (known model defect class, Codex 003 §4.1)
+  - t_ms* same-second AND same-millisecond pause/resume (reverse file order) — zero time may be lost (ADR 0009)
+  - t_mid session crosses midnight and the file boundary (partition + day-grain edge)
+  - DST: N/A by design — timestamps are UTC epochs and IST has no DST; noted, not planted
+  - z0 one epoch-0 heartbeat: lone run counts NOTHING, but the file's min timestamp is now 1970 — every dense minute spine (gate, verify, windows) spans ~29.8M minutes
+  - z1 whole session in epoch SECONDS: /1000 lands it on 1970-01-21 silently — counted concurrency in 1970, missing from 2026
+  - z2 EMPTY event_timestamp field parses to 0 silently (empty-as-default)
+  - z3 session dated one year in the future — spine stretches forward too
+  - z4 pause+resume both at epoch second 0: spec truth = fully active; the model's arrayFirst 0-sentinel reads 'resume at 0' as 'no resume' and eats the run (EXPECTED DIVERGENCE — model bug probe)
+  - sr_shared one sid on two devices at once (hour 03, SPEC_ONLY)
+  - sd0 byte-duplicate rows x3 — must not move any number
+  - sd1 3x VideoSessionStart, 2x VideoSessionEnd — bare timestamps per spec
+  - sd2 heartbeats 40-180s AFTER VideoSessionEnd extend the run ('ended is not sealed')
+  - sd3 orphan resume (no pause) — spec: no effect
+  - sd4 orphan pause at +300s — conservative rule: active [start, pause], NO tail
+  - sd5 orphan AppBackgrounded with beats continuing at 79s — spec keeps it fully active (bg is a generic timestamp; doubts/10 disputes exactly this)
+  - sd6 one sid, two clusters 35 min apart — two runs, both counted, one session
+  - su* one user u_cr_multi holding 8 simultaneous sessions — session peak 8, USER peak 1
+  - v00-v02 kept alive 20 min PURELY by unknown 'SystemSleep' (fail-open, doubts/11): open-spec counts it, allow-list does not — the delta is the measured exposure
+  - v5 unknown 'WidgetPing' every 100s bridges a 600s heartbeat gap
+  - v3 uppercase 'PAUSE' silently NOT a pause (SPEC_ONLY)
+  - v4 unknown type + event='pause' silently IS a pause (SPEC_ONLY)
+  - companion file cruel-vocab.truth-closed.tsv = the allow-list reading
+  - big 18,003 events in ONE session (100ms cadence) + a real 2-min pause — the groupArray state for this session alone is ~100x the median (Codex 003 §10.1)
+  - h* 1,200 sessions starting inside one minute (live-event shape) — designed peak 1,200 across 20:01-20:10
+  - c* 400 distinct app_version/player_version values in one minute — LowCardinality dictionary pressure + filter-grain cardinality
+
+UNDEFINED — spec projection recorded, needs an organiser ruling:
+  - session '(empty)': two devices share an EMPTY video_session_id; spec merges them into one session (counts 1, true viewers 2)
+  - session 'vs_cr_t_ebs0': VideoSessionEnd 5 min BEFORE VideoSessionStart — meaning undefined
+  - session 'vs_cr_t_ebs1': VideoSessionEnd 5 min BEFORE VideoSessionStart — meaning undefined
+  - session 'vs_cr_sr_shared': one video_session_id interleaved from two platforms/users simultaneously; spec merges to ONE session (true viewers: 2)
+  - session 'vs_cr_v3': 'PAUSE' (uppercase) at +300s is ignored by the exact-lowercase match; if it MEANT pause, active time ends there
+  - session 'vs_cr_v4': unknown event_type 'VideoPause' carrying event='pause' opens a real pause window by accident of the event-only predicate
+
+questions for the organisers:
+  - Two rows with an empty/garbage session id from different devices: one viewer or two? Our spec merges them into one.
+  - Is the private ground truth matched on raw dimension strings or on a normalised form? 'hin' vs 'HIN' moves every filtered answer.
+  - A VideoSessionEnd timestamped before its VideoSessionStart: is the session invalid, is the end ignored, or is the pair reordered? Our spec treats both as bare timestamps (the early end counts nothing).
+  - An interval ending exactly on a minute boundary (tail lands on :00.000): does that minute count? Inclusive vs half-open moves 5 designed viewers at 15:40 on this file (Codex 003 §12.3 Q11).
+  - A session id reused simultaneously on two devices (interleaved events, two platforms): one concurrent viewer or two?
+  - If a new event type appears on the unseen day, does it extend activity by default (fail open) or is it excluded until reviewed (fail closed)? On this file the two readings differ by 4 sessions for 20 minutes each (doubts/11 measured -1.3% on the provided file).
+
+expected breakage when run:
+  - unseen-run.sh refuses at the SENTINEL AUDIT unless UNSEEN_ACK_SENTINEL=1 — that refusal is the designed behaviour
+  - gate/verify dense-spine queries over a 1970..2027 span: slow, memory-heavy, or Code 241 — measure which
+  - z4 designed truth-vs-served mismatch at 1970-01-01 00:00..00:06
+  - the 47-pair vocabulary contract (evidence/liveness/vocabulary.tsv) must flag SystemSleep/WidgetPing/PAUSE/VideoPause — nothing in the pipeline does today (fail-open)

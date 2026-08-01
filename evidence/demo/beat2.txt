@@ -1,0 +1,39 @@
+    ┌─────────event_timestamp─┬─event_type────────┬─event─────────────┐
+ 1. │ 2026-07-26 10:31:37.215 │ VideoSessionStart │ VideoSessionStart │
+ 2. │ 2026-07-26 10:31:38.899 │ VideoPlay         │ Play              │
+ 3. │ 2026-07-26 10:31:49.611 │ VideoHeartbeat    │ pause             │
+ 4. │ 2026-07-26 10:31:51.236 │ VideoHeartbeat    │ network-change    │
+ 5. │ 2026-07-26 10:32:18.003 │ VideoHeartbeat    │ network-bandwidth │
+ 6. │ 2026-07-26 10:32:38.920 │ VideoHeartbeat    │ network-change    │
+ 7. │ 2026-07-26 10:32:39.946 │ VideoHeartbeat    │ network-change    │
+ 8. │ 2026-07-26 10:32:58.004 │ VideoHeartbeat    │ network-bandwidth │
+ 9. │ 2026-07-26 10:33:38.004 │ VideoHeartbeat    │ network-bandwidth │
+10. │ 2026-07-26 10:34:18.005 │ VideoHeartbeat    │ network-bandwidth │
+11. │ 2026-07-26 10:34:22.994 │ VideoHeartbeat    │ resume            │
+12. │ 2026-07-26 10:34:58.005 │ VideoHeartbeat    │ network-bandwidth │
+13. │ 2026-07-26 10:35:38.006 │ VideoHeartbeat    │ network-bandwidth │
+14. │ 2026-07-26 10:36:18.006 │ VideoHeartbeat    │ network-bandwidth │
+15. │ 2026-07-26 10:36:58.006 │ VideoHeartbeat    │ network-bandwidth │
+16. │ 2026-07-26 10:37:30.734 │ VideoHeartbeat    │ pause             │
+17. │ 2026-07-26 10:37:38.007 │ VideoHeartbeat    │ network-bandwidth │
+18. │ 2026-07-26 10:38:40.981 │ VideoHeartbeat    │ resume            │
+19. │ 2026-07-26 10:38:58.007 │ VideoHeartbeat    │ network-bandwidth │
+20. │ 2026-07-26 10:39:38.008 │ VideoHeartbeat    │ network-bandwidth │
+21. │ 2026-07-26 10:40:18.007 │ VideoHeartbeat    │ network-bandwidth │
+22. │ 2026-07-26 10:40:58.008 │ VideoHeartbeat    │ network-bandwidth │
+23. │ 2026-07-26 10:41:38.008 │ VideoHeartbeat    │ network-bandwidth │
+24. │ 2026-07-26 10:42:18.009 │ VideoHeartbeat    │ network-bandwidth │
+25. │ 2026-07-26 10:42:58.010 │ VideoHeartbeat    │ network-bandwidth │
+26. │ 2026-07-26 10:43:38.011 │ VideoHeartbeat    │ network-bandwidth │
+27. │ 2026-07-26 10:44:05.702 │ VideoHeartbeat    │ pause             │
+28. │ 2026-07-26 10:44:18.011 │ VideoHeartbeat    │ network-bandwidth │
+29. │ 2026-07-26 10:44:58.011 │ VideoHeartbeat    │ network-bandwidth │
+30. │ 2026-07-26 10:45:38.011 │ VideoHeartbeat    │ network-bandwidth │
+31. │ 2026-07-26 10:46:04.060 │ AppBackgrounded   │ AppBackgrounded   │
+32. │ 2026-07-26 10:49:19.836 │ AppForegrounded   │ AppForegrounded   │
+33. │ 2026-07-26 10:49:31.619 │ VideoHeartbeat    │ network-bandwidth │
+34. │ 2026-07-26 10:50:00.280 │ AppBackgrounded   │ AppBackgrounded   │
+35. │ 2026-07-26 10:50:02.837 │ AppForegrounded   │ AppForegrounded   │
+36. │ 2026-07-26 10:51:00.516 │ VideoSessionEnd   │ VideoSessionEnd   │
+37. │ 2026-07-26 10:51:00.545 │ AppBackgrounded   │ AppBackgrounded   │
+    └─────────────────────────┴───────────────────┴───────────────────┘

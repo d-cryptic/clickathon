@@ -1,0 +1,43 @@
+UNSEEN-DAY RUN
+generated 2026-08-01T19:30:04Z   commit 1f45aab
+target database cruel_scratch   ·   raw data/cruel-newcol-raw.csv   ·   content data/cruel-content.csv
+--------------------------------------------------------------------------
+reset: DROP DATABASE cruel_scratch — re-loading without this DOUBLES ev_raw (measured; see the note in this script)
+preflight ok · server 26.2.1.525 · database cruel_scratch ready and empty
+
+=== FAILED: preflight ===
+raw CSV header does not match what tools/load.sh inserts.
+expected: content_id,video_session_id,user_id,event_type,event,event_timestamp,platform,app_version,country,audio_language,subtitle_language,player_version,session_start_epoch
+actual  : content_id,video_session_id,user_id,event_type,event,event_timestamp,platform,app_version,country,audio_language,subtitle_language,player_version,session_start_epoch,experiment_id
+Columns are mapped by POSITION, not by name. Fix the loader before continuing.
+
+CRUEL: harness refused the reshaped header (exit 1) — designed. Now the BARE loader:
+applying to CLOUD: pnyj8ql3jw.asia-northeast1.gcp.clickhouse.cloud/cruel_scratch   (database from --database)
+  sql/00_schema.sql        ... ok
+  sql/10_intervals.sql     ... ok
+done.
+target=cloud  database=cruel_scratch  (from --database)  mode=refuse
+loading content_dim from data/cruel-content.csv ...
+loading ev_raw from data/cruel-newcol-raw.csv ...
+loaded into TARGET=cloud, database cruel_scratch:
+   ┌─t───────────┬─before─┬─rows─┬─added─┐
+1. │ ev_raw      │      0 │  128 │   128 │
+2. │ content_dim │      0 │   30 │    30 │
+   └─────────────┴────────┴──────┴───────┘
+
+bare tools/load.sh exit code: 0 (0 = swallowed the reshaped file silently)
+rows loaded: 128
+the extra 'experiment_id' column was dropped without a word; columns stored:
+content_id
+video_session_id
+user_id
+event_type
+event
+event_timestamp
+platform
+app_version
+country
+audio_language
+subtitle_language
+player_version
+session_start_epoch
