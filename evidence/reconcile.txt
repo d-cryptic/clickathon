@@ -1,5 +1,5 @@
 RECONCILE — serving layer vs ev_raw
-target: cloud   commit: 2b551b5
+target: cloud   commit: 201718b
 
 == 1. THE GATE — truth recomputed from ev_raw, five minutes
    (peak, both data boundaries, two arbitrary; any non-zero delta is a failure)
