@@ -136,6 +136,32 @@ Fix so a real id can never collide with a rollup marker: a separate `is_rollup` 
 the id domain, or a documented guarantee that negative ids are reserved. Whichever, the unseen-day
 loader should **assert** the invariant rather than trust it.
 
+## 🔴 Q33 · `build-model.sh` and `reconcile.sh` still carry bug 11 — found INDEPENDENTLY by two agents
+
+Two agents in different lanes hit the same defect within an hour, which is why this is a queue item
+rather than a footnote in one worksheet.
+
+Both scripts do `set -a && . ./.env` **after** the caller's environment is read, so `.env`
+**overwrites** an exported `CH_DATABASE`. Consequence: `CH_DATABASE=scratch TARGET=cloud
+tools/build-model.sh` resolves to **`sonyliv`** — the graded database — and only the new
+`REBUILD_GRADED` guard stops it.
+
+- **T3** could not build a scratch model at all and had to replay all six stages by hand with
+  `apply-sql.sh --database`.
+- **T1** asked for `adr0024_drift` and the script **TRUNCATEd `default.session_intervals`** before
+  dying on a schema mismatch. Local-only damage — and the same table Q30 describes, so the two
+  findings are one story.
+
+**The fix already exists** at the top of `tools/ch`, `tools/apply-sql.sh` and `tools/load.sh`:
+capture the environment's view *before* sourcing `.env`, so the environment wins. It needs copying
+into `build-model.sh` and `reconcile.sh`, plus a sweep for any other `set -a && . ./.env`.
+
+**Severity, stated honestly:** the guard means this can no longer reach the graded database
+unauthorised, so it is not a live correctness risk. It *is* a productivity and safety trap — a
+scratch build via env override is currently impossible, and the guard is the only thing between that
+mistake and `sonyliv`. Belt and braces are both required here; the guard was never meant to be the
+only line.
+
 ## Q30 · Local `default.session_intervals` is on a pre-ADR-0012 schema — **operator call**
 
 Found 2026-08-01 while testing the new write guards: `default.session_intervals` has **no
