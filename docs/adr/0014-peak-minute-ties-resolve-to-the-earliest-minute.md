@@ -50,7 +50,7 @@ storage site and nowhere else.
 | 9 | `sql/85_windows.sql` — `v_cc_window_range` (the ragged-range answer path) | **no peak minute exposed at all** | gap; added |
 | 10 | `tools/unseen-run.sh:307` — "hour tier says peak N @ …" | `argMax(peak_minute, peak)` — **bare** | **the bug**; diff sketch below |
 | 11 | `tools/unseen-run.sh:312` — "session concurrency peak N @ …", *the submitted answer* | `argMax(minute, concurrent)` — **bare** | **the bug**; diff sketch below |
-| 12 | `sql/90_reconcile.sql:202` — picks the peak minute as a gate sample target | `argMax(minute, truth)` — **bare** | evidence not reproducible; diff sketch below |
+| 12 | `sql/90_reconcile.sql` — picks the peak minute as a gate sample target | `argMax(minute, truth)` — **bare** | **APPLIED 2026-08-02** (promotion W2); now the tuple form. See the addendum |
 
 Checked and found NOT to be peak-minute sites, so that the inventory is complete rather than
 conveniently short:
@@ -209,7 +209,9 @@ rather than leaving it to be inferred:
 +say "  tie-break rule: EARLIEST minute wins (ADR 0014)"
 ```
 
-**`sql/90_reconcile.sql:202`** — the gate picks its sample minutes with
+**`sql/90_reconcile.sql`** — **this one is no longer a sketch: it was applied on 2026-08-02 by
+promotion W2, which carries the file.** The text below is kept as the derivation. The gate picks its
+sample minutes with
 `(SELECT argMax(minute, truth) FROM compared)`. On a day whose peak ties, *which* minute gets sampled
 is arbitrary, so the committed `evidence/reconcile.txt` is not reproducible run to run. The two
 neighbouring samples already use `ORDER BY cityHash64(minute, 17)` precisely to be reproducible-but-
@@ -223,7 +225,8 @@ not-cherry-picked; this one should match:
 ```
 
 Verdict-neutral: it changes *which* minute is printed, never whether it matches. On the provided file
-`max(truth)` = 2,887 is unique, so this is a no-op today and a correctness fix on any day it is not.
+`max(truth)` is unique — 2,887 when this ADR was written, **2,917** after ADR 0009 — so this is a
+no-op today and a correctness fix on any day it is not.
 
 **`sql/45_user_concurrency.sql`** — no peak minute is exposed, so "when did USER concurrency peak" has
 no answer from the serving layer at all. If that shape is in the benchmark set it needs a view, not a
@@ -235,3 +238,22 @@ tie-break; out of scope here, recorded so it is not mistaken for an oversight.
 columns, and the gate compares per-minute concurrency VALUES. The negative control above measured that
 directly — a bare-argMax run differs from an earliest-wins run in 3 `peak_minute` values and **0**
 peak values, across all 26,186 rows.
+
+---
+
+## Addendum — 2026-08-02 · which sites are actually applied, after Codex check 5
+
+Codex check 5 on promotion W2 made a fair objection: this ADR is **Accepted** and says "earliest
+wins, **everywhere**", while three sites in the inventory still carried a bare `argMax` in the
+promoted tree. An ADR's status describes the tree, not the intention. Corrected, per site:
+
+| site | state on this branch | why |
+|---|---|---|
+| rows 1–9 (`sql/50_hour_agg.sql`, `sql/85_windows.sql`) | **applied** | 98/98 live hours and 98/98 scratch windows agree with an independent `minIf` derivation; 0 live views retain a bare `argMax(minute, …)` |
+| row 12 (`sql/90_reconcile.sql`) | **applied 2026-08-02** | the ADR's own diff sketch, landed. This promotion carries that file, so the claim can be — and now is — true in it. Verdict-neutral by construction: it changes which minute is *printed* as a sample, never whether a minute matches. `max(truth)` is unique on the provided file, so the gate output is byte-identical today |
+| rows 10–11 (`tools/unseen-run.sh:307,312`) | **NOT applied, and this promotion does not carry the file** | `tools/unseen-run.sh` is not in W2's diff; another workstream owns it, together with the stale A1/A2 narration `docs/RUNBOOK_UNSEEN.md` now flags. Row 11 is *the submitted answer path*, so this is the one that still matters |
+
+**So the honest status is: accepted, and applied everywhere this promotion carries.** Row 11 is the
+open item. Until it lands, "when did concurrency peak" answered through `unseen-run.sh` can still
+return an arbitrary minute among ties on a day whose peak ties — which is 5 of the 7 days in the
+provided file.

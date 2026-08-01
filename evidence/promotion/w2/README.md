@@ -1,11 +1,13 @@
 # Promotion W2 — model correctness: ADR 0009 · ADR 0011 · ADR 0014
 
 > **Summary:** second-level gate (docs/PROMOTION.md) run 2026-08-02 for the three ADRs that change
-> what the model answers. All six checks pass. Headline consequence on `main`: the gate SQL and the
-> live service now agree — before this promotion, `main`'s own `sql/90_reconcile.sql` **failed**
-> against the live service (177 mismatched minutes, truth 2,887 vs served 2,917) because it still
-> encoded the same-second bug ADR 0009 fixed. Every number below was re-derived, not copied; the
-> exact command and the source of every figure is stated inline so check 5 can verify without trust.
+> what the model answers. **Codex check 5 returned DO NOT PROMOTE on the first pass and was right**;
+> its findings are answered with measured evidence in
+> [`codex-check5-answers.md`](codex-check5-answers.md) and this file is updated to match. Headline
+> consequence on `main`: the gate SQL and the live service now agree — before this promotion, `main`'s
+> own `sql/90_reconcile.sql` **failed** against the live service (177 mismatched minutes, truth 2,887
+> vs served 2,917) because it still encoded the same-second bug ADR 0009 fixed. Every number below was
+> re-derived, not copied; the exact command and source of every figure is stated inline.
 
 Promoted from `dev` onto `main` by branch `sc-coupled-squid-7842`. Baseline: `main` @ `2b551b5`.
 
@@ -33,7 +35,9 @@ credentials for multi-statement files). `tools/reconcile.sh` is unaffected — i
 | `sql/90_reconcile.sql` | `origin/dev` tip | dev-only history is exactly `0c0f020` (the gate half of ADR 0009) |
 | `sql/85_windows.sql` | `origin/dev` tip | dev-only history is exactly `0446423` (ADR 0014 tie-break only) |
 | `sql/15_normalise.sql` | `1fb6351` | ADR 0011 (`ac04975`) + renumber (`1fb6351`), **excluding** `bcf436f`'s ADR 0025 sections 6–9 (+306 lines) which are not in this group. One stale split-line reference (`ADR\n0009` → `ADR 0011` at line 258, missed by the renumber because the token is split across lines) fixed here |
-| `docs/adr/0009-*.md` | `5743b39` | the dev tip version was edited by `df6e7a2` (ADR 0012) and links `0012-*.md`, which does not exist on `main`; the `5743b39` text ("Filed, not fixed") is the true statement of `main`'s state after W2 |
+| `sql/40_deltas.sql` | `df6e7a2`'s blob, **added 2026-08-02 after Codex check 5** | ADR 0009's title claims all seven dimensions leave `any()`; without this the branch's own file executed `any(platform/country/content_id)` and made the ADR false. The two `ADR 0012` references in `df6e7a2`'s comments are re-pointed at ADR 0008/0009, which this branch carries — see the note in the file |
+| `sql/90_reconcile.sql` | `origin/dev` tip **+ ADR 0014's own diff sketch, applied 2026-08-02** | dev-only history is exactly `0c0f020` (the gate half of ADR 0009). The bare `argMax(minute, truth)` sample picker was ADR 0014 inventory row 12, disclosed-but-unapplied; this branch carries the file, so the claim is made true here. Verdict-neutral — gate output byte-identical |
+| `docs/adr/0009-*.md` | `5743b39`, **then corrected here** | the dev tip version links `0012-*.md`, which this branch does not carry. Taking `5743b39` verbatim left the "Filed, not fixed" bullet contradicting the ADR's own title once `sql/40_deltas.sql` came across — that contradiction is now closed in the Consequences section, and the 2,697-vs-2,502 numerator is qualified |
 | `docs/adr/0011-*.md` | `origin/dev` tip | only `ac04975` + `1fb6351` touched it; a dated addendum with the live re-measure (below) added here |
 | `docs/adr/0014-*.md` | `origin/dev` tip | only `0446423` touched it |
 | `docs/adr/0008-*.md` | `origin/dev` tip | the main→dev diff is exactly the "now done in ADR 0011" pointer from `ac04975`+`1fb6351` |
@@ -50,7 +54,11 @@ credentials for multi-statement files). `tools/reconcile.sh` is unaffected — i
   (it always did — `0446423`: "the stored tier was never wrong"), so nothing on `main` contradicts
   ADR 0014; `main`'s `v_concurrency_day*` keep the older indirect tie-break (same answer today, as
   the ADR itself documents). The residue rides with wave 3/6.
-- `sql/40_deltas.sql` / `tools/build-model.sh` — ADR 0012 (`df6e7a2`), a different feature.
+- `tools/build-model.sh` — the OTHER half of `df6e7a2`/ADR 0012 (the rebuild owning every tier it
+  invalidates). A genuinely different feature; it rides with wave 3. `sql/40_deltas.sql` was
+  originally excluded with it and **that was the error Codex check 5 found** — the SQL half is what
+  makes ADR 0009's headline claim true, so it belongs with ADR 0009, not with the rebuild. ADR 0012
+  itself is deliberately still absent: half of what it claims is not on this branch.
 - `bcf436f` (ADR 0025) — later feature; excluded from `15_normalise.sql` as above.
 - `tools/unseen-run.sh` phases 6–7 bare `argMax` — ADR 0014 carries the diff sketch, not the fix
   (another workstream owns the file). Recorded in `docs/RUNBOOK_UNSEEN.md` §A8 (updated here with
@@ -78,12 +86,17 @@ sql/15_normalise.sql        -- 24-assertion self-test: all zeros (pass)
 sql/85_windows.sql
 ```
 
-Results: `session_intervals` **30,323** (exactly ADR 0009's post-fix count — the ADR's 31,938
-variant is the zero-length-split alternative it rejects) · `cc_minute_delta` **28,074** ·
-`cc_hour_agg` 26,242. `sql/90_reconcile.sql` against the scratch:
-**17,028 minutes · 0 mismatched · max_abs_diff 0 · peak 2,917 · PASS.**
-(Live `cc_minute_delta` is 28,073 — one row fewer, ADR 0012's relabel, not in this group, no effect
-on any concurrency number.)
+**Re-run 2026-08-02 after the `sql/40_deltas.sql` cherry-pick** (scratch database `w2ans`, same
+recipe): `session_intervals` **30,323** (exactly ADR 0009's post-fix count — the ADR's 31,938 variant
+is the zero-length-split alternative it rejects) · `cc_minute_delta` **28,073** · `cc_hour_agg`
+**26,254**. `sql/15_normalise.sql`'s 24-assertion self-test: all zeros. `sql/90_reconcile.sql`
+against the scratch: **17,028 minutes · 0 mismatched · max_abs_diff 0 · peak 2,917 · PASS.**
+
+**All three tier counts now equal the live graded database exactly** (30,323 / 28,073 / 26,254 — the
+figures `docs/PROMOTION.md` records from the operator-authorised recovery rebuild). Before the
+cherry-pick they did not: the scratch built 28,074 delta rows and 26,242 hour rows. That one-row and
+twelve-row gap *was* the finding, and it is measured in
+[`codex-check5-answers.md`](codex-check5-answers.md).
 
 ## Check 3 · Run it for real — every claim re-derived on the live service, read-only
 
@@ -100,11 +113,12 @@ SELECT sum(length(ps)), sum(arrayCount(p -> has(rs, p), ps)), ...
 
 | claim (ADR 0009) | measured live 2026-08-02 |
 |---|---|
-| pause events 27,340 | **27,340** |
-| same-second pairs 2,697 (9.86%) | **2,697 (9.86%)** |
+| pause event ROWS 27,340 | **27,340** |
+| same-second pairs 2,697 (9.86% of ROWS) | **2,697 (9.86%)** |
+| …deduplicated to distinct `(session, second)` pause instants | **2,502 (9.15% of rows · 9.26% of the 27,017 instants)** — the figure to quote for MODEL impact; added after Codex check 5 |
 | closed-pause h, strict `>` 834.1 | **834.1** |
 | closed-pause h, inclusive `>=` 792.6 | **792.6** |
-| raw over-exclusion 41.5 h | **41.5** |
+| raw over-exclusion 41.5 h | **41.5** — a RAW pause-ledger figure. Deduplicated it is **39.8 h**, and the end-to-end counted-watch-time change is **+28.8 h**. Do not quote 41.5 h as model impact |
 | 30,323 intervals / peak 2,917 / 1,978.1 h post-fix | **30,323 live · gate peak 2,917 · 1,978.1 h** (check 4) |
 
 ### ADR 0011 — objects live, numbers re-measured; ADR figures are pre-rebuild
@@ -150,9 +164,13 @@ Measured 2026-08-02 on `sonyliv` (`system.tables.metadata_modification_time` in 
   2026-08-01 11:02). This is the *gap* half of ADR 0014 (no way to answer "when"), not the
   nondeterminism half. The repo SQL promoted here has all of them; re-applying
   `sql/85_windows.sql` to the graded service remains an operator decision (v2.todo §A4).
-- `sql/90_reconcile.sql:216` keeps a bare `argMax(minute, truth)` in a **display** column of the
-  gate output (which minute to print, never the verdict); ADR 0014 carries the diff sketch for it,
-  unapplied, as its doc states.
+- `sql/90_reconcile.sql`'s bare `argMax(minute, truth)` — a **display** column of the gate output
+  (which minute to print, never the verdict) — **is now applied**, 2026-08-02, using ADR 0014's own
+  diff sketch. It was inventory row 12, and this promotion carries the file, so leaving it unapplied
+  while the ADR said "earliest wins, everywhere" was the same class of defect as the `any()` one.
+  Verified verdict-neutral: the gate output against both the live service and the scratch is
+  byte-identical before and after. Rows 10–11 (`tools/unseen-run.sh`) remain unapplied and are
+  flagged, not fixed — that file is not in this diff.
 
 ## Check 4 · The correctness gate — before and after
 
@@ -168,14 +186,24 @@ Measured 2026-08-02 on `sonyliv` (`system.tables.metadata_modification_time` in 
   numbers. §2 model comparison: session-aware 2,917 / stateless 2,894 at the peak minute; §3
   headline: 1,978.1 h session-aware vs 2,976.9 h naive, 33.6% excluded. Written to
   `evidence/reconcile.txt` (committed; the `commit:` stamp names the HEAD at run time).
+- **4a / 4b under the revised two-part check** (re-run 2026-08-02 after the cherry-pick, read-only
+  `curl` against `sonyliv`): **4a** `origin/dev`'s gate — 17,028 · 0 · 0 · peak 2,917 · PASS. **4b**
+  this branch's gate — 17,028 · 0 · 0 · peak 2,917 · PASS. The two files differ only by ADR 0014's
+  three-line sample-picker change, so there is **no spec skew to attribute and no excuse to make**.
+  Full output in [`codex-check5-answers.md`](codex-check5-answers.md).
 
-## Check 5 · Cross-model validation
+## Check 5 · Cross-model validation — RAN, returned DO NOT PROMOTE, answered
 
-Runs after this branch lands, per the process (`claude-fable-5`, adversarial brief). Everything
-above states its command and its source commit so the validator can re-derive without trusting this
-document. Points most worth attacking: the same-second pair count (one `tools/ch -c` query),
-the before-gate failure (rerun `gate-before-2b551b5.txt`'s command), the Hindi pair, and the
-independent earliest-wins check.
+A **Codex** agent (a different lineage, per the revised check 5) validated `7f5a517` read-only on
+2026-08-02. Verdict: [`codex-validation.md`](codex-validation.md). It confirmed nearly everything —
+both gates, the ADR 0011 UDFs and Hindi pair, the ADR 0014 98/98 agreement, the before-gate failure —
+and found one promotion-blocking defect plus three documentation defects. **The blocking one was
+real:** ADR 0009 claimed all seven dimensions had left `any()` while `sql/40_deltas.sql` on this very
+branch still executed three of them.
+
+Every finding is answered, with the measurement, in
+[`codex-check5-answers.md`](codex-check5-answers.md). The branch is ready for a fresh check 5; it does
+not promote on this document's say-so.
 
 ## Check 6 · Docs current
 
@@ -203,6 +231,13 @@ be recomputed, an explicit *historical* label instead of a patched number:
 - `docs/MENTOR_QUESTIONS.md` — unclosed-pause arms dated to `cf80acc`, conservative arm 1,978.1 h.
 - `docs/RUNBOOK_UNSEEN.md` — §A8 replaced with `0446423`'s own resolved text (answer for 2026-07-25
   is 15:51; `unseen-run.sh` patch still outstanding); rehearsal peak annotated pre/post-fix.
+  **Corrected 2026-08-02 after Codex check 5:** its first seven lines still said the committed gate
+  "does NOT work on a new day — its five target minutes are 2026-07-26 literals", which commit
+  `81c0161` made false before this promotion existed. A1 and A2 are now marked CLOSED with the
+  mechanism that closed them (derived samples + a dense minute spine + a `minutes_compared` SUMMARY),
+  the troubleshooting row about a vacuous G0 pass is rewritten, and §4.1 no longer asks a human to
+  edit literals that are gone. `tools/unseen-run.sh`'s own stale narration of the same defect is
+  named as an open item owned elsewhere.
 - `TODOS.md` — completed-entry measurements annotated "(as at completion; now …)".
 - Left as measured, deliberately: dated records (`docs/SESSION-2026-08-01.md`, `checkpoint/1.md`,
   `checklist.md`, `V0_CHECKLIST.md`, `doubts/02`, `evidence/*`, `evidence/promotion/baseline.md`)
@@ -210,8 +245,17 @@ be recomputed, an explicit *historical* label instead of a patched number:
   keeps them identically). `deck/` and `docs/artifacts/` already carried 2,917 / 1,774 → 2,196 from
   the Q27 pass (`c10e97d`) and needed nothing.
 
+- `docs/PROMOTION.md` — **replaced with `origin/dev`'s current version, 2026-08-02.** The branch
+  carried the pre-revision contract: a one-part check 4 and `claude-fable-5` as the check-5 validator.
+  Both were superseded before this branch was validated, so it was documenting a gate it had not
+  actually been held to. It now carries the two-part check 4a/4b, the Codex lineage requirement, the
+  2026-08-02 incident record, and the check-5 verdict section — with the ledger updated for what this
+  branch has answered.
+
 ## Rules held
 
-Zero writes to `sonyliv` or any Cloud database (the scratch lives on the local container — checked
-into no Cloud `system.query_log`); `REBUILD_GRADED` / `APPLY_GRADED_DESTRUCTIVE` never set;
-`dev` not merged; W1's `tools/ch` fix not cherry-picked (all Cloud reads via `-c`).
+Zero writes to `sonyliv` or any Cloud database (the scratch databases `w2ans` and `w2before` live on
+the local container — checked into no Cloud `system.query_log`); `REBUILD_GRADED` /
+`APPLY_GRADED_DESTRUCTIVE` never set, not even to test a guard; `dev` not merged; W1's `tools/ch` fix
+not cherry-picked (all Cloud reads via `-c` or raw `curl`). Every Cloud statement run for this
+document was scanned for write forms before it was sent.

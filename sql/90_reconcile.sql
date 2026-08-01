@@ -213,7 +213,9 @@ WITH
     samples AS
     (
         SELECT arrayJoin([
-            (SELECT argMax(minute, truth) FROM compared),
+            -- ADR 0014: earliest minute at the peak, so the sampled minute is
+            -- the same on every run and the committed evidence is reproducible.
+            (SELECT argMax(minute, (truth, -toInt64(toUInt32(minute)))) FROM compared),
             (SELECT min(minute) FROM compared),
             (SELECT max(minute) FROM compared),
             (SELECT minute FROM compared ORDER BY cityHash64(minute, 17) LIMIT 1),

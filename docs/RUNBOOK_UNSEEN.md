@@ -4,10 +4,12 @@
 > `tools/unseen-run.sh <raw.csv> <content.csv>` — into the isolated database `sonyliv_unseen`,
 > ending on the correctness gate. **Measured end to end: 47 s for 30,097 events, 58 s for 849,888
 > events**; the path is fixed-cost dominated, so budget ~3 min even for a 5x-bigger day. **The
-> committed gate `sql/90_reconcile.sql` does NOT work on a new day** — its five target minutes are
-> 2026-07-26 literals, so it returns zero rows and `tools/reconcile.sh` reports PASS having compared
-> nothing. That, plus nine more unseen-day assumptions (A1-A10) and five human decisions, is the body of
-> this document. Evidence for every claim: [`evidence/unseen-rehearsal.txt`](../evidence/unseen-rehearsal.txt).
+> committed gate `sql/90_reconcile.sql` DOES now work on a new day** — commit `81c0161` derived its
+> bounds and its five sample minutes from `ev_raw`, added a dense minute spine, and made the first
+> output row a SUMMARY carrying `minutes_compared`. **A1 and A2 below are therefore CLOSED** and kept
+> as history, not as open risks. Eight unseen-day assumptions (A3–A10) and five human
+> decisions remain, and are the body of this document. Evidence:
+> [`evidence/unseen-rehearsal.txt`](../evidence/unseen-rehearsal.txt).
 
 **Rehearsed:** 2026-08-01, holdout day 2026-07-25 (204 sessions, 30,097 events, peak 13) and a
 full-size replay of 2026-07-26 (10,524 sessions, 849,888 events, peak 2,887 — run on the pre-ADR-0009
@@ -94,7 +96,7 @@ claims.
 | `rendered file … still names another database` | `sql/80_content.sql` hard-codes `sonyliv` | That guard exists because the file really does. Extend `render()` in `tools/unseen-run.sh`; do not disable the guard. |
 | `GATE FAILED` with non-zero `mismatches` | a real disagreement between the serving layer and `ev_raw` | Get the offending minutes: re-run G2 without the summary wrapper and `WHERE served != truth`. Do **not** submit. |
 | `the 'ch' docker container is not running` | docker down | `docker compose up -d`, wait for healthy, re-run. |
-| G0 prints `ZERO ROWS` | expected on any day that is not 2026-07-26 | See assumption **A1** below. Not a failure of this run. |
+| G0 prints `ZERO ROWS` | **should no longer happen** — A1 is closed and the committed gate re-targets itself | If it does, the render step broke, not the gate. Check that `render()` produced a file whose `samples` CTE still reads `FROM compared`. Note `tools/unseen-run.sh:31,331` still *narrates* the old literals story; that script is owned by another workstream and its text is stale, not its behaviour. |
 
 ---
 
@@ -103,22 +105,40 @@ claims.
 Ordered by how much damage each does. Every one is measured in
 [`evidence/unseen-rehearsal.txt`](../evidence/unseen-rehearsal.txt).
 
-### A1 — the gate's target minutes are 2026-07-26 literals · **breaks silently, reports success**
+### A1 — the gate's target minutes were 2026-07-26 literals · **CLOSED by `81c0161`**
 
-`sql/90_reconcile.sql:24-30` hard-codes five minutes. On 2026-07-25 the file returns **zero rows**;
-`tools/reconcile.sh:86` decides with `grep -q MISMATCH`, finds none, and prints
-`reconcile PASSED`. It also degrades *partially*: on the 2026-07-26 day-file it returned **four** rows
+**What it was.** `sql/90_reconcile.sql` hard-coded five minutes. On 2026-07-25 the file returned
+**zero rows**; `tools/reconcile.sh` decides with `grep -q MISMATCH`, found none, and printed
+`reconcile PASSED`. It also degraded *partially*: on the 2026-07-26 day-file it returned **four** rows
 instead of five, because the `2026-07-14 15:43:00` target does not exist in a one-day load — and
-nothing asserts the row count. **`make reconcile` is worthless on the unseen day until those five
-literals are re-targeted.** `tools/unseen-run.sh` works around it by templating the `targets` CTE.
+nothing asserted the row count.
 
-### A2 — the gate never compares a minute in which nobody was watching
+**Why it is closed.** The `samples` CTE now derives all five minutes from `compared` — the peak, both
+data boundaries, and two picked by `cityHash64` so the choice is reproducible without being
+cherry-picked — and the first output row is a `SUMMARY` carrying `minutes_compared`, which
+`reconcile.sh` fails on if it is zero or absent. The gate re-targets itself on whatever day it is
+given. `tools/unseen-run.sh` still templates its own G1/G2 form; deciding which of the two is the
+submitted artefact of record is a human call (§4.1).
 
-`sql/90_reconcile.sql:153-161` ends `FROM truth AS t LEFT JOIN served AS s`, and `truth` is a
-`GROUP BY` over a `CROSS JOIN`, so an idle minute produces no row. **207 of 2026-07-25's 1,364
-minutes** are such minutes. Injecting one fabricated row made the chart report **500 concurrent
+**Left open, and named:** `tools/unseen-run.sh` lines 31 and 331–337 still *say* the committed gate's
+"five target minutes are 2026-07-26 literals" and still warn about a vacuous G0 pass. Those strings
+are stale. The file is owned by another workstream — the same one that owns its two unpatched bare
+`argMax` calls (§A8) — so this promotion flags the text rather than editing a script it does not
+carry. Anyone touching `unseen-run.sh` next should close both in one pass.
+
+### A2 — the gate never compared a minute in which nobody was watching · **CLOSED by `81c0161`**
+
+**What it was.** The comparison ended `FROM truth AS t LEFT JOIN served AS s`, and `truth` was a
+`GROUP BY` over a `CROSS JOIN`, so an idle minute produced no row. **207 of 2026-07-25's 1,364
+minutes** were such minutes. Injecting one fabricated row made the chart report **500 concurrent
 viewers at an idle minute** and the gate still said PASS — both the five-minute form and an
-all-minutes form driven off `truth`. Reproduce, in an isolated DB only:
+all-minutes form driven off `truth`.
+
+**Why it is closed.** A dense `spine` CTE now enumerates every minute between the first and last
+`ev_raw` event, `served` runs its window sum along that spine, and `compared` is
+`FROM served LEFT JOIN truth_min` — so an idle minute is checked as `0 = 0` like any other and a
+fabricated row at one would now register as a mismatch. The injection reproducer below is retained
+as the regression's own test; run it in an isolated DB only:
 
 ```sql
 INSERT INTO sonyliv_unseen.cc_minute_delta (minute,platform,country,content_id,delta,starts,ends)
@@ -245,9 +265,10 @@ file must be placed by hand.
 
 ## 4. What needs a human, mid-run
 
-1. **Re-target the gate** (A1). Either accept `tools/unseen-run.sh`'s templated G1/G2 as the gate of
-   record, or edit the five literals in `sql/90_reconcile.sql` so `make reconcile` means something.
-   Someone must decide which artefact is submitted as the correctness evidence.
+1. **Choose the gate of record** (A1). `sql/90_reconcile.sql` re-targets itself now, so both it and
+   `tools/unseen-run.sh`'s templated G1/G2 produce a valid verdict on the unseen day. Nobody needs to
+   edit literals any more; someone still has to decide which of the two artefacts is submitted as the
+   correctness evidence, because they are separate files with separate output shapes.
 2. **Re-tune or keep `GAP_S`/`TAIL_S`** (A3). If the measured heartbeat p99 has moved, keeping 150 s
    is a judgement call — and any change must be made in two files at once.
 3. **Set the HyperDX chart range** to the unseen day (A10). No API call in the repo does this.

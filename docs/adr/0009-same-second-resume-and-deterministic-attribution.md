@@ -2,7 +2,10 @@
 
 > **Summary:** Two measured correctness defects in `sql/30_build_intervals.sql`, fixed together.
 > (1) Timestamps are truncated to whole seconds, and a paused window closed on a strict `> p`, so a
-> `resume` in the pause's own second was invisible — **2,697 of 27,340 pauses (9.86%)**. It
+> `resume` in the pause's own second was invisible — **2,697 of 27,340 raw pause ROWS (9.86%)**,
+> which collapse to **2,502 distinct pause instants (9.15%)** once duplicate rows at the same
+> truncated `(session, second)` are deduplicated, because the model's `arrayFold` is idempotent over
+> them. Quote 9.15% when describing what the MODEL saw; 9.86% is a raw event-row rate. It
 > over-EXCLUDED paused time, i.e. under-counted watching. Fixed with `>= p` in the model **and** in
 > the gate, which carried the identical expression and so agreed with the bug. **PEAK 2,887 → 2,917
 > (+30); hours 1,949.3 → 1,978.1 (+28.8).** (2) `any(user_id/content_id/platform/country)` was still
@@ -52,11 +55,22 @@ share the exact same millisecond**, and truncating to seconds makes ties denser 
 
 | | |
 |---|---:|
-| `pause` events | 27,340 |
-| …with a `resume` in the same truncated second | **2,697 (9.86%)** |
+| `pause` event ROWS | 27,340 |
+| …with a `resume` in the same truncated second | **2,697 (9.86% of rows)** |
+| DISTINCT pause instants `(session, truncated second)` | 27,017 |
+| …with a `resume` in the same truncated second | **2,502 (9.15% of rows · 9.26% of instants)** |
 | closed-pause time, strict `>` | 834.1 h |
 | closed-pause time, inclusive `>=` | 792.6 h |
-| **raw over-exclusion attributable to the tie** | **41.5 h** |
+| **raw over-exclusion attributable to the tie** | **41.5 h** (39.8 h on deduplicated instants) |
+
+**Which numerator is the honest one depends on the sentence.** 2,697 is how many raw `pause` rows
+carry the tie; 2,502 is how many pause *instants* the model could actually have been wrong about,
+because 323 rows repeat a `(session, second)` the fold has already applied and are idempotent. Codex
+check 5 (2026-08-02) measured both and flagged that the promotion brief's unqualified "2,697 pauses
+were affected / 41.5 h removed" reads as model impact when it is a raw-ledger figure. It is not:
+the deduplicated raw ledger moves **39.8 h**, and the end-to-end counted-watch-time change is
+**+28.8 h** (1,949.3 → 1,978.1). The 23.3 h below is a third, narrower measurement — paused time
+excluded *inside runs* — and is not interchangeable with either.
 
 That 41.5 h is a raw pause-ledger figure and it **overstates the model's exposure**, for exactly the
 reason ADR 0007 had to correct itself on the unclosed-pause question (330 h estimated → 99.3 h real):
@@ -216,12 +230,23 @@ count (+11), which is dimension tuples redistributing inside the 36,930-row ceil
 - `UNCLOSED_PAUSE_TO_RUN_END`'s measured cost in ADR 0007 (conservative 2,887 / permissive 3,018) was
   taken under the tie bug. The *switch* is unaffected but **both of its numbers are superseded**; the
   permissive arm has not been re-measured on the fixed derivation.
-- **`sql/40_deltas.sql` still uses `any(platform)`, `any(country)`, `any(content_id)`** over
-  `session_intervals`, so the delta layer re-introduces exactly the non-determinism this ADR removes
-  from the derivation, and it *collapses* the new per-interval attribution back to one value per
-  session. That file was out of scope for this change and its own comment records the choice
-  ("moving those to a different rule would move numbers this task is not allowed to move"). It is now
-  the last `any()` in the pipeline and should be closed the same way. **Filed, not fixed.**
+- **`sql/40_deltas.sql`'s three `any()` are CLOSED — on this branch, since 2026-08-02.** They were
+  originally filed here and not fixed, and that made this ADR's own title false: the delta layer
+  re-introduced exactly the non-determinism the derivation had just shed, and it *collapsed* the new
+  per-interval attribution back to one value per session. Codex check 5 caught the contradiction —
+  the ADR claimed all seven dimensions had left `any()` while lines 87-89 of the branch's own
+  `sql/40_deltas.sql` still executed `any(platform)`, `any(country)`, `any(content_id)`, relabelling
+  25 live sessions that carry two interval platforms. `platform`/`country`/`content_id` now ride the
+  same `arrayFold` at tail slots `.7/.8/.9` under ADR 0008's first-wins-per-run rule — reuse, not a
+  third mechanism. **Measured: 13 of 17,189 merged runs are relabelled; peak 2,917 and 1,978.1 h are
+  unmoved** (this half only labels intervals), `cc_minute_delta` 28,074 → 28,073 rows.
+
+  Honest about what the old code's exposure was: the output already hashed identically at
+  `max_threads` 1/8/32 *before* the change, because only 25 of 10,866 sessions carry two platforms
+  and none carries two countries or content_ids, so the groups that could vary fit in one block. The
+  identical `any()` over `ev_raw` (905,558 rows) returns three different answers at those same thread
+  counts. **The defect was latent, not live — what protected it was the input's shape, not the code.**
+  The per-session label collapse, by contrast, was live and visible.
 - **`tools/build-model.sh` does not truncate `cc_user_minute`.** `mv_user_minute` is a `TO` view on
   `session_intervals`, so every rebuild appends another build's rows and stale intervals never leave.
   `uniqExactMerge` hides it by deduplicating user ids, so the number stays plausible while drifting
