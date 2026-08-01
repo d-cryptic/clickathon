@@ -245,16 +245,24 @@ func buildLogs(
 			nil, run.traceID, run.rootSpanID))
 	case ev.Pass():
 		logs = append(logs, otelemit.Log(now, otelemit.SeverityInfo, fmt.Sprintf(
-			"reconcile gate: PASS (%d/%d minutes agree, evidence commit %s, %s old)",
-			len(ev.Minutes), len(ev.Minutes), ev.Commit, time.Since(ev.GeneratedAt).Round(time.Second),
+			"reconcile gate: PASS (%d minutes compared, 0 mismatched, peak %d, evidence commit %s, %s old)",
+			ev.Summary.MinutesCompared, ev.Summary.Peak, ev.Commit, time.Since(ev.GeneratedAt).Round(time.Second),
 		), []otelemit.KeyValue{
 			otelemit.BoolAttr("pass", true),
 			otelemit.StringAttr("commit", ev.Commit),
 		}, run.traceID, run.rootSpanID))
+	case !ev.Summary.Found:
+		logs = append(logs, otelemit.Log(now, otelemit.SeverityError, fmt.Sprintf(
+			"reconcile gate: FAIL — no SUMMARY row parsed from %s; the evidence is unreadable or predates the hardened gate (commit %s, %s old)",
+			ev.Path, ev.Commit, time.Since(ev.GeneratedAt).Round(time.Second),
+		), []otelemit.KeyValue{
+			otelemit.BoolAttr("pass", false),
+			otelemit.StringAttr("commit", ev.Commit),
+		}, run.traceID, run.rootSpanID))
 	default:
 		logs = append(logs, otelemit.Log(now, otelemit.SeverityError, fmt.Sprintf(
-			"reconcile gate: FAIL — max |delta|=%d across %d sampled minutes (evidence commit %s, %s old)",
-			ev.MaxAbsDelta(), len(ev.Minutes), ev.Commit, time.Since(ev.GeneratedAt).Round(time.Second),
+			"reconcile gate: FAIL — %d of %d minutes mismatch, max |delta|=%d (evidence commit %s, %s old)",
+			ev.Summary.Mismatched, ev.Summary.MinutesCompared, ev.MaxAbsDelta(), ev.Commit, time.Since(ev.GeneratedAt).Round(time.Second),
 		), []otelemit.KeyValue{
 			otelemit.BoolAttr("pass", false),
 			otelemit.IntAttr("max_abs_delta", ev.MaxAbsDelta()),
@@ -308,7 +316,7 @@ func printSummary(
 	case !evFound:
 		fmt.Printf("reconcile   no evidence at %s\n", ev.Path)
 	default:
-		fmt.Printf("reconcile   pass=%-5t max_abs_delta=%-4d commit=%-10s %s old\n",
-			ev.Pass(), ev.MaxAbsDelta(), ev.Commit, time.Since(ev.GeneratedAt).Round(time.Second))
+		fmt.Printf("reconcile   pass=%-5t max_abs_delta=%-4d minutes_compared=%-6d commit=%-10s %s old\n",
+			ev.Pass(), ev.MaxAbsDelta(), ev.Summary.MinutesCompared, ev.Commit, time.Since(ev.GeneratedAt).Round(time.Second))
 	}
 }
