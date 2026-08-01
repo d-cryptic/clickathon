@@ -136,6 +136,49 @@ Fix so a real id can never collide with a rollup marker: a separate `is_rollup` 
 the id domain, or a documented guarantee that negative ids are reserved. Whichever, the unseen-day
 loader should **assert** the invariant rather than trust it.
 
+## Q34/Q35 · The two real model disagreements the property suite found — verified live, severity measured
+
+`tools/reference_interpreter.py` (T6) compared 400 random sessions against a spec-derived Python
+implementation and found two genuine disagreements. **Both verified by the orchestrator against the
+graded database**, and both sized before being prioritised — because an unsized finding gets either
+ignored or over-reacted to.
+
+### Q34 · User concurrency can exceed session concurrency — **verified live, off-by-one, headline safe**
+
+The invariant is unconditional: one user may hold several sessions, so users ≤ sessions at the same
+minute and grain, always. It does not hold.
+
+```
+ violating cells on sonyliv     28
+ worst excess                   +1   (2026-07-26 10:55)
+ cells with sessions=0, users>0  0
+ HEADLINE user peak 2,844  vs  session peak 2,917   ✓ correct
+```
+
+Cause per T6: ADR 0012's first-wins dimension merge and ADR 0016's per-interval expansion disagree
+about attribution, so a user lands in a `(minute, dims)` bucket whose session deltas went elsewhere.
+**Severity: low.** It is off-by-one on per-combination cells and never touches a total. Worth fixing
+because an invariant that "mostly holds" is not an invariant — a judge testing it will find it — but
+it changes no number we submit.
+
+### Q35 · Zero-length segments erase point activity — **worth +10 on the peak**
+
+A run consisting of a single event produces a zero-length segment, dropped **before** `TAIL_S` is
+applied, so it earns no watch time at all. T6 measured **182 such runs**; keeping them moves the peak
+**2,917 → 2,927** and adds **5.0 h**. Shrunk to a one-event reproduction.
+
+**The gate cannot see it** — `sql/90_reconcile.sql` carries the same filter, so truth and serving
+agree while both discard the same activity. Same structural blindness as `doubts/05`–`12`.
+
+**This is a semantics question, not obviously a bug.** Does a viewer who generated exactly one event
+count as watching for one cadence, or not at all? Our answer is currently "not at all", by accident
+rather than decision. It should become a decision — and it interacts with `doubts/07`, which measured
+tail credit at explicit stops.
+
+**Neither is fixed.** `sql/30_build_intervals.sql` and `sql/90_reconcile.sql` are a shared-spec pair;
+changing one without the other makes the gate agree with a bug. That is a wave-2-style promotion, not
+a patch.
+
 ## 🔴 Q33 · `build-model.sh` and `reconcile.sh` still carry bug 11 — found INDEPENDENTLY by two agents
 
 Two agents in different lanes hit the same defect within an hour, which is why this is a queue item
