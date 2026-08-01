@@ -19,14 +19,23 @@ TARGET="${TARGET:-local}"          # TARGET=cloud tools/load.sh
 RAW_COLS='content_id Int64, video_session_id String, user_id String, event_type String, event String, event_timestamp UInt64, platform String, app_version String, country String, audio_language String, subtitle_language String, player_version String, session_start_epoch UInt64'
 CONTENT_COLS='content_id Int64, title String, video_type String, category String'
 
+# The Cloud console shows the host as https://xxx.clickhouse.cloud, and that is what
+# lands in .env. We add the scheme ourselves, so strip it — otherwise curl is handed
+# https://https://... and dies with "Could not resolve host: https".
+ch_host() { local h="${CH_HOST:?CH_HOST unset — fill in .env}"; h="${h#https://}"; h="${h#http://}"; echo "${h%/}"; }
+
 run() {  # run <sql> ; CSV arrives on stdin
   if [ "$TARGET" = cloud ]; then
     curl -sS --fail-with-body \
-      "https://${CH_HOST}:${CH_PORT}/?database=${CH_DATABASE}&query=$(python3 -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1]))' "$1")" \
+      "https://$(ch_host):${CH_PORT}/?database=${CH_DATABASE}&query=$(python3 -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1]))' "$1")" \
       --user "${CH_USER}:${CH_PASSWORD}" --data-binary @-
   else
     docker exec -i ch clickhouse-client --query "$1"
   fi
+}
+
+query() {  # query <sql> ; no stdin — used for the post-load row counts
+  run "$1" < /dev/null
 }
 
 [ -f "$CONTENT" ] || { echo "missing $CONTENT"; exit 1; }
@@ -38,4 +47,7 @@ run "INSERT INTO content_dim SELECT content_id, title, video_type, category FROM
 echo "loading ev_raw from $RAW ..."
 run "INSERT INTO ev_raw SELECT content_id, video_session_id, user_id, event_type, event, toDateTime64(event_timestamp/1000, 3), platform, app_version, country, audio_language, subtitle_language, player_version, toDateTime64(session_start_epoch/1000, 3) FROM input('$RAW_COLS') FORMAT CSVWithNames" < "$RAW"
 
-docker exec -i ch clickhouse-client -q "SELECT 'ev_raw' AS t, count() AS rows FROM ev_raw UNION ALL SELECT 'content_dim', count() FROM content_dim FORMAT PrettyCompact"
+# Count through run(), not docker exec — a TARGET=cloud load has no local container,
+# and reporting local counts after a Cloud load would be actively misleading.
+echo "loaded into TARGET=$TARGET:"
+query "SELECT 'ev_raw' AS t, count() AS rows FROM ev_raw UNION ALL SELECT 'content_dim', count() FROM content_dim FORMAT PrettyCompact"
