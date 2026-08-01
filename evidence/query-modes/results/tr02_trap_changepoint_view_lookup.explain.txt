@@ -1,0 +1,22 @@
+Expression ((Project names + (Projection + (WHERE + (Change column names to column identifiers + (Convert VIEW subquery result to VIEW table structure + (Materialize constants after VIEW subquery + (Project names + (Projection + (Change column names to column identifiers + (Project names + Projection)))))))))))
+  Filter (((WHERE + (Change column names to column identifiers + (Convert VIEW subquery result to VIEW table structure + (Materialize constants after VIEW subquery + (Project names + (Projection + (Change column names to column identifiers + (Project names + Projection)))))))))[split])
+    Window
+      Sorting
+        Expression (Before window functions)
+          Aggregating
+            Expression ((Before GROUP BY + Change column names to column identifiers))
+              ReadFromMergeTree (sonyliv_u3.cc_minute_delta)
+              Indexes:
+                MinMax
+                  Condition: true
+                  Parts: 7/7
+                  Granules: 10/10
+                Partition
+                  Condition: true
+                  Parts: 7/7
+                  Granules: 10/10
+                PrimaryKey
+                  Condition: true
+                  Parts: 7/7
+                  Granules: 10/10
+                Ranges: 7
