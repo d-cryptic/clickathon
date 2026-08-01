@@ -1,0 +1,22 @@
+CRUEL VERIFY · knob malformed · database cruel_scratch · 2026-08-01T19:16:27Z
+minutes compared 60 · TRUTH mismatches 0 · SPEC_ONLY divergences 0
+VERDICT: PASS — every TRUTH minute matches
+
+vocabulary probe (pairs in ev_raw missing from evidence/liveness/vocabulary.tsv):
+  1 UNKNOWN pairs granted liveness silently (fail-open):
+    		5
+
+dimension survival (length shows what invisible strings really are):
+   ┌─platform───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┬─len─┬─ivals─┐
+1. │                                                                                                                                                                                                                                                            │   0 │     2 │
+2. │ ANDROID_PHONE                                                                                                                                                                                                                                              │  13 │     2 │
+3. │ IPHONE                                                                                                                                                                                                                                                     │   6 │     1 │
+4. │ PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP │ 500 │     1 │
+   └────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┴─────┴───────┘
+   ┌─audio_language─┬─len─┬─ivals─┐
+1. │ hin            │   3 │     4 │
+2. │ NULL           │   4 │     1 │
+3. │ null           │   4 │     1 │
+   └────────────────┴─────┴───────┘
+
+verify verdict: PASS · full detail above · evidence/cruel/malformed.verify.txt

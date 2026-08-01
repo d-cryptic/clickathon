@@ -1,0 +1,15 @@
+CRUEL VERIFY · knob timebomb · database cruel_scratch · 2026-08-01T19:26:55Z
+minutes compared 187 · TRUTH mismatches 7 · SPEC_ONLY divergences 0
+  FAIL 1970-01-01 00:00 UTC  designed 1  served 0
+  FAIL 1970-01-01 00:01 UTC  designed 1  served 0
+  FAIL 1970-01-01 00:02 UTC  designed 1  served 0
+  FAIL 1970-01-01 00:03 UTC  designed 1  served 0
+  FAIL 1970-01-01 00:04 UTC  designed 1  served 0
+  FAIL 1970-01-01 00:05 UTC  designed 1  served 0
+  FAIL 1970-01-01 00:06 UTC  designed 1  served 0
+VERDICT: FAIL — the serving layer disagrees with the designed truth
+
+vocabulary probe (pairs in ev_raw missing from evidence/liveness/vocabulary.tsv):
+  none — every pair is inside the committed vocabulary
+
+verify verdict: FAIL · full detail above · evidence/cruel/timebomb.verify.txt

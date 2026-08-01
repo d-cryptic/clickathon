@@ -1,0 +1,1 @@
+Code: 47. DB::Exception: Unknown expression or function identifier `audio_language` in scope SELECT hour, peak FROM v_concurrency_hour WHERE audio_language = 'hin' ORDER BY hour ASC. (UNKNOWN_IDENTIFIER) (version 26.7.1.1315 (official build))

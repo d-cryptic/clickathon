@@ -1,0 +1,14 @@
+CRUEL knob 'timebomb' · seed 20260822 · day 2026-08-22 UTC · data/cruel-timebomb-raw.csv
+events 103 (+header) · sessions 5 · truth minutes 60 (0 SPEC_ONLY)
+designed peak 1 @ 1970-01-01 00:00 UTC (spec projection; SPEC_ONLY minutes are a policy, not a truth)
+
+hazards:
+  - z0 one epoch-0 heartbeat: lone run counts NOTHING, but the file's min timestamp is now 1970 — every dense minute spine (gate, verify, windows) spans ~29.8M minutes
+  - z1 whole session in epoch SECONDS: /1000 lands it on 1970-01-21 silently — counted concurrency in 1970, missing from 2026
+  - z2 EMPTY event_timestamp field parses to 0 silently (empty-as-default)
+  - z3 session dated one year in the future — spine stretches forward too
+  - z4 pause+resume both at epoch second 0: spec truth = fully active; the model's arrayFirst 0-sentinel reads 'resume at 0' as 'no resume' and eats the run (EXPECTED DIVERGENCE — model bug probe)
+
+expected breakage when run:
+  - gate/verify dense-spine queries over a 1970..2027 span: slow, memory-heavy, or Code 241 — measure which
+  - z4 designed truth-vs-served mismatch at 1970-01-01 00:00..00:06

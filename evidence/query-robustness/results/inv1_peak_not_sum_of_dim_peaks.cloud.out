@@ -1,0 +1,2 @@
+invariant	truth_peak	serving_peak	sum_of_platform_peaks	verdict
+peak_not_sum_of_dim_peaks	2681	2917	2758	FAIL: serving headline peak 2917 != truth 2681
