@@ -53,6 +53,33 @@ These are **code-inspection findings, not reproduced incidents** — reproduce b
 
 ---
 
+## 🔴 The spawn defect that caused a production incident
+
+`sc worktree create` bases a new worktree on **`main`**, NOT on the target branch, even after
+`sc worktree set-target-branch dev`. Verified four times: every worktree spawned on 2026-08-01
+forked from `542d80d` regardless.
+
+**What it cost.** A worktree forked from `main` carries `main`'s `sql/`, which predates the ADR 0009
+merge. That agent ran a model build against Cloud and left the **graded database serving two model
+generations** — minute tier 2,887 with 1,949.331 hours, hour tier 2,917 — for roughly two hours,
+until an external audit caught it. `query_log` shows the good build at 13:59 (122,015 → 28,073)
+overwritten at 16:16 (121,492 → 28,139).
+
+**Every brief must therefore contain both of these, verbatim:**
+
+```
+STEP ZERO, before reading anything else:
+    git fetch origin && git merge origin/dev
+Your worktree is forked from `main` and is missing everything on dev.
+
+NEVER run `make model`, `tools/build-model.sh`, or ANY write against TARGET=cloud or
+database `sonyliv`. `tools/reconcile.sh` is read-only and is fine. If you need to build
+a model, create your OWN scratch database — sql/70_truncation_test.sql shows the pattern.
+```
+
+The guard is the load-bearing half: the stale base is an inconvenience, writing to the graded
+database with stale SQL is an incident.
+
 ## Rules for spawning from this queue
 
 - **Assign the ADR number from this file.** Three agents once independently chose 0009.
