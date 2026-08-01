@@ -194,7 +194,7 @@ the local gate reads `default` regardless. For those, editing `.env` is still th
 `tools/unseen-run.sh` now passes `--database "$DB"` *and* `CH_DATABASE="$DB"` to the loader (its
 sandbox `.env` is kept as a third, redundant guard).
 
-### A6 — ~~`sql/80_content.sql` hard-codes the `sonyliv` database~~ FIXED (ADR 0009)
+### A6 — ~~`sql/80_content.sql` hard-codes the `sonyliv` database~~ FIXED (ADR 0010)
 
 **Was:** `SOURCE(CLICKHOUSE(TABLE 'content_dim' DB 'sonyliv'))` plus six `dictGet('sonyliv.dict_content', …)`
 calls, so applied to any other database those views read **production's** dictionary — reproduced in a
@@ -204,7 +204,7 @@ scratch database, where the old form returned production titles for scratch data
 dictionary name at `CREATE VIEW` time and bakes it in, so each view is permanently pinned to its own
 database's dictionary — verified by applying the committed file with `--database sonyliv_scratch80`
 and reading it from a session attached to `sonyliv`. See
-[ADR 0009](adr/0009-content-views-are-database-agnostic-and-label-their-ambiguity.md).
+[ADR 0010](adr/0010-content-views-are-database-agnostic-and-label-their-ambiguity.md).
 
 `tools/unseen-run.sh` still templates the database name out of every file and still refuses to run one
 that names another database. **Keep that guard** — it now has nothing to rewrite in `80_content.sql`,

@@ -95,7 +95,7 @@
 - [ ] **[H8]** Tail-sensitivity sweep (gap × tail grid) — the ground truth is private and unfittable
 - [~] **[DIMS]** Filter-dimension value normalisation — **decided and built, NOT wired**.
       `sql/15_normalise.sql` (UDFs + `v_cc_minute_delta_norm`, `v_concurrency_minute_audio_norm`,
-      `v_dimension_drift`) and [ADR 0009](docs/adr/0009-normalise-filter-dimensions-at-query-time.md).
+      `v_dimension_drift`) and [ADR 0011](docs/adr/0011-normalise-filter-dimensions-at-query-time.md).
       Measured: peak Hindi **1,768 → 2,180 (+23.3%)**; total peak **2,887 unchanged**; query cost
       **zero** (both filters read the same 28,101 rows / 137 KiB). Normalising inside the derivation
       was built and measured as **worse** — 202 intervals degraded onto a sentinel — so

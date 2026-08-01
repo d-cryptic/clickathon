@@ -31,7 +31,7 @@ supersede the version in `MENTOR_QUESTIONS.md`:
   noise to ignore. They are not noise; they are load-bearing, and the assumption is worth 9.7%.
 - **04 is Q18**, and it exists only because measuring created it: ADR 0008 settled the *keys* of the
   four new filter dimensions without examining the *values* in them. It is the one doubt here whose
-  machinery is already built either way ([ADR 0009](../docs/adr/0009-normalise-filter-dimensions-at-query-time.md)),
+  machinery is already built either way ([ADR 0011](../docs/adr/0011-normalise-filter-dimensions-at-query-time.md)),
   so the answer changes a `WHERE` clause rather than a model.
 
 ## Rules for this folder

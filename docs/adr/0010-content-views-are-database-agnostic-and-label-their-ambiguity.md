@@ -1,4 +1,4 @@
-# ADR 0009 — Content views name no database, keep the title grain, and label the blank `video_type`
+# ADR 0010 — Content views name no database, keep the title grain, and label the blank `video_type`
 
 > **Summary:** `sql/80_content.sql` hard-coded `dictGet('sonyliv.dict_content', …)` in six places, so
 > every content view built in the unseen-day database `sonyliv_unseen` would have answered from

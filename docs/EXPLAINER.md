@@ -338,7 +338,7 @@ its window.
 ADR 0008**, which promotes these four columns to filter dimensions — the key-order and row-count
 analysis there is sound, but the *values* going into those keys need a normalisation decision first.
 
-**Decided in [ADR 0009](adr/0009-normalise-filter-dimensions-at-query-time.md)** — storage stays raw,
+**Decided in [ADR 0011](adr/0011-normalise-filter-dimensions-at-query-time.md)** — storage stays raw,
 normalisation is a query-time rule (`sql/15_normalise.sql`). At the graded grain the hole is bigger
 than the row counts suggest: peak Hindi concurrency is **1,768** as shipped and **2,180** normalised,
 **+23.3%**, and at the peak minute `= 'hin'` returns 1,758 of 2,174 Hindi viewers. The **total peak
@@ -366,7 +366,7 @@ figures above need a correction: Japanese is *four* values (`jap`, `jpn`, `JPN`,
 
 Dossier: [doubts/03](../doubts/03-content-catalog.md).
 
-**Since handled** ([ADR 0009](adr/0009-content-views-are-database-agnostic-and-label-their-ambiguity.md)):
+**Since handled** ([ADR 0010](adr/0010-content-views-are-database-agnostic-and-label-their-ambiguity.md)):
 the blank `video_type` is labelled `'(blank)'` — kept distinct from `'(unknown)'`, which means a
 dictionary *miss* and nothing else — and `v_concurrency_minute_title` now carries
 `catalog_content_ids` so a merged label cannot be read as one asset. Same ADR fixed a

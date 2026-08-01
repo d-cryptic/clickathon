@@ -6,12 +6,12 @@
 -- dirty: `hin`, `HIN`, `hin-hindi` and `hin-Hindi` are all Hindi, so
 -- `WHERE audio_language = 'hin'` answers 1,768 for peak Hindi concurrency when
 -- the true answer is 2,180 — it silently drops 23.3%. This file fixes that
--- WITHOUT rewriting a single stored byte. See ADR 0009 for the measurements.
+-- WITHOUT rewriting a single stored byte. See ADR 0011 for the measurements.
 --
 -- THE POLICY, in one line: storage stays raw, normalisation is a RULE applied on
 -- read. Nothing here changes any concurrency number the pipeline reports.
 --
--- Why not normalise in storage (measured, ADR 0009):
+-- Why not normalise in storage (measured, ADR 0011):
 --   * The graded ground truth is PRIVATE and may itself be un-normalised. A raw
 --     column can answer both questions; a rewritten column can answer only one.
 --   * It buys nothing on the totals. The derivation reads dimensions as LABELS
@@ -139,7 +139,7 @@ CREATE OR REPLACE FUNCTION norm_app_version AS (s) ->
 -- the viewer chose, distinct from "the player never told us". ISO 639-3 assigns
 -- `non` to Old Norse; treating 8,633 SonyLIV rows as Old Norse is the sillier
 -- of the two readings. `aut` is read as "auto-select", not as a language — no
--- ISO 639 code `aut` exists. Both are judgement calls, flagged in ADR 0009 and
+-- ISO 639 code `aut` exists. Both are judgement calls, flagged in ADR 0011 and
 -- in doubts/04.
 CREATE OR REPLACE FUNCTION lang_class AS (s) ->
     multiIf(
@@ -167,7 +167,7 @@ SELECT throwIf(norm_lang('hin')          != 'hin', 'norm_lang: identity broken')
      -- jap/jpn are BOTH Japanese and the rule deliberately does NOT merge them.
      -- Only a hard-coded synonym map could, and that is the thing this file
      -- refuses to be. Asserted so the limitation is a decision, not a bug.
-     , throwIf(norm_lang('jap') = norm_lang('jpn'), 'norm_lang: must NOT merge jap/jpn — see ADR 0009')
+     , throwIf(norm_lang('jap') = norm_lang('jpn'), 'norm_lang: must NOT merge jap/jpn — see ADR 0011')
      -- The subtag rule must never touch a version string.
      , throwIf(norm_version('3.33.50_ADE') != '3.33.50_ade', 'norm_version: case fold broken')
      , throwIf(norm_version('v-0.0.117.12.05.1_adNE') != 'v-0.0.117.12.05.1_adne',

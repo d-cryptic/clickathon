@@ -239,7 +239,7 @@ normalised — **23.3%** on any per-language answer. The unfiltered peak is 2,88
 filtered queries are exposed — but `/reconcile` cannot catch this, because it recomputes truth from
 the same strings and agrees with itself by construction.
 **Our assumption:** store raw, normalise on read, and report the normalised figure. See
-[ADR 0009](adr/0009-normalise-filter-dimensions-at-query-time.md) and the dossier at
+[ADR 0011](adr/0011-normalise-filter-dimensions-at-query-time.md) and the dossier at
 [doubts/04](../doubts/04-dimension-normalisation.md) — switching readings is a `WHERE` clause, not a
 rebuild.
 **Answer:** _unrecorded_

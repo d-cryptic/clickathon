@@ -2,12 +2,12 @@
 
 > **Summary:** `audio_language` carries **41** distinct values and Hindi is **four** of them
 > (`hin` 610,889 · `HIN` 69,033 · `hin-hindi` 23,095 · `hin-Hindi` 507). We can serve either reading —
-> ADR 0009 keeps the raw strings in storage and normalises on read, so both answers are one `WHERE`
+> ADR 0011 keeps the raw strings in storage and normalises on read, so both answers are one `WHERE`
 > clause apart. What we **cannot** do is submit both. A benchmark query filtered on Hindi audio
 > answers **1,768** un-normalised and **2,180** normalised — a **23.3%** fork on that query, and at the
 > graded peak minute `= 'hin'` returns 1,758 of 2,174 Hindi viewers, dropping **19.1%**. The unfiltered
 > peak is **2,887 either way**, so nothing else in the model is at risk. **Deepens ADR 0008; answered by
-> ADR 0009.**
+> ADR 0011.**
 
 **Status:** open · **Evidence measured:** 2026-08-01, ClickHouse 26.7.1.1315, local `csv_audit.raw_str`
 (verified column-for-column against the CSV with `awk`) and a verbatim rebuild of the committed
@@ -56,7 +56,7 @@ SELECT max(c) FROM (
   SELECT minute, sum(sum(delta)) OVER (PARTITION BY toStartOfHour(minute) ORDER BY minute) AS c
   FROM cc_minute_delta WHERE audio_language = 'hin' GROUP BY minute);
 
--- reading B — case-folded and primary-subtag (ADR 0009's norm_lang)
+-- reading B — case-folded and primary-subtag (ADR 0011's norm_lang)
 --   ... WHERE norm_lang(audio_language) = 'hin' ...
 ```
 
@@ -134,7 +134,7 @@ the serving layer matches our own interval derivation; it recomputes truth from 
 same strings, so it agrees with itself by construction whichever reading we pick. A 23.3% error on a
 filtered benchmark answer passes every test we have.
 
-It is also **cheap to ask and cheap to act on**. ADR 0009 already ships the machinery
+It is also **cheap to ask and cheap to act on**. ADR 0011 already ships the machinery
 (`sql/15_normalise.sql`): the raw values stay in storage and normalisation is a query-time rule, so
 switching readings is editing a `WHERE` clause, not rebuilding a model. Measured, the normalised
 filter costs nothing — both variants read the same 28,101 rows / 137 KiB, because `audio_language`
@@ -166,7 +166,7 @@ family is *seen* rather than assumed absent. That belongs in `docs/RUNBOOK_UNSEE
 ## Our current assumption
 
 Raw strings are stored and never rewritten; normalisation is applied on read
-(`sql/15_normalise.sql`, ADR 0009). For a per-language benchmark answer we would report the
+(`sql/15_normalise.sql`, ADR 0011). For a per-language benchmark answer we would report the
 **normalised** figure — **2,180** — because four spellings of Hindi are four spellings of Hindi, and
 because the un-normalised reading is the one that would look like a bug to a reviewer. **That
 preference is a guess, and it is the whole reason this question exists.**

@@ -164,7 +164,7 @@ The cost of asking is low and the cost of guessing is a whole category of benchm
 | **negative ids may appear in events** | already covered — `Int64` end to end. Add one assertion at load that `min(content_id)` is Int64-parseable | ~2 lines in `tools/load.sh` |
 | *no answer received* | ship both grains (`content_id` and `title`), label the blank explicitly as `unknown`, and say in the deck which one we treat as canonical and why | small; converts ambiguity into a stated choice |
 
-## Our current assumption — now SHIPPED as a stated default (ADR 0009, 2026-08-01)
+## Our current assumption — now SHIPPED as a stated default (ADR 0010, 2026-08-01)
 
 Group by `content_id` is canonical; `title` / `category` / `video_type` are rollups on top.
 `content_id` is `Int64` everywhere. The join stays `LEFT` with a `'(unknown)'` dictionary default so an

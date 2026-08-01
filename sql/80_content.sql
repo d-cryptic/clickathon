@@ -259,7 +259,7 @@ HAVING content_ids > 1;
 --   32 is the number that matters for reading a chart. Both are properties of
 --   THIS file, not contracts — the unseen day gets a different catalog.
 --
--- WHY THE VIEW SURVIVES ANYWAY (option (a), not (b) — see ADR 0009):
+-- WHY THE VIEW SURVIVES ANYWAY (option (a), not (b) — see ADR 0010):
 -- "Understand demand by title OR content identifier" is the deliverable's own
 -- wording, so both grains are wanted, and dropping this one deletes half of
 -- it. v_concurrency_minute_content is NOT a drop-in replacement: its grain is

@@ -1,4 +1,4 @@
-# ADR 0009 — Normalise the filter dimension VALUES at query time, never in storage
+# ADR 0011 — Normalise the filter dimension VALUES at query time, never in storage
 
 > **Summary:** ADR 0008 promoted four columns to filter dimensions and kept their values raw.
 > Measured, that ships a correctness hole: `WHERE audio_language = 'hin'` answers **1,768** for peak
