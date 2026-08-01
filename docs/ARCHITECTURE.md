@@ -4,8 +4,9 @@
 > combination → concurrency as a running sum within each hour. The implemented historical spine is
 > deterministic and excludes backgrounded and paused heartbeats; a published correction-state finalizer
 > incrementally absorbs late or evolving sessions, while a published bounded exact tail serves the newest
-> event-time window. Peak is never summable across dimensions, while hour clipping removes
-> carry-in and makes a future time rollup safe. Read [ADR 0007](adr/0007-state-gate-heartbeats.md) first.
+> event-time window. Peak is never summable across dimensions; hour clipping removes carry-in, while
+> only additive integrals or exact filter cuboids may be rolled up. Read
+> [ADR 0007](adr/0007-state-gate-heartbeats.md) first.
 
 ## Layers
 
@@ -32,8 +33,10 @@ minute after it closes, **clipped to each hour the interval touches**
 minute)`. Concurrency at minute *M* is `sum(delta) OVER (PARTITION BY toStartOfHour(minute) ORDER BY
 minute)` — bounded to the hour, no carry-in from earlier history. **Append-only.**
 
-**4 · Next: `cc_hour_agg`** — per `(dims, hour)`, an hour max and integral. It is deferred until the
-delta layer has a raw-data reconciliation gate.
+**4 · Future rollups** — an hourly integral per base dimension combination is additive and may be
+benchmarked. An hourly peak is valid only when materialised for the exact requested filter cuboid; it is
+not safe to sum across platform/content/country groups. The reconciled minute ledger remains peak authority
+until an evidence-backed cuboid is selected ([ADR 0015](adr/0015-filtered-peak-is-not-additive.md)).
 
 **4 · `session_delta_base` + `session_delta_correction_stage`** — the update layer. The bootstrap stores
 each session's contribution; a finalizer re-derives only sessions whose `ingested_at` is in an overlapping
@@ -51,8 +54,9 @@ ledger only inside its recorded `[event_watermark, tail_until]` range, never aft
 
 1. **Peak is not summable across dimensions.** platform+content and platform+country peak at different
    minutes; `max(a+b) ≤ max(a)+max(b)` and the gap is large. Never store a peak *per dimension*. Filter
-   → sum deltas per minute → running sum → **then** `max()`. (Hour-clipping does make peak summable
-   *across time*, which is what `cc_hour_agg` exploits — a different axis.)
+   → sum deltas per minute → running sum → **then** `max()`. An exact peak for one fully aggregated hour
+   can be maximized across full hours, but only after the query's dimensions are already combined; this is
+   why a generic per-dimension `cc_hour_agg` is unsafe.
 2. **Never sum a distinct count.** `uniqExactState`/`uniqExactMerge`, never `SummingMergeTree` over a
    distinct count — that over-counted 9× in testing. Session-level concurrency *is* summable across
    dimension buckets (a session has one platform, one content); user-level is not.
@@ -79,7 +83,7 @@ instrument in ClickStack** — watermark lag is the observable expression of the
 | Choice | Alternative | Why ours |
 |---|---|---|
 | Interval → delta | per-minute explosion | O(intervals) vs O(sessions × minutes) |
-| Hour-clipped deltas | unclipped | removes the carry-in scan-from-`t=0`; makes hour-grain peak pre-aggregable (day peak reads 24 rows/combo, not 1,440) |
+| Hour-clipped deltas | unclipped | removes the carry-in scan-from-`t=0`; permits additive hour integrals and an exact-hour peak only at a fully specified query cuboid |
 | State-gated heartbeats | gap-only / bg-fg pairing | state markers prevent known false positives; heartbeat cadence still bridges missing markers |
 | Bounded exact tail | stateless heartbeat leases | a stateless MV cannot see previous app/playback state and would count known-inactive heartbeats |
 | Sealed delta + exact tail | one mutable history table | bounded mutability keeps historical reads append-friendly |

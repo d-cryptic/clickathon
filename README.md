@@ -40,7 +40,7 @@ tools/ch "SELECT name FROM system.tables WHERE database='default'"
    │
    ├─▶ session_intervals (MergeTree)               ← ACTIVE ranges per session,
    │      state-gated by foreground AND playing,      split by hard stop or heartbeat gap.
-   │      background/pause terminate immediately;      a fresh eligible heartbeat restarts.
+   │      background/pause terminate immediately;      after foreground/resume, a fresh heartbeat restarts.
    │
    ├─▶ cc_minute_delta (AggregatingMergeTree)      ← +1 on open, −1 on close, per minute
    │      ORDER BY (platform, country, content_id, minute)   per dimension combination

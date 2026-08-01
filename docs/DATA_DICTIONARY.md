@@ -69,8 +69,11 @@ sessions with no VideoSessionEnd        0   ← but see trap 3
 unmatched**, and 418 sessions background and never come back. The dictionary says outright they
 "are not guaranteed events and sometimes depend on the system." Any model that reconstructs inactivity
 by pairing `AppBackgrounded` → `AppForegrounded` is wrong on ~4% of sessions here, and wrong by a
-different amount on the unseen day. **Use the events as hard stop gates, but do not depend on a paired
-foreground event to restart.** A fresh eligible heartbeat is the restart proof.
+different amount on the unseen day. **Use the events as hard stop gates and fail closed if the corresponding
+foreground signal is missing.** An `AppForegrounded`/`resume` transition changes state eligibility; only a
+fresh heartbeat after both gates are active restarts playback. In this corpus, 83 sessions have a heartbeat
+after their final unmatched background; counting those as foreground from heartbeat alone would reintroduce
+the failure mode the gate prevents.
 
 **2 · Backgrounding is universal, not an edge case.** Every one of the 10,866 sessions has at least one
 background event. Foreground-only exclusion is the entire problem, not a correction term.

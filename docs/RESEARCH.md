@@ -77,9 +77,10 @@ hour-clipped signed deltas         O(intervals × crossed hours)
 filtered change-point serving      running sum only inside requested hour
 ```
 
-The sessionizer fails closed after an unmatched background or pause and resumes only on a subsequent
-eligible heartbeat. It gives the final heartbeat 60 seconds of credit, caps that credit at a stop
-marker, splits on serving-dimension drift, and uses a 150-second continuity gap.
+The sessionizer fails closed after an unmatched background or pause and resumes only after the corresponding
+state gate is active again **and** a subsequent eligible heartbeat arrives. It gives the final heartbeat 60
+seconds of credit, caps that credit at a stop marker, splits on serving-dimension drift, and uses a
+150-second continuity gap.
 `queries/materialize_intervals.sql` is the executable specification.
 
 ## Ideas evaluated
@@ -93,7 +94,8 @@ marker, splits on serving-dimension drift, and uses a 150-second continuity gap.
 | Session-id projection on raw | Adopted | Preserves dashboard-oriented base key while serving finalizer point reads. |
 | Published per-session correction state | Adopted | Replace a touched session's target marker correction only after its run is published. |
 | Bounded exact mutable tail | Adopted | Publish a complete small minute snapshot only after its finalizer run; stitch it only while that correction version remains current. |
-| Hour max + integral rollup | Next | Safe only after the delta ledger is reconciled; accelerates hour/day peak and time-weighted average. |
+| Generic hour max rollup | Reject | A sum of per-dimension peaks loses minute alignment; only additive integrals or exact query cuboids are safe. |
+| Exact-cuboid hour peak | Conditional | Valid for one fully specified filter grouping after Cloud benchmark evidence justifies its write cost. |
 | Approximate distinct sketches | Reject for serving | Private ground truth makes even small error unacceptable. |
 
 ## Implemented finalizer protocol
@@ -183,7 +185,7 @@ pending H1 arrival-order measurement and the `finalizer_run_log` ledger.
 | Error followed by playback | 743 heartbeats after `VideoError` | Record as QoE signal; do not terminate playback without an explicit stop. |
 | Tied timestamps | 159,434 timestamps have ≥2 events after exact-payload dedupe; one has simultaneous pause + resume | Define deterministic transition precedence: stop → start → heartbeat. |
 | Exact minute stop | a half-open interval can end at `HH:MM:00.000` | emit the negative delta at that minute, not one minute later. |
-| Missing or unmatched state | 453 unpaired backgrounds; 6,418 unpaired pauses | Fail closed; fresh eligible heartbeat is the only restart proof. |
+| Missing or unmatched state | 453 unpaired backgrounds; 6,418 unpaired pauses | Fail closed; state must be foreground/unpaused again before a fresh heartbeat restarts playback. |
 | State event scope | `AppBackgrounded` names an app process but the source carries only a session id | Treat delivered events as session-scoped; require player instance and scope for any producer that fans one state change across sessions. |
 | Open sessions | 144 state-machine-open sessions at a 10:30 cut; 75 overlap that cutoff minute | `truncation-test.sh` proves no truncated interval extends more than its 60-second tail grace. |
 | Long-lived session id | one supplied id spans 157,101 seconds (43.6h) | do not expire FSM state by session age; expire only after inactivity plus watermark. |
@@ -233,6 +235,13 @@ transition only after the producer declares its semantics, its ordering with pau
 and a sensitivity run demonstrates the intended effect. The same gate now quarantines a timestamp more than
 five minutes ahead of durable ingestion; this catches impossible device clocks without confusing ordinary
 late arrivals with bad chronology.
+
+The same conservatism applies to missing foreground markers. A heartbeat after a final unmatched background
+is not proof that the app returned foreground; the supplied corpus contains 83 such sessions (22 continue
+past the normal 150-second continuity gap). The implementation excludes them until an explicit
+`AppForegrounded` arrives, then requires a fresh heartbeat before starting a new interval. This is a
+deliberate false-negative bias under ambiguous state, preferable to reconstructing a known-background period
+as viewing.
 
 ### State scope is a separate identity problem
 
