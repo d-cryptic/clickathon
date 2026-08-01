@@ -99,11 +99,13 @@ backgrounding is universal, bg/fg events are **not guaranteed to pair**.
       versioned incremental == production truth on **all 1,579 minutes, peak 2,917**
       (`evidence/truncation.txt`; the file deliberately keeps the broken `interval_end` variant to
       prove the test still *detects* the historical +37 divergence).
-- [~] **"Publish continuously updated aggregates"** — **partial.** ADR 0013's finalizer maintains
-      `session_intervals` + `cc_minute_delta` and is proven byte-identical to a rebuild *for those two
-      tables* (`evidence/publish.txt`). It has zero references to `cc_hour_agg`/`cc_user_minute` — the
-      hour/day and user tiers still batch-rebuild (`docs/WORKTREE_QUEUE.md` Q2) — and on `sonyliv` it
-      is installed but has never committed a run, so live numbers all come from batch rebuilds.
+- [x] **"Publish continuously updated aggregates"** — **all four tiers.** ADR 0013's finalizer
+      maintained `session_intervals` + `cc_minute_delta` only; **ADR 0016** added the `hours` and
+      `users` phases, so the hour/day cube and the user tier are re-derived for the buckets a batch
+      touched. All four converge to a from-scratch rebuild — 0 differing cells across bootstrap,
+      growth, shrink, dimension change, a 46-minute straggler and 200 forced republications
+      (`evidence/publish.txt`). ⚠️ On `sonyliv` it is installed but has **never committed a run**
+      (cursor at epoch), so every live number still comes from a batch rebuild.
 
 ---
 
@@ -133,7 +135,7 @@ event streams in real time to produce one or more aggregated tables."
 | User-level concurrency (`uniqExact`, **not** deltas — a user holds several sessions) | ✅ `sql/45_user_concurrency.sql` — platform/country/content_id grain only |
 | **Content-level concurrency by title** (metadata enrichment) | ✅ `sql/80_content.sql` — `dict_content` + title/type/category views, hour-peak reconciled 0 mismatches. Title is a label, not an asset key: 2,773 titles map to >1 content_id |
 | **Time-window trend** — rolling / fixed windows | ✅ `sql/85_windows.sql` — verified against brute-force self-join, 0 mismatches at 5/15/60 min. platform/country/content_id grain only |
-| **Dedup of repeated events** | ⚠️ **decided, scoped** — proven inert for totals/peak (`evidence/dedup.txt`); NOT inert at filter grain (Q5, ADR 0016 pre-assigned): 6 attributions and the `hin`/`non`/`unk` audio curves move |
+| **Dedup of repeated events** | ⚠️ **decided, scoped** — proven inert for totals/peak (`evidence/dedup.txt`); NOT inert at filter grain (Q5 — `evidence/dedup.txt`, `doubts/06`): 6 attributions and the `hin`/`non`/`unk` audio curves move |
 | Schemas documented from `dataset_details.md` | ✅ [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) |
 | Filter dimensions survive derivation | ⚠️ **7 of 7 raw dims carried in the interval/delta tier** (ADR 0008; bounded rows) + 3 content dims via dictionary — but hour/day, user, window and stateless paths expose only platform/country/content_id, so support is **not uniform** across grains ([codex-validation/002.md](docs/codex-validation/002.md) §8) |
 

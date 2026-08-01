@@ -155,9 +155,9 @@ Everything here was run, not reasoned about.
 | Load is exact | `ev_raw` 905,558 = source rows; `content_dim` 33,464 |
 | From-scratch rebuild is deterministic | isolated DB reproduces production exactly |
 | User concurrency correct | peak **2,844** vs session **2,917**; `uniqExactMerge` 9,531 = 9,531 distinct users *(re-measured 2026-08-01, direct from `session_intervals`; the drift-up-on-rebuild defect in `cc_user_minute` itself is closed by ADR 0016 — buckets are replaced, not unioned)* |
-| Content concurrency correct | hour-peak reconcile, **0** mismatches over 6,764 rows |
-| Rolling/tumbling windows correct | vs brute-force self-join, **0** mismatches at 5/15/60 min |
-| Duplicates are inert **at total/peak grain** | full derivation run raw vs deduped: identical totals, **0** of 3,725 minutes differ *(measured at `4a89399`, pre-ADR-0009)*. ⚠️ **Not inert at filter grain** on the current 7-dimension model — a 2026-08-01 re-measure moved 6 interval dimension attributions and the `hin`/`non`/`unk` audio curves on 18/15/26 minutes, UNK audio peak 183 → 184 (`docs/WORKTREE_QUEUE.md` Q5; evidence commit pending, ADR 0016 pre-assigned) |
+| Content concurrency correct | hour-peak reconcile, **0** mismatches over 6,764 rows — ⚠️ **no evidence file in the tree, and not re-run since**. The recorded run predates ADR 0009 (model change) and ADR 0010 (content views rewritten). Treat as *believed*, not verified, until `evidence/` carries it |
+| Rolling/tumbling windows correct | vs brute-force self-join, **0** mismatches at 5/15/60 min — ⚠️ **no evidence file, no tool runs this comparison**, and the one recorded run (`docs/EXPLAINER.md` at `4a89399`) predates ADR 0009 and ADR 0014, which rewrote `sql/85_windows.sql`. Treat as *believed*, not verified |
+| Duplicates are inert **at total/peak grain** | full derivation run raw vs deduped: identical totals, **0** of 3,725 minutes differ *(measured at `4a89399`, pre-ADR-0009)*. ⚠️ **Not inert at filter grain** on the current 7-dimension model — a 2026-08-01 re-measure moved 6 interval dimension attributions and the `hin`/`non`/`unk` audio curves on 18/15/26 minutes, UNK audio peak 183 → 184 (`docs/WORKTREE_QUEUE.md` Q5; measured in `evidence/dedup.txt` and [`doubts/06`](doubts/06-dedup-at-filter-grain.md)) |
 | Absorption converges (after the fix) | incremental = clean rebuild, row for row, all 1,578 minutes *(pre-ADR-0009, not re-run)* |
 
 ---
@@ -188,7 +188,7 @@ Found late — `tools/fetch_data.sh` originally pulled only the CSVs, so
 | User-level concurrency | dataset_details | **done** |
 | Time-window trend | core aggregation | **done** |
 | Dedup of repeated events | README step 3 | **proven unnecessary at total/peak grain; NOT at filter grain** — see below |
-| **"Publish continuously updated aggregates"** | README step 4 | **PARTIAL** — `sql/12_publish.sql` + `tools/publish.sh`, [ADR 0013](docs/adr/0013-continuous-publication-by-incremental-finalizer.md), maintain `session_intervals` + `cc_minute_delta` **only** (zero references to `cc_hour_agg`/`cc_user_minute` — those tiers rebuild in batch, `WORKTREE_QUEUE.md` Q2). Proven byte-identical to a rebuild **for those two tables** in `evidence/publish.txt`. Installed on `sonyliv` but has **never committed a run** there — live numbers all come from batch rebuilds |
+| **"Publish continuously updated aggregates"** | README step 4 | **DONE for all four tiers** — `sql/12_publish.sql` + `tools/publish.sh`, [ADR 0013](docs/adr/0013-continuous-publication-by-incremental-finalizer.md) + [ADR 0016](docs/adr/0016-publisher-owns-the-user-and-hour-tiers.md). ADR 0013 maintained `session_intervals` + `cc_minute_delta` only; ADR 0016 added the `hours` and `users` phases, so all four tiers converge to a from-scratch rebuild — 0 differing cells across bootstrap, growth, shrink, dimension change, a 46-minute straggler and 200 forced republications (`evidence/publish.txt`). ⚠️ Installed on `sonyliv` but has **never committed a run** there (cursor at epoch) — every live number still comes from a batch rebuild |
 | All 10 filter dimensions | dataset_details ("should work even if dimensions increase") | **PARTIAL, non-uniform** — all 7 raw dims carried in `cc_minute_delta` (rows hard-bounded regardless of dimension count, ADR 0008) and in per-dimension dashboard views; 3 content dims via `dict_content` at query time. But hour/day, user, window and stateless paths expose only platform/country/content_id, so e.g. *user concurrency by audio language* or *day peak by app version* needs custom SQL, not a shipped serving shape — see scope limits below |
 | H7 OTLP self-instrumentation | ClickStack "meaningful integration" bar | **done** — `sonyliv observe` |
 | Unseen-day dry run + evidence packaging | "no pipeline evidence, no credit" | **done** — `tools/unseen-run.sh`, ~2.5 min for a 1 GB day |
@@ -204,7 +204,7 @@ dims since ADR 0008), exactly one duplicate group conflicts on it (`UNK` vs `OFF
 re-measure at the current grain found dedup is **not inert for filtered answers** — 6 interval
 dimension attributions change and the `hin`/`non`/`unk` audio curves move on 18/15/26 minutes (UNK
 audio peak 183 → 184). Totals and the 2,917 peak are unaffected. The filter-grain policy is an open
-decision: `docs/WORKTREE_QUEUE.md` Q5, ADR 0016 pre-assigned.
+decision: `docs/WORKTREE_QUEUE.md` Q5 — measured in `evidence/dedup.txt` and `doubts/06`.
 
 ### Scope limits found by the cross-model audits
 

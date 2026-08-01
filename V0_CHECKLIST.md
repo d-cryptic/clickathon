@@ -36,7 +36,7 @@ evidence) and §D1 (incomplete build path) — **are both closed and marked so b
       2026-08-01 re-measure found 6 interval dimension attributions change and the `hin`/`non`/`unk`
       audio curves move on 18/15/26 minutes (UNK audio peak 183 → 184) — exactly the
       `subtitle_language`-conflict coupling this file predicted below. Policy decision pending:
-      `docs/WORKTREE_QUEUE.md` Q5, ADR 0016 pre-assigned.
+      `docs/WORKTREE_QUEUE.md` Q5 — measured in `evidence/dedup.txt` and `doubts/06`.
 - [x] **Non-summability measured, not asserted** — **re-measured 2026-08-01** on the post-ADR-0009
       model: summing per-platform peaks gives **2,988** vs a true **2,917** (+2.4%); per-content peaks
       give **5,680** vs 2,917 (**+94.7%**). *(Was 2,945 / 4,433 against a true 2,887 before the tie
@@ -145,7 +145,7 @@ Four rows left this table since the last pass. What remains:
 
 | Deferred | Why it can wait | Why it still matters |
 |---|---|---|
-| **Continuous publishing of the hour/user tiers** | ADR 0013's finalizer keeps `session_intervals`+`cc_minute_delta` current and is proven byte-identical for those two tables; hour/user rebuild in ~11 s batch | The publisher has zero references to `cc_hour_agg`/`cc_user_minute` (Q2, ADR 0015 pre-assigned), and on `sonyliv` it has never committed a run — until then "continuously updated aggregates" holds for one tier only |
+| **Continuous publishing of the hour/user tiers** | ADR 0013's finalizer keeps `session_intervals`+`cc_minute_delta` current and is proven byte-identical for those two tables; hour/user rebuild in ~11 s batch | **Closed by ADR 0016**: the `hours`/`users` phases re-derive the touched hour-cube rows and user-minute buckets, and all four tiers converge to a from-scratch rebuild. ⚠️ On `sonyliv` the publisher has still never committed a run (cursor at epoch), so every live number comes from a batch rebuild |
 | **Uniform dimension support across grains** | All 7 raw dims are carried in the interval/delta tier (ADR 0008) and answer minute-grain filters; content dims join at query time | Hour/day, user, window and stateless paths expose only platform/country/content_id — a benchmark asking e.g. *user concurrency by audio language* needs custom SQL, not a shipped shape ([codex-validation/002.md](docs/codex-validation/002.md) §8) — and see the coupling below |
 | Session-aware vs session-independent **numeric** comparison | Both tables exist and both are verified | The comparison *is* the deliverable, not the two tables. Cheap now: one query, one paragraph |
 | 100× scale story | No code — a growth law per tier | Judges *will* ask; an honest whiteboard answer suffices |

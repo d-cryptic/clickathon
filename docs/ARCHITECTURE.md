@@ -67,11 +67,12 @@ set-union MV could never express. `v_cc_publish_lag` is the freshness metric; `v
 still reports event-time staleness. See [ADR 0013](adr/0013-continuous-publication-by-incremental-finalizer.md)
 and `evidence/publish.txt`.
 
-**Scope of the finalizer — read this before quoting "continuously updated".** It maintains
-`session_intervals` and `cc_minute_delta` only; `sql/12_publish.sql` and `tools/publish.sh` contain
-**zero** references to `cc_hour_agg` or `cc_user_minute`, so hour/day peaks and user concurrency still
-come from the batch rebuild (`tools/build-model.sh`) — see `docs/WORKTREE_QUEUE.md` Q2 (ADR 0015,
-pre-assigned). Each run also schedules one lightweight `DELETE` pruning interval rows superseded by
+**Scope of the finalizer — read this before quoting "continuously updated".** It maintains all four
+tiers. ADR 0013 covered `session_intervals` and `cc_minute_delta` only, which left hour/day peaks
+stale and user concurrency inflated; `sql/12_publish.sql` and `tools/publish.sh` now also contain
+the `hours` and `users` phases ([ADR 0016](adr/0016-publisher-owns-the-user-and-hour-tiers.md)), so
+the hour/day cube and the user tier are re-derived for the buckets a batch touched rather than left to
+the next batch rebuild. Each run also schedules one lightweight `DELETE` pruning interval rows superseded by
 `build_version`; the pipeline is append-only *except* for that prune. And on the graded `sonyliv`
 database the publisher is **installed but has never committed a run** (publish cursor at epoch,
 `last_committed_run = 0`, re-verified read-only 2026-08-01) — every live number there comes from
