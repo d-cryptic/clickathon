@@ -22,6 +22,7 @@ released in the final hours. Full statement: [docs/PROBLEM.md](docs/PROBLEM.md).
 | Understand the concurrency model and why | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | Know the field names / event types / data shape | [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) |
 | Write SQL the way this repo writes SQL | [docs/CONVENTIONS.md](docs/CONVENTIONS.md) |
+| **Set up the Go toolchain / write Go here** | [docs/GO.md](docs/GO.md) — `direnv allow`, then `make ci` |
 | Know what is tested and what to avoid | [docs/TESTS.md](docs/TESTS.md) |
 | Pick up the next task | [TODOS.md](TODOS.md) |
 | Resume a dead session | newest file in [docs/worksheets/](docs/worksheets/) |

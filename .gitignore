@@ -13,6 +13,19 @@ data/*.parquet
 data/*.native
 !data/.gitkeep
 
+# --- go ---
+# Build output. devbox.lock IS committed — it is the version pin.
+bin/
+dist/
+coverage.out
+coverage.html
+*.test
+*.prof
+# devbox's local nix profile / generated shell files
+.devbox/
+# direnv's cache, not .envrc itself
+.direnv/
+
 # --- local noise ---
 .DS_Store
 __pycache__/

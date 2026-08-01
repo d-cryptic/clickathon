@@ -1,0 +1,102 @@
+# Makefile — the one place that knows how to build, test and lint this repo.
+# CI runs these same targets, so "works on my machine" and "passes CI" cannot drift.
+
+BINARY      := sonyliv
+CMD_PKG     := ./cmd/sonyliv
+BIN_DIR     := bin
+COVER_FILE  := coverage.out
+
+VERSION     := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS     := -s -w -X main.version=$(VERSION)
+
+GO          ?= go
+GOFLAGS     ?=
+ARGS        ?=
+
+export CGO_ENABLED ?= 0
+
+.DEFAULT_GOAL := help
+
+## help: list the targets
+.PHONY: help
+help:
+	@grep -hE '^## ' $(MAKEFILE_LIST) | sed 's/^## /  /' | awk -F': ' '{printf "\033[36m%-16s\033[0m %s\n", $$1, $$2}'
+
+## build: compile the CLI into ./bin
+.PHONY: build
+build:
+	$(GO) build $(GOFLAGS) -trimpath -ldflags '$(LDFLAGS)' -o $(BIN_DIR)/$(BINARY) $(CMD_PKG)
+
+## run: build and run — make run ARGS="verify -target cloud"
+.PHONY: run
+run: build
+	./$(BIN_DIR)/$(BINARY) $(ARGS)
+
+## test: unit tests with the race detector
+.PHONY: test
+test:
+	CGO_ENABLED=1 $(GO) test -race -count=1 ./...
+
+## test-short: unit tests without the race detector (faster inner loop)
+.PHONY: test-short
+test-short:
+	$(GO) test -count=1 ./...
+
+## cover: test with coverage and print the per-function summary
+.PHONY: cover
+cover:
+	CGO_ENABLED=1 $(GO) test -race -count=1 -coverprofile=$(COVER_FILE) -covermode=atomic ./...
+	$(GO) tool cover -func=$(COVER_FILE) | tail -20
+
+## cover-html: open the coverage report in a browser
+.PHONY: cover-html
+cover-html: cover
+	$(GO) tool cover -html=$(COVER_FILE)
+
+## lint: golangci-lint over everything
+.PHONY: lint
+lint:
+	golangci-lint run ./...
+
+## lint-fix: golangci-lint with autofix — hooks FIX, they do not just flag
+.PHONY: lint-fix
+lint-fix:
+	golangci-lint run --fix ./...
+
+## fmt: gofmt + import grouping
+.PHONY: fmt
+fmt:
+	$(GO) fmt ./...
+	@command -v goimports >/dev/null 2>&1 && goimports -w -local github.com/d-cryptic/clickathon . || echo "goimports not found (devbox shell provides it)"
+
+## vet: go vet
+.PHONY: vet
+vet:
+	$(GO) vet ./...
+
+## tidy: sync go.mod/go.sum and fail if that produced a diff
+.PHONY: tidy
+tidy:
+	$(GO) mod tidy
+	@git diff --exit-code go.mod go.sum || { echo "go.mod/go.sum are stale — commit the tidy result"; exit 1; }
+
+## verify: run the CLI's verify against the cloud service
+.PHONY: verify
+verify: build
+	./$(BIN_DIR)/$(BINARY) verify -target cloud
+
+## hooks: point git at .githooks (fixing pre-commit hook)
+.PHONY: hooks
+hooks:
+	git config core.hooksPath .githooks
+	@chmod +x .githooks/*
+	@echo "git hooks installed from .githooks/"
+
+## ci: everything CI runs, in CI's order
+.PHONY: ci
+ci: tidy vet lint test build
+
+## clean: remove build and coverage artifacts
+.PHONY: clean
+clean:
+	rm -rf $(BIN_DIR) $(COVER_FILE)
