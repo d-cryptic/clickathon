@@ -73,9 +73,35 @@ the feature touches applies cleanly to a **scratch** database, never the graded 
 numbers the feature claims rather than trusting the ones in its commit message. A feature whose
 claimed number cannot be reproduced does not promote — that is the whole point of this gate.
 
-**4 · The correctness gate.** `TARGET=cloud tools/reconcile.sh` must still report **17,028 minutes ·
-0 mismatched · peak 2,917**. Any movement is a finding, not a rounding difference, and stops the
-promotion until explained.
+**4 · The correctness gate — two measurements, not one.** Revised 2026-08-02 after W1 refused twice
+and was right both times.
+
+**4a · The graded database passes the gate matching its DEPLOYED spec.** Currently that is `dev`'s
+gate: **17,028 minutes · 0 mismatched · max_abs_diff 0 · peak 2,917**. This is the correctness
+measurement — is the database right?
+
+**4b · Run the promoting branch's OWN gate too, and account for any difference.** If it disagrees,
+the difference must be explained as **known spec skew** with the commit that causes it named. Any
+disagreement that cannot be attributed to a specific known change is a **failure**.
+
+**Why this is stricter, not weaker.** The original wording assumed the graded database matched
+`main`. It does not: the 2026-08-02 recovery rebuild ran `dev`'s build, so the graded database now
+embodies `dev`'s spec — including ADR 0009's same-second resume fix (`>` → `>=`), which affects
+**2,502 of 27,340 pauses (9.15%)**. `main`'s gate still carries the strict `>` and therefore reports
+**177 mismatched, max_abs_diff 39** against a database that is *correct*. Running a stale gate
+measures spec difference, not correctness — 4b now surfaces that as its own signal instead of
+letting it masquerade as either a pass or a data fault.
+
+**The orchestrator's error, recorded so the sequencing lesson survives:** rebuilding the graded
+database from `dev` while promoting wave-by-wave from `main` put the deployed spec *ahead* of the
+branch being promoted. Either the rebuild should have come from `main` plus the wave under
+promotion, or wave 2 should have been promoted first. It could not have come from `main` — that
+would have undone ADR 0009 and reintroduced a known bug — so the real consequence is below.
+
+**Wave 2 is now on the critical path.** `main` currently ships SQL and docs that do not match the
+deployed database. Until ADR 0009/0011/0014 are promoted, every wave-1-based branch will show 4b
+skew, and `main` is not independently releasable in the sense this document requires. Promote wave 2
+next, and do not let other waves overtake it.
 
 **5 · Cross-model validation.** A **`claude-fable-5`** agent — a different model from the one that
 built and the one that merged — independently verifies the feature's claims against the live
