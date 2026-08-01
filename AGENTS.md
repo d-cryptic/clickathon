@@ -29,6 +29,8 @@ what is verified, what is broken, and what is still missing, in one page.
 | **Set up the Go toolchain / write Go here** | [docs/GO.md](docs/GO.md) — `direnv allow`, then `make ci` |
 | Know what is tested and what to avoid | [docs/TESTS.md](docs/TESTS.md) |
 | Pick up the next task | [TODOS.md](TODOS.md) |
+| **Spawn the next worktree** | [docs/WORKTREE_QUEUE.md](docs/WORKTREE_QUEUE.md) — prioritised, brief-ready, with ADR numbers pre-assigned |
+| **Read the cross-model audit** | [docs/codex-validation/](docs/codex-validation/) — Codex reviewing our claims, not our code |
 | Resume a dead session | newest file in [docs/worksheets/](docs/worksheets/) |
 | Run something (query, bench, reconcile, load) | [tools/README.md](tools/README.md) |
 | **Bring up ClickStack / see the concurrency chart** | [docs/CLICKSTACK.md](docs/CLICKSTACK.md) — `make stack-up && make clickstack` |

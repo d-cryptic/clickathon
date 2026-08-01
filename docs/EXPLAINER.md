@@ -455,9 +455,13 @@ four ways — and none of those three were in our docs before this pass.
 Why this shape at all:
 
 ```
- explode every session to one row per active minute   ~185,000,000 rows
- our delta serving layer                                  ~28,000 rows
-                                                          ~6,600× smaller
+ explode every session to one row per ACTIVE minute        148,900 rows   <- measured
+ our delta serving layer                                   28,073 rows
+                                                              5.3× smaller
+
+ (a naive dense grid of every session x every minute of the 12-day span would be
+  185,015,382 rows — but no implementation would ever build that, so quoting it
+  as the comparison overstates the win. 5.3× is the honest number.)
 ```
 
 ## C.2 · Layer by layer
@@ -948,8 +952,8 @@ mandated session-aware vs session-independent comparison can only run at the coa
 
 > *"We built a foreground-only concurrency model on ClickHouse that excludes backgrounded and paused
 > time. We proved the exclusion matters — 33.6% of apparent watch time, and a 21.3% over-count
-> eliminated at the peak minute. The serving layer is an hour-clipped delta table, 6,600× smaller than
-> per-minute explosion, and it reconciles exactly against raw events on every one of 17,028 minutes.
+> eliminated at the peak minute. The serving layer is an hour-clipped delta table, 5.3× smaller than
+> per-minute expansion of the active ranges, and it reconciles exactly against raw events on every one of 17,028 minutes.
 > Every design decision was settled by a measurement, and four overturned our own prior plan. We know
 > of three definitional questions we cannot resolve without the answer key, we have measured what each
 > is worth, and we can show the envelope."*
