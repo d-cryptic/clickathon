@@ -22,6 +22,7 @@
 | `clickstack-bootstrap.sh` | headless ClickStack setup; prints the OTLP ingestion key |
 | `clickstack-sources.sh` | point the SELF-HOSTED HyperDX at our concurrency views. Idempotent |
 | `clickstack-cloud.sh` | provision the HyperDX built into ClickHouse Cloud — 24 sources, SIX dashboards, saved searches — via the Cloud API. Idempotent (dashboards converge by PUT) |
+| `clickstack-alerts.sh [--validate\|--verify]` | concurrency-**decline** detection + the three-way ended/broken/boring classifier: one dashboard, one webhook, 3 alerts on hosted HyperDX. Idempotent. `--validate` regenerates every threshold's evidence read-only; `--verify` reads the alerts back signed-in. Read-only against ClickHouse ([docs/DECLINE_ALERTING.md](../docs/DECLINE_ALERTING.md)) |
 | `clickstack-artifact.sh` | regenerate the offline demo fallback `docs/artifacts/2026-08-01-clickstack-dashboards.html` from live serving-view data |
 | `../evidence/capture.sh` | the evidence harness — parts, compression, pruning, latency, MV cost |
 | `scale-test.sh [N...]` | **THE SCALE EVIDENCE** — run the model at 1x/10x/100x the provided file and write `evidence/scale.txt`. Local only, own scratch databases, drops them after. `KEEP=1` to inspect |

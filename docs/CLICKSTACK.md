@@ -184,8 +184,14 @@ sources without the column would error rather than no-op.
 
 **Hosted has no OTLP path** (no `otel_*` tables — verified), so pipeline health here is
 cloud-native; the OTLP-fed twin from `sonyliv observe` lives on the local stack
-([OBSERVABILITY.md](OBSERVABILITY.md)). **No alerts, deliberately**: the dataset is frozen, so a
-threshold alert either never fires or fires forever.
+([OBSERVABILITY.md](OBSERVABILITY.md)).
+
+**Alerts: three, on concurrency decline** — `tools/clickstack-alerts.sh`, an eighth dashboard and its
+own document, [DECLINE_ALERTING.md](DECLINE_ALERTING.md). This file previously said *"No alerts,
+deliberately: the dataset is frozen, so a threshold alert either never fires or fires forever"*. That
+holds only for an alert anchored to `now()`; these anchor every window to
+`v_cc_watermark.sealed_watermark`, the data's own clock, which is the correct anchor on a frozen file
+and on a live stream alike.
 
 A re-run **PUTs** every dashboard rather than skipping it, so the definition in the script is the
 source of truth and a hand-edit in the UI cannot silently outlive it. It runs each payload through `POST /clickstack/dashboards/validate` *before*
