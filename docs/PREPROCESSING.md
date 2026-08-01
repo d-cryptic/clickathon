@@ -5,8 +5,10 @@
 > **quarantine** only rows the model cannot use correctly (no session identity / no usable timestamp)
 > into `ev_quarantine` with one reason code per row, **keep-and-count** everything else suspicious
 > (`v_preprocess_flags`), and **normalise on read** for value defects (ADR 0011, extended with a
-> unicode scrub). Measured: the provided 905,558-row file quarantines **0** rows and flags **0**; the
-> sweep costs **327 ms / 122.63 MiB** on the full file. Evidence: `evidence/preprocessing.txt`.
+> unicode scrub). One stage EARLIER, at the cast boundary, **ADR 0030**'s all-`String` landing table
+> catches what the type system rejects at the door and `q_reason` therefore never sees. Measured: the
+> provided file quarantines **0** rows, flags **0**, and casts **0** to the ledger; the sweep costs
+> **327 ms / 122.63 MiB**. Evidence: `evidence/preprocessing.txt`, `evidence/landing/identity.txt`.
 
 ## The one-table answer
 
@@ -27,7 +29,7 @@ generator's output and the unseen day, where these views are the first read afte
 
 | Input class | Example | Treatment | Why this and not the others |
 |---|---|---|---|
-| Type mismatch (unparseable under the typed load) | `content_id = "abc"`, non-numeric timestamp | **Reject at load** — structural, not a rule we wrote | The loader's typed `input()` cannot store it. Today one such row fails the *whole batch* (see gap 1 below). Empty numeric CSV fields do **not** reject — they parse to 0 and the epoch-zero timestamp is then quarantined by rule |
+| Type mismatch (unparseable under the typed load) | `content_id = "abc"`, non-numeric timestamp | **Cast ledger at load** ([ADR 0030](adr/0030-all-string-landing-table-makes-cast-failure-per-row.md)) — `ev_cast_quarantine`, one row per source row, raw text preserved | Since ADR 0030 the loader lands every value as `String` first, so this class costs its **own row**, not the batch. An unparseable `event_timestamp` is `rejected` (no placeable time); an unparseable `content_id` or `session_start_epoch` is `coalesced` — substituted, row kept, and recorded. Empty numeric CSV fields no longer parse to 0: they are uncastable, so an empty timestamp is now rejected at the boundary rather than quarantined a stage later as epoch-zero |
 | No session identity | `video_session_id` empty, whitespace-only, or zero-width-only | **Quarantine** `session_id_unusable` | The model is (session × time); an unattributable row can only corrupt. Quarantine, not reject: the row stays countable and byte-recoverable |
 | Identity not valid UTF-8 | sid/uid containing `0xC3 0x28` | **Quarantine** `identity_not_utf8` | Equality on mangled bytes is tool-dependent; an id that may or may not equal itself cannot attribute. Recoverable if the key disagrees |
 | Timestamp outside [2020-01-01, 2035-01-01) | epoch-zero, 1999, DateTime64 saturation (2299) | **Quarantine** `ts_out_of_range` | Catches the real failure signatures (empty→0, ms/s/ns confusion) while no clock-skewed *real* viewer can fall out of a ±9-year window. Judgement call, recorded in ADR 0025 |
@@ -73,10 +75,14 @@ spellings grouped with `hin` on read. Full transcript: [evidence/preprocessing.t
 
 ## Known gaps, owned openly
 
-1. **A type-mismatched row still fails the whole load batch.** The typed `input()` in
-   `tools/load.sh` (T1's lane) rejects the batch, not the row. The tolerant recipe — stage the CSV
-   all-`String`, cast-or-quarantine with `q_reason` — is written up in ADR 0025 §Consequences for
-   whoever owns the loader to adopt.
+1. ~~**A type-mismatched row still fails the whole load batch.**~~ **CLOSED** by
+   [ADR 0030](adr/0030-all-string-landing-table-makes-cast-failure-per-row.md) (Y1, 2026-08-02): the
+   loader now lands both CSVs all-`String` before typing either, and casts forward per row into
+   `ev_raw` or `ev_cast_quarantine`. Measured on the real file with one corrupted timestamp —
+   905,557 rows loaded instead of 0, `content_dim` whole instead of half. What ADR 0030 does **not**
+   cover, and what still belongs here: a *castable but wrong* value (seconds where milliseconds were
+   meant) is a valid `UInt64`, so no cast can object — that one is caught by `ts_out_of_range` in
+   this file, which means it depends on gap 2 below. Evidence: `evidence/landing/identity.txt`.
 2. **`v_ev_model_input` is not wired into the model or the gate.** `sql/30_build_intervals.sql` and
    `sql/90_reconcile.sql` both read `ev_raw` directly; switching them is a two-file change that must
    land together (a model that skips a row the gate still counts is a mismatch the gate will —

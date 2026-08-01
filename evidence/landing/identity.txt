@@ -1,0 +1,141 @@
+LANDING BOUNDARY (ADR 0030) — proof
+commit: 0348267   server: 26.7.1.1315
+raw: data/ch-hackathon-raw-data.csv   content: data/ch-hackathon-content-data.csv
+
+== 1  IDENTITY — the happy path is unchanged, byte for byte
+
+  ev_raw      pre-landing : 905558 11323271608680909621 15538575503364151543
+  ev_raw      landing     : 905558 11323271608680909621 15538575503364151543
+  content_dim pre-landing : 33464 17908377308551298947 10117155906616985401
+  content_dim landing     : 33464 17908377308551298947 10117155906616985401
+  (count · sum of per-row cityHash64 over every column · bitXor of the same)
+
+  PASS  ev_raw fingerprint identical
+  PASS  content_dim fingerprint identical
+  PASS  landing produced no cast-ledger rows = 0
+
+== 1b THE GATE — a model built through the landing table still reconciles
+   (sql/90_reconcile.sql recomputes from ev_raw with a different implementation
+    of the same spec, so it tests the pipeline instead of agreeing with itself)
+
+    == target: local
+    == 1/6  session_intervals (gap + pause, ADR 0001/0007)
+       intervals: 30323 over 10866 sessions
+    == 2/6  cc_user_minute (uniqExact per bucket, replaced not unioned — ADR 0016)
+       user-minute buckets: 91692
+    == 3/6  cc_minute_delta (hour-clipped, ADR 0003)
+       delta rows: 28073  opens 20002  closes 16826
+    == 4/6  cc_hour_agg (the hour tier, ADR 0003)
+       hour rows: 98  peak 2917
+    == 5/6  views
+       ok
+    == 6/6  normalisation UDFs + views (ADR 0011)
+       ok
+    == reconcile: delta serving layer vs interval expansion, every minute
+       PASS  3732 minutes, peak 2917
+    == reconcile: user tier vs interval expansion, every minute
+       PASS  3732 minutes, user peak 2844
+    == reconcile: hour tier peak vs minute tier peak
+       PASS  hour tier peak 2917 = minute tier peak
+
+     ┌─ord─┬─scope───┬─c1─────────────────────┬─c2───────────┬─c3─────────────┬─c4────────┬─verdict─┐
+  1. │   0 │ SUMMARY │ minutes_compared=17028 │ mismatched=0 │ max_abs_diff=0 │ peak=2917 │ PASS    │
+  2. │   2 │ sample  │ 2026-07-14 15:43:00    │ 1            │ 1              │ 0         │ PASS    │
+  3. │   2 │ sample  │ 2026-07-16 12:35:00    │ 0            │ 0              │ 0         │ PASS    │
+  4. │   2 │ sample  │ 2026-07-17 08:56:00    │ 0            │ 0              │ 0         │ PASS    │
+  5. │   2 │ sample  │ 2026-07-26 10:56:00    │ 2917         │ 2917           │ 0         │ PASS    │
+  6. │   2 │ sample  │ 2026-07-26 11:30:00    │ 197          │ 197            │ 0         │ PASS    │
+     └─────┴─────────┴────────────────────────┴──────────────┴────────────────┴───────────┴─────────┘
+
+  PASS  no MISMATCH
+  PASS  minutes compared = 17028
+  PASS  mismatched = 0
+  PASS  peak = 2917
+
+== 2  BLAST RADIUS — the real file, exactly one corrupted event_timestamp
+   (docs/codex-validation/004-triage.md §D1 corrupted data row 499,999 the same way)
+
+                  pre-landing      landing
+  ev_raw                    0       905557
+  content_dim           33464        33464
+
+  PASS  one bad row costs one row (of 905558) = 905557
+  PASS  the loader still succeeds = 0
+  PASS  content_dim is whole, not half = 33464
+  PASS  the row is in the ledger = 1
+  PASS  its raw text survived = NOT_A_TIMESTAMP
+
+  the ledger entry:
+   ┌─source─┬─reason───────────────┬─disposition─┬─detail──────────────────────────┬─copies─┐
+1. │ ev_raw │ cast_event_timestamp │ rejected    │ event_timestamp=NOT_A_TIMESTAMP │      1 │
+   └────────┴──────────────────────┴─────────────┴─────────────────────────────────┴────────┘
+
+== 3  SWEEP — one malformation per file, each measured alone
+
+  case      | rc  ev/content | rc  ev/content ledger                       min(event_timestamp)
+  ----------------------------------------------------------------------------------------------------
+  clean     | 0   2/1        | 0   2/1        -                            2026-07-26 10:54:01.252
+  text      | 27  0/1        | 0   1/1        cast_event_timestamp:rejected 2026-07-26 10:55:01.252
+  negative  | 72  0/1        | 0   1/1        cast_event_timestamp:rejected 2026-07-26 10:55:01.252
+  decimal   | 27  0/1        | 0   1/1        cast_event_timestamp:rejected 2026-07-26 10:55:01.252
+  empty     | 0   2/1        | 0   1/1        cast_event_timestamp:rejected 2026-07-26 10:55:01.252
+  seconds   | 0   2/1        | 0   2/1        -                            1970-01-21 15:51:03.241
+  overflow  | 0   2/1        | 0   1/1        cast_event_timestamp:rejected 2026-07-26 10:55:01.252
+  quoted    | 0   2/1        | 0   2/1        -                            2026-07-26 10:54:01.252
+
+  Read the two rc columns first: 27 and 72 are whole-file losses. The landing
+  column is 0 everywhere — every class costs its own row and nothing else.
+
+  'seconds' is the one the cast cannot catch: 1785063241 IS a valid UInt64, so
+  no cast can object. It lands in 1970 and is caught one stage later, by ADR
+  0025's ts_out_of_range rule — demonstrated here:
+    cast ledger (load time, ADR 0030): 0 rows
+   ┌─reason──────────┬─rows─┬─sessions─┬──────────────first_seen─┐
+1. │ ts_out_of_range │    1 │        1 │ 1970-01-21 15:51:03.241 │
+   └─────────────────┴──────┴──────────┴─────────────────────────┘
+  PASS  the castable-but-wrong timestamp is quarantined by rule = ts_out_of_range
+
+  What landing does NOT cover: a STRUCTURAL CSV fault — a row with the wrong
+  number of fields — still costs the file, because the failure is in the reader
+  before any column has a value to hold. It does now fail in phase A, so
+  content_dim is no longer left populated beside an empty ev_raw:
+  PASS  structural fault still refuses the file (exit 27)
+  PASS  and content_dim was NOT half-populated = 0
+
+== 4  ROLLBACK — a phase-B fault leaves the typed tables as it found them
+
+  PASS  the load failed loudly (exit 1)
+  PASS  ev_raw rolled back = 0
+  PASS  content_dim rolled back = 0
+  PASS  ev_landing kept — the only record = 2
+
+  and the same property for a REFUSED load: the loader applies sql/05_landing.sql
+  itself, so it must do that AFTER the double-load guard — a refusal that quietly
+  created three tables would not be a refusal.
+  PASS  the non-empty database was refused (exit 1)
+  PASS  object count unchanged by the refusal = 6
+  PASS  no landing objects created = 0
+
+== 5  COST — what the extra materialisation actually costs
+
+  storage, after loading the real file (ev_raw + content_dim vs what landing adds):
+   ┌─typed────┬─landing_adds─┬─pct_over_typed─┐
+1. │ 6.98 MiB │ 8.58 MiB     │          122.9 │
+   └──────────┴──────────────┴────────────────┘
+
+  server-side INSERT time and bytes read for the two identity loads above.
+  Wall clock is not reported: this container is shared with other worktrees
+  and its wall clock swings ~2x run to run. See ADR 0030 for a 14-run series.
+   ┌─route───────┬─server_ms─┬─read───────┬─statements─┐
+1. │ landing     │      1848 │ 564.90 MiB │          6 │
+2. │ pre-landing │      1706 │ 333.07 MiB │          2 │
+   └─────────────┴───────────┴────────────┴────────────┘
+
+  ev_landing is the whole cost and it is reclaimable in one statement once a
+  load is verified — TRUNCATE TABLE ev_landing. What that gives up is the raw
+  text of the rows that DID type; the rows that did not are in the ledger,
+  which is tiny. --replace already truncates it.
+
+------------------------------------------------------------
+landing test PASSED · 22 assertions
+------------------------------------------------------------
