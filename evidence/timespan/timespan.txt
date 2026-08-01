@@ -297,3 +297,131 @@ POINT d180_e278k — span 180 days, density 278,000 events/day
     content rotation: 6 of the top-20 titles of the first month are still top-20 in the last month
 
   [intervals]  FAILED at default: Received exception from server (version 26.7.1): Code: 241. DB::Exception: Received from localhost:9000. DB::Exception: (total) memory limit exceeded: would use 5.30 GiB (attempt to allocate chunk of 75.87 MiB), current RSS: 4.11 GiB, maximum: 5.27 GiB. OvercommitTracker decision: Query was selected
+  [intervals+spill]  273175 ms  ·  peak mem 2.74 GiB  ·  read 49,759,554 rows  ·  wrote 1,614,635 rows  ·  SPILLED 312.28 MiB to disk
+  [users]  65272 ms  ·  peak mem 2.24 GiB  ·  read 1,647,403 rows  ·  wrote 9,410,327 rows  ·  SPILLED 235.92 MiB to disk
+  [deltas]  14016 ms  ·  peak mem 1.40 GiB  ·  read 3,294,806 rows  ·  wrote 2,463,659 rows
+  [houragg]  45449 ms  ·  peak mem 2.02 GiB  ·  read 2,463,659 rows  ·  wrote 3,049,881 rows  ·  SPILLED 258.54 MiB to disk
+
+  ROWS  intervals 1,614,635  ·  delta 2,463,659  ·  hour cube 3,049,881  ·  user 9,410,327  ·  stateless 9,816,118
+  hour cube vs delta tier: 1.24x the rows  ·  1.19x the bytes
+
+  STORAGE — system.parts, active only, no OPTIMIZE FINAL beforehand.
+  table                            rows      on disk   uncompressed    parts   partns  max p/ptn
+  ev_raw                 49.76 million  438.41 MiB      8.53 GiB     710     181         5
+  session_intervals       1.61 million  100.73 MiB    280.25 MiB       2       1         2
+  cc_user_minute          9.41 million   63.95 MiB    353.00 MiB     724     181         4
+  cc_hour_agg             3.05 million   34.77 MiB    125.08 MiB      18       6         3
+  cc_minute_delta         2.46 million   29.21 MiB     99.16 MiB     543     181         3
+  cc_minute_stateless     9.82 million   25.32 MiB    293.29 MiB     192     181         3
+  content_dim           33.46 thousand  367.90 KiB      1.12 MiB       1       1         1
+  ts_min_e              65.54 thousand  264.65 KiB    384.00 KiB       1       1         1
+  ts_min_n              65.54 thousand  264.57 KiB    384.00 KiB       1       1         1
+  gen_content           33.46 thousand  264.46 KiB    392.16 KiB       1       1         1
+  ts_day                65.54 thousand  259.27 KiB    512.00 KiB       1       1         1
+  gen_ev                 4.10 thousand   17.45 KiB    186.22 KiB       1       1         1
+  gen_lut                       226.00    3.84 KiB      9.94 KiB       1       1         1
+  point on-disk total: 704.77 MiB
+
+  SERVING COST — median of 3, plus parts/marks actually selected (query_log):
+  query                                             ms     rows read   bytes read   parts    marks  result
+  W1 window-range, ONE day (hour tier)            56.2        24,577     1.01 MiB       3        3  169/3888120/45/24/0
+  W2 window-range, 30 days                        35.2        49,153     2.02 MiB       6        6  691/101731740/39.25/720/0
+  W3 window-range, WHOLE history (180 d)          47.2       147,457     6.05 MiB      18       18  691/575721000/37.02/4320/0
+  M1 minute tier, whole history (contrast)        88.8     2,463,659    28.19 MiB     543      551  691
+  M2 minute tier, one day (pruning check)         22.8        16,820   197.11 KiB       3        3  169
+
+  reconcile (delta serving vs interval expansion, every minute of 180 days): PASS  259429 minutes compared, peak 691
+  designed-truth probe (python truth vs interval expansion): PASS  186 designed minutes, peak 40, month/midnight-crossing blocks included
+
+  OLD-STRAGGLER PUBLISH — event-time ~173 days before span end:
+    straggler: 000A1D3F0303BF7959C9…  heartbeat at 2026-02-07 13:37:53.000 (bridges a gap in week 1)
+      == run 1785621734771  ·  1 session(s) claimed  ·  cursor 1970-01-01 00:00:00.000 -> 2026-08-01 22:02:10.623
+         negated   4 corrective delta rows   85 ms
+         derived   4 intervals   199 ms   (window 2026-02-07 13:29:42.000 .. 2026-02-07 13:54:27.000)
+         pruned    superseded intervals   93 ms
+         emitted   2 delta rows   71 ms
+         hours     2398 hour-cube rows re-derived   59 ms
+         users     1020 user-minute buckets re-derived   490 ms
+         committed cursor now 2026-08-01 22:02:10.623
+    per-phase: negated 85ms · derived 199ms · pruned 93ms · emitted 71ms · hours 59ms · users 490ms
+    reconcile after the old-straggler publish: PASS  259429 minutes
+--------------------------------------------------------------------------
+SUMMARY — every point, side by side
+--------------------------------------------------------------------------
+point            days   events/day        events   intervals         delta   hour_cube   user_bkts     on disk    recon
+d12_e694k          12      694,000     8,295,351     269,050       408,545     439,483   1,483,834  110.24 MiB     PASS
+d60_e139k          60      139,000     8,307,711     269,433       410,546     513,467   1,566,916  113.41 MiB     PASS
+d180_e46k         180       46,000     8,245,018     267,438       407,815     559,399   1,577,978  117.20 MiB     PASS
+d12_e4170k         12    4,170,000    49,759,554   1,614,635     2,438,222   2,363,397   8,527,162  662.96 MiB     PASS
+d60_e834k          60      834,000    49,759,554   1,614,635     2,459,225   2,830,449   9,175,268  687.79 MiB     PASS
+d180_e278k        180      278,000    49,759,554   1,614,635     2,463,659   3,049,881   9,410,327  704.77 MiB     PASS
+--------------------------------------------------------------------------
+BUILD COST — per stage per point (system.query_log)
+--------------------------------------------------------------------------
+point          stage                          ms    peak memory
+d12_e694k      intervals                    5682       2.45 GiB
+d12_e694k      users                        1251     923.62 MiB
+d12_e694k      deltas                        706     243.49 MiB
+d12_e694k      houragg                      1023     487.96 MiB
+d60_e139k      intervals                    5179       2.45 GiB
+d60_e139k      users                        2042     991.56 MiB
+d60_e139k      deltas                       1241     246.00 MiB
+d60_e139k      houragg                      1728     499.73 MiB
+d180_e46k      intervals                   23325       2.55 GiB
+d180_e46k      users                        3319     930.10 MiB
+d180_e46k      deltas                       1246     243.98 MiB
+d180_e46k      houragg                      1996     776.02 MiB
+d12_e4170k     intervals                  169781       3.11 GiB
+d12_e4170k     users                       24944       2.24 GiB
+d12_e4170k     deltas                       5593       1.78 GiB
+d12_e4170k     houragg                     16876       2.32 GiB
+d60_e834k      intervals                  208814       3.14 GiB
+d60_e834k      users                       57729       2.23 GiB
+d60_e834k      deltas                       7379       1.55 GiB
+d60_e834k      houragg                     28616       2.27 GiB
+d180_e278k     intervals+default          FAILED              -
+d180_e278k     intervals+spill            273175       2.74 GiB
+d180_e278k     users                       65272       2.24 GiB
+d180_e278k     deltas                      14016       1.40 GiB
+d180_e278k     houragg                     45449       2.02 GiB
+--------------------------------------------------------------------------
+SERVING COST — the span claim, side by side (median ms · bytes read · parts)
+--------------------------------------------------------------------------
+point          query         ms     rows read   bytes read   parts
+d12_e694k      W1           8.7         8,193   272.00 KiB       1
+d12_e694k      W2          11.3         8,193   272.00 KiB       1
+d12_e694k      W3           9.2         8,193   272.00 KiB       1
+d12_e694k      M1           5.2       408,545     4.68 MiB      13
+d12_e694k      M2           2.6        37,817   443.17 KiB       1
+d60_e139k      W1          34.7         8,193   272.00 KiB       1
+d60_e139k      W2          33.5        16,385   544.00 KiB       2
+d60_e139k      W3          15.7        24,025   797.67 KiB       3
+d60_e139k      M1          12.9       410,546     4.70 MiB      61
+d60_e139k      M2           9.6         5,951    69.74 KiB       1
+d180_e46k      W1          20.2         8,193   272.00 KiB       1
+d180_e46k      W2          28.7        16,385   544.00 KiB       2
+d180_e46k      W3          13.6        49,153     1.59 MiB       6
+d180_e46k      M1          35.1       407,815     4.67 MiB     181
+d180_e46k      M2           5.7         2,865    33.57 KiB       1
+d12_e4170k     W1          12.1        24,577     1.01 MiB       3
+d12_e4170k     W2          14.6        24,577     1.01 MiB       3
+d12_e4170k     W3          10.0        24,577     1.01 MiB       3
+d12_e4170k     M1          10.3     2,438,222    27.90 MiB      39
+d12_e4170k     M2           4.4       224,631     2.57 MiB       3
+d60_e834k      W1          50.6        24,577     1.01 MiB       3
+d60_e834k      W2          27.6        49,153     2.02 MiB       6
+d60_e834k      W3          36.0        73,729     3.02 MiB       9
+d60_e834k      M1          47.7     2,459,225    28.14 MiB     183
+d60_e834k      M2          13.1        35,400   414.84 KiB       3
+d180_e278k     W1          56.2        24,577     1.01 MiB       3
+d180_e278k     W2          35.2        49,153     2.02 MiB       6
+d180_e278k     W3          47.2       147,457     6.05 MiB      18
+d180_e278k     M1          88.8     2,463,659    28.19 MiB     543
+d180_e278k     M2          22.8        16,820   197.11 KiB       3
+--------------------------------------------------------------------------
+DISK — peak scratch footprint across points (sum of per-point on-disk totals,
+       points built and dropped sequentially so concurrent peak is ~the largest
+       single point): 2.34 GiB
+free disk now: 404.81 GiB  (was 406.98 GiB at start)
+all scratch databases (tspan_*) dropped.
+done 2026-08-01T22:02:22Z
