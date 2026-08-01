@@ -1,0 +1,93 @@
+CHECK 4 — ISOLATION EXPERIMENT. The spec-skew diagnosis in 04f is now PROVEN, not inferred.
+Date: 2026-08-02 · branch commit 64f2ed7 · read-only throughout (SELECT only; verified before running).
+Re-derivable by a different model from the commands below without trusting this file.
+
+== The question 04f left open
+
+04f argued from three circumstantial facts (direction of the delta, its clustering in the
+dense window, dev's gate passing) that dev commit 0c0f020's `>` -> `>=` pause/resume change
+explains the 177 mismatched minutes. That is inference. The rebuild also applied ADR 0016,
+0021 and 0022, so a rival explanation was available: some OTHER dev change, or residual data
+damage, could have been the cause.
+
+This experiment removes the rival explanations by changing exactly one thing.
+
+== Method — one variable, two characters
+
+The gate (sql/90_reconcile.sql) is a pure SELECT: it recomputes truth from ev_raw and compares.
+Running a modified copy touches nothing. Verified write-free first:
+
+  grep -inE '^\s*(insert|create|drop|alter|truncate|optimize|rename|attach|detach)' sql/90_reconcile.sql
+    -> no matches
+
+Variant A = this branch's committed gate with ONLY the two `p2.rs` resume lookups relaxed:
+
+  sed 's/arrayFirst(x -> x > p, p2\.rs)/arrayFirst(x -> x >= p, p2.rs)/g' \
+      sql/90_reconcile.sql > /tmp/90_variantA.sql
+
+  diff <(git show HEAD:sql/90_reconcile.sql) /tmp/90_variantA.sql
+    -> exactly 2 changed lines, 104 and 108, both `x > p, p2.rs` -> `x >= p, p2.rs`
+
+Nothing else was touched. In particular the `r.run_ts` lookup stays STRICT (`>`), matching
+0c0f020's own note that the pause is itself in run_ts at p; and dev's second change — the
+`arrayFilter(w -> w.2 > w.1, ...)` zero-length-window drop — was deliberately NOT applied,
+to see whether the `>=` alone accounts for everything.
+
+  curl "https://$CH_HOST:$CH_PORT/?database=sonyliv&default_format=PrettyCompact" \
+    --user "$CH_USER:$CH_PASSWORD" --data-binary @/tmp/90_variantA.sql
+
+== Result — the entire discrepancy is that one change
+
+  branch gate as committed (04d) : 17,028 compared · 177 mismatched · max_abs_diff 39 · peak 2,887 · MISMATCH
+  variant A (>= on p2.rs only)   : 17,028 compared ·   0 mismatched · max_abs_diff  0 · peak 2,917 · PASS
+  origin/dev's gate      (04e)   : 17,028 compared ·   0 mismatched · max_abs_diff  0 · peak 2,917 · PASS
+
+All three ran against the same database (sonyliv) within the same session, minutes apart.
+
+Two characters move the branch's own gate from 177 mismatched to byte-perfect agreement, and
+land on precisely the expected peak of 2,917. Therefore:
+
+- The graded database is NOT damaged. It is internally consistent with dev's model spec.
+- No other dev change is implicated. ADR 0016 / 0021 / 0022, applied by the same rebuild, are
+  ruled out as causes of the check-4 failure: they are present in the database under both
+  variants, and the gate passes under one of them.
+- dev's second edit (dropping zero-length tie windows) is NOT needed for agreement on this
+  dataset. It is a correctness/robustness change on its own merits — it prevents one interval
+  being split into two abutting ones — but it is not what the 177 minutes were about.
+- The check-4 expectation "0 mismatched · peak 2,917" is reachable from this branch ONLY by
+  adopting a wave-2 model spec change. That is a promotion-ORDER conflict, not a defect in
+  the wave-1 feature under test.
+
+== Why this does not change the verdict
+
+The experiment proves the cause; it does not license the promotion. Applying `>=` to this
+branch would mean shipping ADR 0009's model change inside wave 1 — the exact granularity
+violation docs/PROMOTION.md check 1 forbids, and it would promote a model change whose own
+checks 3 and 5 have never been run. The variant file was never committed to the branch and
+the branch's gate is unchanged.
+
+W1 rows stay GATE 4. The orchestrator's two options are unchanged from 04f, but option (b)
+is now the better-founded one:
+
+  (a) accept 04e/04g as check-4 evidence for a wave that touches no model SQL; or
+  (b) promote wave 2's ADR 0009 pair (0c0f020, 5743b39) NEXT — the promotion order already
+      puts it immediately after wave 1 — then re-run W1's check 4 from a rebased branch whose
+      gate matches the deployed spec. This needs no exception to the gate rules, and it is
+      the only option that leaves `main` self-consistent: main's model SQL currently disagrees
+      with the graded database it is supposed to describe.
+
+Option (b) carries a consequence worth stating plainly: until ADR 0009 is promoted, `main`
+cannot reproduce the graded service's numbers with its own code. That is a pre-existing
+condition created by the rebuild, not by this promotion — but it means `main` is currently
+NOT releasable in the sense docs/PROMOTION.md requires ("main must be releasable after every
+single promotion"), and wave 2 is what repairs it.
+
+== Commands, in order, for an independent re-run
+
+  git checkout chore/promotion-w1-foundations          # 64f2ed7
+  grep -inE '^\s*(insert|create|drop|alter|truncate|optimize)' sql/90_reconcile.sql
+  sed 's/arrayFirst(x -> x > p, p2\.rs)/arrayFirst(x -> x >= p, p2.rs)/g' sql/90_reconcile.sql > /tmp/90_variantA.sql
+  diff <(git show HEAD:sql/90_reconcile.sql) /tmp/90_variantA.sql        # expect exactly lines 104,108
+  curl "https://$CH_HOST:$CH_PORT/?database=sonyliv&default_format=PrettyCompact" \
+       --user "$CH_USER:$CH_PASSWORD" --data-binary @/tmp/90_variantA.sql
+  # expect: minutes_compared=17028 · mismatched=0 · max_abs_diff=0 · peak=2917 · PASS
