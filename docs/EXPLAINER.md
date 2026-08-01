@@ -54,8 +54,8 @@ Multiply that across millions of viewers and you have over-sold your ad inventor
 over-provisioned your servers. **The whole problem exists to kill that over-count.**
 
 On our actual file the over-count is not a rounding error: naive session-span counts **2,976.9 hours**
-of watch time against the foreground-only model's **1,949.3 hours** — **34.5% of apparent watch time
-is backgrounded or paused**. At the peak minute, 3,708 naive against **2,887** actual.
+of watch time against the foreground-only model's **1,978.1 hours** — **33.6% of apparent watch time
+is backgrounded or paused**. At the peak minute, 3,708 naive against **2,917** actual.
 
 ## What we are actually handed
 
@@ -261,9 +261,10 @@ exactly as [ADR 0007](adr/0007-gate-answers-pause-needs-explicit-handling.md) re
  pauses with no later resume at all    6,124  (22.4%)
 ```
 
-`sql/30_build_intervals.sql` closes a paused window at `arrayFirst(x -> x > p, resumes)` — the first
-resume after the pause. If that resume is spurious (fired by a seek or buffer recovery), the window
-closes early and the remainder is booked as watch time.
+`sql/30_build_intervals.sql` closes a paused window at `arrayFirst(x -> x >= p, resumes)` — the first
+resume at or after the pause ([ADR 0009](adr/0009-same-second-resume-and-deterministic-attribution.md)
+made the comparison inclusive; it was a strict `>`). If that resume is spurious (fired by a seek or
+buffer recovery), the window closes early and the remainder is booked as watch time.
 
 Measured end to end over the real file:
 
@@ -271,10 +272,14 @@ Measured end to end over the real file:
 |---|---|
 | **A — shipped** (close at first resume) | **816.1 h** |
 | **B** (a burst of resumes is one un-pause) | **1,005.2 h** |
-| **difference** | **189.2 h — 9.7% of the 1,949.3 h we report** |
+| **difference** | **189.2 h — 9.6% of the 1,978.1 h we report** |
 
-That is **nearly double** the unclosed-pause question (99.3 h / 5.09%) that ADR 0007 calls "the single
-largest unresolved number in the model." It is not. This is. Dossier:
+> The **189.2 h** is a separately measured pause-ledger figure from
+> [doubts/02](../doubts/02-resume-semantics.md), taken before ADR 0009. It is kept as measured; only
+> the **ratio** is recomputed here, because the denominator moved 1,949.3 h → 1,978.1 h (9.7% → 9.6%).
+
+That is **nearly double** the unclosed-pause question that ADR 0007 calls "the single largest
+unresolved number in the model." It is not. This is. Dossier:
 [doubts/02](../doubts/02-resume-semantics.md).
 
 The bg/fg ledger is imperfect too: **109** `bg→bg` and **45** `fg→fg` illegal same-state transitions
@@ -340,12 +345,18 @@ analysis there is sound, but the *values* going into those keys need a normalisa
 
 **Decided in [ADR 0011](adr/0011-normalise-filter-dimensions-at-query-time.md)** — storage stays raw,
 normalisation is a query-time rule (`sql/15_normalise.sql`). At the graded grain the hole is bigger
-than the row counts suggest: peak Hindi concurrency is **1,768** as shipped and **2,180** normalised,
-**+23.3%**, and at the peak minute `= 'hin'` returns 1,758 of 2,174 Hindi viewers. The **total peak
-stays 2,887 either way** — normalisation can only relabel an interval, never move one. Two of the
+than the row counts suggest: peak Hindi concurrency is **1,791** as shipped and **2,213** normalised,
+**+23.6%**, and at the peak minute `= 'hin'` returns 1,781 of 2,210 Hindi viewers. The **total peak
+stays 2,917 either way** — normalisation can only relabel an interval, never move one. Two of the
 figures above need a correction: Japanese is *four* values (`jap`, `jpn`, `JPN`, `jpn-japanese`), and
 `player_version`'s `_ADE`/`_adE` are **not** case twins — they are different releases, and no two
 `player_version` values collide under `lower()`. Mentor dossier: [doubts/04](../doubts/04-dimension-normalisation.md).
+
+> **Re-measured 2026-08-01 on the post-ADR-0009 model.** ADR 0011 branched from `8af15cb`, so the
+> figures it records (1,768 → 2,180, **+23.3%**; 1,758 of 2,174; total peak 2,887) were taken under
+> the same-second tie bug. Re-run against the current `session_intervals` the shape is unchanged and
+> the hole is marginally wider: **1,791 → 2,213, +23.6%**. The ADR is left as written — it is a dated
+> record of the decision, and the decision does not turn on the third significant figure.
 
 ## B.8 · The content catalog
 
@@ -397,8 +408,8 @@ the model truncates to whole seconds before splitting runs, so ties are denser s
 | | |
 |---|---|
 | **Confirmed exactly** | 0 orphans · poison row · 0 negative clock skew · `session_start_epoch` reliable · the 0.047 / 0.756 / 4.72 asymmetry · 88% in two hours · 4,210 duplicates · `pause`/`resume` lowercase only, under `VideoHeartbeat` only |
-| 🔴 **New, and it moves the model** | 40-second cadence exists → `TAIL_S` reasoning is wrong · `resume` overloaded → 9.7% · dimensions un-normalised · 23.67% same-millisecond ties · title collisions |
-| 🔴 **Our docs are wrong** | "≈78-minute average session" (11.9 min median) · "no cadence exists" (40 s) · "one outlier user with 297 sessions" (301) |
+| 🔴 **New, and it moves the model** | 40-second cadence exists → `TAIL_S` reasoning is wrong · `resume` overloaded → 9.6% · ~~dimensions un-normalised~~ (fixed, ADR 0011) · ~~23.67% same-millisecond ties~~ (the pause-rule tie fixed, ADR 0009) · title collisions |
+| 🔴 **Our docs were wrong** | ~~"≈78-minute average session" (11.9 min median)~~ · ~~"no cadence exists" (40 s)~~ · ~~"one outlier user with 297 sessions" (301)~~ — all three corrected at `6877e87` |
 | **Definitions need pinning** | "backgrounds and never returns" = 418 (count-based) or 344 (last-event-based)? Both appear in our docs. |
 
 **B in one sentence:** the data has a hidden 40-second heartbeat we told ourselves did not exist, a
@@ -421,13 +432,13 @@ four ways — and none of those three were in our docs before this pass.
             │    runs split on 150s gaps  MINUS  explicit pause windows
             ▼
      ┌──────────────────────┐
-     │  session_intervals   │  30,769 rows · one row per active stretch
+     │  session_intervals   │  30,323 rows · one row per active stretch
      └──────┬───────────────┘  all 7 raw dimensions (ADR 0008)
             │
             │ ② "turn stretches into +1 / −1, clipped to each hour"
             ▼
      ┌──────────────────────┐
-     │   cc_minute_delta    │  ~28,000 rows ← THE SERVING LAYER
+     │   cc_minute_delta    │  28,074 rows ← THE SERVING LAYER
      └──────┬───────────────┘  concurrency = running sum WITHIN the hour
             │
      ┌──────┴───────┬──────────────┬────────────────┐
@@ -486,17 +497,45 @@ day-grain peak reads 24 stored rows instead of 1,440 minutes.
 **③ `cc_hour_agg` — an 8-level cube, because peak does not add up.**
 
 ```
- true peak, all platforms      2,887
- sum of per-platform peaks     2,945   (+2.0%)
- sum of per-content peaks      4,433   (+53.6%)
+ true peak, all platforms      2,917
+ sum of per-platform peaks     2,988   (+2.4%)
+ sum of per-content peaks      5,680   (+94.7%)
 ```
 
 Each of the 8 dimension subsets gets its own separately-computed curve and a genuine peak. Nothing is
 derived from anything else.
 
-**④ Both mandated models, side by side.** `cc_minute_delta` (session-aware) reads **2,887** at the peak
-minute; `cc_minute_stateless` (session-independent) reads **2,894**. The gap *is* the excluded
-background and paused time — the comparison is structural, not bolted on.
+> **Re-measured 2026-08-01** against the post-ADR-0009 model (the previous reading — 2,887 / 2,945 /
+> 4,433 — was taken before the tie fix). The per-**content** figure moved far more than the headline
+> did (+28% against the headline's +1.04%), and that is expected rather than alarming: it is a sum of
+> **3,357 independent maxima**, and **2,827 of them peak at exactly 1** (298 at 2, 232 at ≥3), so
+> restoring active time to a long tail of near-empty contents bumps many of them by +1 at once. Mean
+> per-content peak went 1.32 → 1.69. The point the number exists to make — *peak
+> does not add up, and per-content is where it fails worst* — got stronger, not weaker. Query:
+>
+> ```sql
+> WITH expanded AS (
+>   SELECT video_session_id, platform, content_id,
+>          arrayJoin(range(toUInt32(toStartOfMinute(interval_start)),
+>                          toUInt32(toStartOfMinute(interval_end)) + 1, 60)) AS m
+>   FROM session_intervals FINAL)
+> SELECT (SELECT max(c) FROM (SELECT m, uniqExact(video_session_id) AS c FROM expanded GROUP BY m)),
+>        (SELECT sum(p) FROM (SELECT platform,   max(c) AS p FROM (SELECT platform,   m, uniqExact(video_session_id) AS c FROM expanded GROUP BY platform,   m) GROUP BY platform)),
+>        (SELECT sum(p) FROM (SELECT content_id, max(c) AS p FROM (SELECT content_id, m, uniqExact(video_session_id) AS c FROM expanded GROUP BY content_id, m) GROUP BY content_id));
+> ```
+
+**④ Both mandated models, side by side.** `cc_minute_delta` (session-aware) reads **2,917** at the peak
+minute; `cc_minute_stateless` (session-independent) reads **2,894**, unmoved by ADR 0009 — it has no
+pause rule to fix. The comparison is structural, not bolted on.
+
+> **The sign of that gap flipped, and the doc used to read it wrong.** Before ADR 0009 the peak minute
+> was 2,887 aware vs 2,894 stateless, and this section described the difference as "the excluded
+> background and paused time" — one-directional. It never was. Measured across the 3,820 minutes both
+> models cover: **session-aware is higher on 449, stateless is higher on 498, and they agree on
+> 2,873.** The two differ in *both* directions because they miss different things — stateless counts
+> only minutes carrying an actual heartbeat (so it loses the `TAIL_S` lease at a session's tail),
+> while session-aware credits that lease but subtracts pause explicitly. At the peak minute the fix
+> moved aware from 7 *below* stateless to **23 above** it.
 
 ## C.3 · Does it handle what §B found?
 
@@ -510,21 +549,31 @@ background and paused time — the comparison is structural, not bolted on.
 | Open sessions | ✅ | `is_open` + the truncation harness manufactures the case |
 | Late arrivals | 🟡 | ADR 0006 arithmetic exact — only inside the isolated test |
 | Peak not summable | ✅ | the 8-level cube, measured not asserted |
-| 23.67% same-millisecond ties | 🟡 | `90_reconcile.sql` has a `DISTINCT` fix; the model has no explicit tie-break |
+| 23.67% same-millisecond ties | ✅ | the same-second **tie in the pause rule** is fixed — [ADR 0009](adr/0009-same-second-resume-and-deterministic-attribution.md), `0c0f020`. Dimension attribution is now a deterministic dominant-value rule on all 7, so ties no longer decide labels |
 | **40-second cadence** | ❌ | `TAIL_S = 60` still assumes a cadence that does not exist |
-| **`resume` overloaded (9.7%)** | ❌ | still closes at the first resume |
-| **Un-normalised dimensions** | ❌ | ADR 0008 shipped them raw |
-| **Title collisions** | ❌ | `v_concurrency_minute_title` merges distinct assets |
+| **`resume` overloaded (9.6%)** | ❌ | still closes at the first resume |
+| **Un-normalised dimensions** | ✅ | [ADR 0011](adr/0011-normalise-filter-dimensions-at-query-time.md) — query-time rule in `sql/15_normalise.sql`, `ac04975` |
+| **Title collisions** | 🟡 | `v_concurrency_minute_title` still merges distinct assets; [ADR 0010](adr/0010-content-views-are-database-agnostic-and-label-their-ambiguity.md) **labels** the ambiguity (`v_content_title_collisions`, 2,773 titles over 5,729 `content_id`s) rather than resolving it |
 
 ## C.4 · Accuracy has three different answers
 
 **Level 1 — is the arithmetic self-consistent? Exactly yes.**
 
 ```
- delta layer  vs  interval expansion    3,725 minutes   0 mismatches
+ delta layer  vs  interval expansion    3,732 minutes   0 mismatches   ← re-run 2026-08-01
  hour tier    vs  minute tier              98 hours     0 mismatches
- incremental  vs  full rebuild          1,578 minutes   0 mismatches
+ incremental  vs  full rebuild          1,578 minutes   0 mismatches   ← pre-ADR-0009, not re-run
  window views vs  brute-force join       every window   0 mismatches
+```
+
+Line 1 was re-run against the current model (it read 3,725 minutes before ADR 0009 — the tie fix
+changes which minutes carry active intervals, not whether the two tiers agree):
+
+```sql
+SELECT count(), countIf(ifNull(s,0) != e), max(abs(ifNull(s,0) - e)), max(e)
+FROM      (SELECT minute, toInt64(concurrent) AS e FROM v_concurrency_minute_intervals) AS ex
+LEFT JOIN (SELECT minute, toInt64(concurrent) AS s FROM v_cc_minute_series_total)       AS se USING (minute);
+-- 3732 | 0 | 0 | 2917
 ```
 
 **Level 2 — does the gate prove that? It did not. It does now (`81c0161`).**
@@ -560,14 +609,25 @@ Evidence: `evidence/unseen-rehearsal.txt` for the discovery, `81c0161` for the f
 **Level 3 — do we match the private answer key? Unknown, with a measured envelope.**
 
 ```
-                                    1,949.3 h  ← what we report today
-     resume semantics (doubts/02)   −189.2 h   9.7%    MEASURED
-     unclosed pause  (ADR 0007)     + 99.3 h   5.09%   MEASURED
-     TAIL_S 60 vs 40 (doubts/01)    ≤ 170.9 h  8.8%    UPPER BOUND
+                                    1,978.1 h  ← what we report today
+     resume semantics (doubts/02)   −189.2 h   9.6%    MEASURED
+     unclosed pause  (ADR 0007)     + 99.3 h    —      SUPERSEDED, see below
+     TAIL_S 60 vs 40 (doubts/01)    ≤ 170.9 h  8.6%    UPPER BOUND
 ```
 
+The two `h` figures that survive are **measured numerators kept as measured**; only their ratios are
+recomputed, because the denominator moved 1,949.3 h → 1,978.1 h.
+
+**The unclosed-pause row is not simply out of date — it is unrecoverable without a re-run.** The
+99.3 h was the *difference* between a conservative arm (1,949.3 h) and a permissive arm (2,048.6 h),
+both measured at `cf80acc`, i.e. **both under the same-second tie bug**. ADR 0009 supersedes the
+conservative arm; the permissive arm has never been re-run on the fixed derivation. Subtracting the
+new conservative number from the old permissive one would invent a delta across two different
+derivations, so the figure is struck rather than rescaled. Re-measuring it needs a rebuild with
+`UNCLOSED_PAUSE_TO_RUN_END = 0` — filed in [TODOS.md](../TODOS.md).
+
 These are **definitional forks**, not bugs — and the gate cannot see any of them, because it recomputes
-truth using the same definition it is testing. A 9.7% error passes every test we own, silently.
+truth using the same definition it is testing. A 9.6% error passes every test we own, silently.
 
 A fourth, from the same adversarial pass: a **day-file answers differently from a full-context build**
 (7 sessions straddle midnight on 2026-07-26; 1,140 events would be dropped by a same-shaped cut), and
@@ -576,37 +636,46 @@ pipeline, never the input.*
 
 ## C.5 · What is broken, ranked
 
+**Nine of the thirteen closed between `8af15cb` and `1fb6351`.** Fixed rows keep their number so the
+ranking stays citable; four remain genuinely open.
+
 | # | Fault | Why it matters | State |
 |---|---|---|---|
 | — | ~~Gate passes vacuously off-day~~ | zero-minute PASS on the graded input | ✅ fixed `81c0161` |
 | — | ~~Gate blind to idle minutes~~ | fabricated 500 → PASS | ✅ fixed `81c0161` |
-| 1 | **Same-second tie bug** | `toUnixTimestamp` truncates to seconds, then strict `>` skips a resume in that second. **2,697 pauses · 41.5 h · 2.1%.** `90_reconcile.sql` carries the identical expression, so the gate agrees with it | open |
-| 2 | **`interval-math` skill teaches the discarded model** | *"Emitted every 60s"*, no pause — agents write SQL from it | open |
-| 3 | **Un-normalised dimensions** | `WHERE audio_language='hin'` misses 13% of Hindi | open |
-| 4 | **`any()` still on 4 of 7 dimensions** | `user_id`, `content_id`, `platform`, `country`. `any()` was *proven non-deterministic* in `8bfeeb2` (three hashes at `max_threads` 1/8/32); 95 sessions carry 2 platforms, 120 carry 2 user_ids. The code comment still says "not worth it until something measures it" — something did, in that same commit | open |
-| 5 | `DATA_DICTIONARY` — *"periodic, every 60s"*, *"≈78 min average session"* | both disproven in §B | open |
-| 6 | `MENTOR_QUESTIONS` calls unclosed-pause the largest unresolved number | `resume` is ~2× bigger on hours; and the *peak* framing is now measured (below) | open |
-| 7 | `TESTS.md` still says absorption **"FAIL as shipped"** | fixed at `388a845`, test repaired at `1dee090`; evidence reads `CONVERGES` | open |
-| 8 | `TAIL_S = 60` contradicts its own justification | the cadence exists and is 40 s | open |
-| 9 | `45_user_concurrency.sql` stale comments | `ReplacingMergeTree(interval_end)`; "297 sessions" (301) | open |
-| 10 | Peak minute ambiguous under ties | hour tier said 16:35, answer phase said 16:59 | open |
-| 11 | `v_concurrency_minute_title` merges distinct assets | 2,773 colliding titles | open |
-| 12 | `sql/80_content.sql` hard-codes `sonyliv` | its views read **production's** dictionary from any other database — exactly the shape of the unseen-day run in `sonyliv_unseen` | open |
-| 13 | A CSV reload **doubles** the data · `CH_DATABASE` silently ignored | load-path defects, both recorded in [`SESSION-2026-08-01.md`](SESSION-2026-08-01.md) §6 | open |
+| 1 | ~~**Same-second tie bug**~~ | `toUnixTimestamp` truncates to seconds, then strict `>` skipped a resume in that second — **2,697 of 27,340 pauses (9.86%)**. `90_reconcile.sql` carried the identical expression, so the gate agreed with it | ✅ fixed **[ADR 0009](adr/0009-same-second-resume-and-deterministic-attribution.md)** `0c0f020` — `>=` in **both** files. **This is what moved the headline: PEAK 2,887 → 2,917, 1,949.3 h → 1,978.1 h** |
+| 2 | ~~`interval-math` skill teaches the discarded model~~ | *"Emitted every 60s"*, no pause — agents write SQL from it | ✅ fixed `6877e87` — the skill now teaches the gap-minus-pause rule and the measured 40 s cadence |
+| 3 | ~~**Un-normalised dimensions**~~ | `WHERE audio_language='hin'` misses Hindi viewers | ✅ fixed **[ADR 0011](adr/0011-normalise-filter-dimensions-at-query-time.md)** `ac04975` — query-time rule in `sql/15_normalise.sql`; re-measured peak Hindi **1,791 → 2,213** |
+| 4 | **`any()` — derivation fixed, delta layer not** | ADR 0009 moved `user_id`, `content_id`, `platform`, `country` onto ADR 0008's dominant-value rule and **proved determinism end to end** (one hash at `max_threads` 1/8/32, was three). But **`sql/40_deltas.sql` still runs `any(platform)`, `any(country)`, `any(content_id)`** over `session_intervals`, re-introducing the non-determinism one layer up *and* collapsing the new per-interval attribution back to one value per session | 🟡 **partly fixed** — ADR 0009 files the remainder explicitly as out of scope. **Last `any()` in the pipeline** |
+| 5 | ~~`DATA_DICTIONARY` — *"periodic, every 60s"*, *"≈78 min average session"*~~ | both disproven in §B | ✅ fixed `6877e87` — both corrected in place, with the correction dated |
+| 6 | ~~`MENTOR_QUESTIONS` calls unclosed-pause the largest unresolved number~~ | `resume` is ~2× bigger on hours | ✅ fixed `6877e87` — it now ranks Q3 `resume` semantics first |
+| 7 | ~~`TESTS.md` still says absorption **"FAIL as shipped"**~~ | fixed at `388a845`, test repaired at `1dee090`; evidence reads `CONVERGES` | ✅ fixed `6877e87` |
+| 8 | **`TAIL_S = 60` contradicts its own justification** | the cadence exists and is 40 s | **open** — upper bound ≤ 170.9 h (8.6%) |
+| 9 | ~~`45_user_concurrency.sql` stale comments~~ | `ReplacingMergeTree(interval_end)`; "297 sessions" (301) | ✅ fixed `6877e87` |
+| 10 | **Peak minute ambiguous under ties** | hour tier said 16:35, answer phase said 16:59 | **open** — the serving tiers (`50_hour_agg.sql`, `85_windows.sql`) carry an earliest-wins tie-break, but `sql/90_reconcile.sql:216` still picks the peak minute with a bare `argMax(minute, truth)` |
+| 11 | **`v_concurrency_minute_title` merges distinct assets** | **2,773** colliding titles spanning **5,729** `content_id`s (re-measured) | 🟡 **labelled, not resolved** — [ADR 0010](adr/0010-content-views-are-database-agnostic-and-label-their-ambiguity.md) adds `v_content_title_collisions` and documents the trap; the view still merges |
+| 12 | ~~`sql/80_content.sql` hard-codes `sonyliv`~~ | its views read **production's** dictionary from any other database — exactly the shape of the unseen-day run in `sonyliv_unseen` | ✅ fixed **[ADR 0010](adr/0010-content-views-are-database-agnostic-and-label-their-ambiguity.md)** `370a74c` — views are unqualified and bake in their creating database |
+| 13 | ~~A CSV reload **doubles** the data · `CH_DATABASE` silently ignored~~ | load-path defects, both recorded in [`SESSION-2026-08-01.md`](SESSION-2026-08-01.md) §6 | ✅ fixed `6355048` — loader guard (`evidence/load-guard.txt`) + `CH_DATABASE` precedence |
 
-**The unclosed-pause rule, now measured where it counts.** It was left open on a 5.09% *hours*
-difference. `cf80acc` measured the number that is actually graded — the **peak**:
+**The unclosed-pause rule — both of its numbers are now superseded.** It was left open on an *hours*
+difference, and `cf80acc` measured the number that is actually graded, the **peak**:
 
 ```
- conservative (shipped)   2,887          permissive   3,018
-                                                      ─────
-                                          +131 viewers · +4.5% on the headline
+ conservative (shipped)   2,887          permissive   3,018      ← BOTH measured at cf80acc,
+                                                     ─────         BEFORE the ADR 0009 tie fix
+                                          +131 viewers · +4.5%
 ```
 
-It is now one constant (`UNCLOSED_PAUSE_TO_RUN_END`) rather than an open question, and the gate
-*catches* a model-only flip (240 mismatched minutes) because it shares the **spec** but not the
-**code**. Default stays conservative: under-counting is visible and explainable; over-counting invents
-viewers that demonstrably were not receiving playback events.
+**Neither figure is current and the comparison must not be patched by halves.** ADR 0009 moved the
+conservative arm to **2,917**; the permissive arm has not been re-run, so the `+131 / +4.5%` spread is
+stale in a way no arithmetic here can repair — writing "2,917 vs 3,018" would silently compare two
+different derivations. The numbers above are therefore left exactly as `cf80acc` measured them and
+labelled as historical. What survives unchanged is the *structural* result: it is one constant
+(`UNCLOSED_PAUSE_TO_RUN_END`) rather than an open question, and the gate *catches* a model-only flip
+(240 mismatched minutes) because it shares the **spec** but not the **code**. Default stays
+conservative: under-counting is visible and explainable; over-counting invents viewers that
+demonstrably were not receiving playback events. Re-measuring the permissive arm is filed in
+[TODOS.md](../TODOS.md).
 
 ## C.6 · What is not built
 
@@ -681,6 +750,11 @@ identical 30,769 intervals, **0 of 3,725 minutes differ**; restricted to only th
 sessions so it could not wash out, 834 minutes, 0 differing. *"We proved the step unnecessary" is a
 stronger answer than "we added the step."* (`evidence/dedup.txt`)
 
+> **Counts as measured at `4a89399`, before ADR 0009** — the current model has 30,323 intervals over
+> 3,732 minutes. The experiment has not been re-run, and the counts are kept rather than substituted.
+> The *conclusion* is unaffected by the tie fix: both arms of that run share whatever pause rule is
+> in force, so the fix moves both identically and cannot turn a 0-row difference into a non-zero one.
+
 **`any()` — rejected after it turned out to be picking a sentinel.** Collapsing a session's dimensions
 with `any()` looked like a tie-break detail; the code comment called it "accurate for 98.8%". Measured
 in `8bfeeb2`, it was not: the player emits a sentinel *before* it resolves a track — `VideoSessionStart`
@@ -690,12 +764,13 @@ wrong** across 139,800 session-minute cells, and **73.5% wrong at the graded pea
 **non-deterministic**: the same data at `max_threads` 1/8/32 produced three different hashes, so two
 rebuilds would serve two different filtered answers. Replaced with dominant-value-per-interval,
 tie-broken by value → 3.3% and 1.8%, and identical hashes across thread counts and a full rebuild.
-*(Still applied to only 4 of the 7 dimensions — see §C.5 fault 4.)*
+*(Now applied to **all 7** dimensions in the derivation — [ADR 0009](adr/0009-same-second-resume-and-deterministic-attribution.md), `5743b39`. `sql/40_deltas.sql` is the one layer still on `any()`; see §C.5 fault 4.)*
 
 **And the extensibility claim is a hard bound, not a hopeful measurement.** `cc_minute_delta` stores at
 most one open and one close per (merged run, hour), so its size is capped at **36,930 rows on this file
-no matter how many dimensions exist**. Three dimensions used 24,951 (67.6% of the ceiling); seven use
-28,139 (76.2%). A hundred could not exceed 36,930. That is what makes *"the solution should work even
+no matter how many dimensions exist**. Three dimensions used 24,951 (67.6% of the ceiling); seven used
+28,139 (76.2%) at `8bfeeb2`, and **28,074 (76.0%) on the current model** — ADR 0009 redistributed
+dimension tuples without changing the bound. A hundred could not exceed 36,930. That is what makes *"the solution should work even
 if the number of dimensions increases"* true rather than aspirational — and it only holds because the
 serving layer is deltas rather than a per-minute explosion, which has no such ceiling.
 
@@ -751,27 +826,27 @@ same discipline applied to the *gate* found it passing on zero rows.
 | Claim | The number | Evidence |
 |---|---|---|
 | Load is exact | 905,558 events = source rows · 33,464 titles | re-confirmed by the fresh reload |
-| Serving layer == interval expansion | **3,725 minutes, 0 mismatches**, peak 2,887 | `tools/build-model.sh` |
+| Serving layer == interval expansion | **3,732 minutes, 0 mismatches**, peak 2,917 | re-run 2026-08-01 · §C.4 |
 | Hour tier == minute tier | **98 hours, 0 mismatches** | `sql/50_hour_agg.sql` |
 | The 8-level cube | 26,162 rows, **0 peak + 0 integral mismatches** | `sql/50_hour_agg.sql` |
-| Incremental absorption converges | **1,578 minutes, 0 mismatches** after the version fix | `evidence/truncation.txt` |
-| Dedup is inert | 0 of 3,725 min; **0 of 834** on duplicate-bearing sessions alone | `evidence/dedup.txt` |
+| Incremental absorption converges | **1,578 minutes, 0 mismatches** after the version fix | `evidence/truncation.txt` — pre-ADR-0009, not re-run |
+| Dedup is inert | 0 of 3,725 min; **0 of 834** on duplicate-bearing sessions alone | `evidence/dedup.txt` — pre-ADR-0009 counts, see §D.2 |
 | Window views | rolling + tumbling vs brute force, **0 mismatches** | commit `4a89399` |
-| Peak is not summable | +2.0% (platform), **+53.6%** (content) | measured |
+| Peak is not summable | +2.4% (platform), **+94.7%** (content) | re-measured 2026-08-01 · §C.2 |
 | Sort key choice | **17.3×** on the dashboard shape | [ADR 0002](adr/0002-order-by-time-bucket-then-platform.md) |
 | Serving beats expansion | 299 KB / 23 ms vs 2.55 MB / 56 ms — **8.5×** | TODOS H3 |
 | Two-signal asymmetry | **0.047 / 0.756 / 4.72** pings/min | [ADR 0007](adr/0007-gate-answers-pause-needs-explicit-handling.md) |
 | Straggler tail | 239 sessions, max **2,081 s** late | ADR 0007 |
-| Charts show real data | HyperDX 61 → **2,887** → 7, 28 ms | [CLICKSTACK.md](CLICKSTACK.md) |
+| Charts show real data | HyperDX, peak day in 1 h buckets: 3 → **2,917** → 2,873; **14 ms**, 28,074 rows | re-taken 2026-08-01 · [CLICKSTACK.md](CLICKSTACK.md) |
 | Runs on a *different* day | **47 s** for 30,097 events, all 8 phases | `evidence/unseen-rehearsal.txt` |
 | The gate *can* fail | bad delta row → exit 1 · fabricated 500 → MISMATCH | two negative tests |
 | The 40-second cadence | p50 = p90 = **40.0 s** on three streams | §B.1 · [doubts/01](../doubts/01-heartbeat-cadence.md) |
-| `resume` overload | **189.2 h · 9.7%** | §B.4 · [doubts/02](../doubts/02-resume-semantics.md) |
-| Same-second tie bug | **41.5 h · 2.1%**, 2,697 pauses affected | §E.2 below |
+| `resume` overload | **189.2 h · 9.6%** (measured h, ratio rebased) | §B.4 · [doubts/02](../doubts/02-resume-semantics.md) |
+| Same-second tie bug — **fixed** | 2,697 of 27,340 pauses (9.86%) · **PEAK +30, hours +28.8** | [ADR 0009](adr/0009-same-second-resume-and-deterministic-attribution.md) `0c0f020` |
 | Gate coverage after `81c0161` | **5 → 17,028 minutes**, zero mismatches, negative-tested | commit `81c0161` |
-| Unclosed-pause cost **at the peak** | conservative 2,887 vs permissive **3,018** — **+4.5%** | commit `cf80acc` |
+| Unclosed-pause cost **at the peak** | conservative 2,887 vs permissive **3,018** — **+4.5%**. ⚠️ **historical**: both arms pre-ADR-0009, spread not re-measured | commit `cf80acc` · §C.5 |
 | `any()` was picking sentinels | **44.5%** audio / **47.6%** subtitle attributions wrong; **73.5%** at the graded peak minute — and non-deterministic across thread counts | commit `8bfeeb2` |
-| Dimension count has a **hard row ceiling** | `cc_minute_delta` ≤ **36,930** rows *regardless of how many dimensions* — 3 dims 24,951 (67.6%), 7 dims 28,139 (76.2%). Whole table 111 KiB | commit `8bfeeb2` |
+| Dimension count has a **hard row ceiling** | `cc_minute_delta` ≤ **36,930** rows *regardless of how many dimensions* — 3 dims 24,951 (67.6%), 7 dims 28,139 (76.2%) at `8bfeeb2`, **28,074 (76.0%) today**. Whole table 111 KiB | commit `8bfeeb2` · row count re-measured 2026-08-01 |
 
 ## E.2 · Claimed, but not proven
 
@@ -797,28 +872,35 @@ same discipline applied to the *gate* found it passing on zero rows.
      ✗  ZERO measurements above 1×. Only timing: 47 s / 30K events.
 
  "filter-friendly across business dimensions"
-     ✗  hin / HIN / hin-hindi / hin-Hindi are four buckets.
+     ✅ FIXED in ADR 0011 (ac04975). hin / HIN / hin-hindi / hin-Hindi fold to
+        one bucket through a query-time rule; peak Hindi 1,791 → 2,213.
 
  "content-level concurrency by title"
-     ✗  2,773 titles merge 2–4 content_ids, 1,418 across categories.
+     ✗  2,773 titles merge 2–4 content_ids, 1,418 across categories. ADR 0010
+        LABELS this (v_content_title_collisions); the view still merges.
 ```
 
-**A newly measured defect belonging here.** `sql/30_build_intervals.sql` truncates to whole seconds
-(`toUnixTimestamp`) and then closes a pause with a strict `arrayFirst(x -> x > p, resumes)`. A resume
-landing in that same truncated second is therefore **invisible**, and the pause runs on to the next
-resume — or becomes unclosed and eats the rest of the run.
+**The defect this section used to hold has been fixed.** `sql/30_build_intervals.sql` truncated to
+whole seconds (`toUnixTimestamp`) and then closed a pause with a strict
+`arrayFirst(x -> x > p, resumes)`, so a resume landing in that same truncated second was **invisible**
+and the pause ran on to the next resume — or became unclosed and ate the rest of the run.
 
 ```
  pauses with a resume in the same truncated second   2,697   (9.86%)
  paused time excluded, shipped   (strict >)          834.1 h
  paused time excluded, inclusive (>=)                792.6 h
                                                      ───────
- over-excluded by the tie                             41.5 h   2.1%
+ over-excluded by the tie                             41.5 h
 ```
 
-`sql/90_reconcile.sql` contains the **identical expression**, so the gate reproduces the bug and agrees
-with it — an independent *implementation*, but not an independent *definition*. Note the direction: it
-pushes the opposite way to the `resume`-overload bug, so the two partially mask each other.
+`sql/90_reconcile.sql` contained the **identical expression**, so the gate reproduced the bug and
+agreed with it — an independent *implementation*, but not an independent *definition*.
+[ADR 0009](adr/0009-same-second-resume-and-deterministic-attribution.md) (`0c0f020`) changed both
+files to `>=`. **End to end that is PEAK 2,887 → 2,917 and 1,949.3 h → 1,978.1 h** — larger than the
+41.5 h raw ledger figure suggests, because much of that time was already excluded by the gap rule, and
+because a segment that now ends at `run_end` earns the `TAIL_S` grace it previously did not. Note the
+direction: it pushed the opposite way to the `resume`-overload fork, so the two partially masked each
+other, which is why the totals had looked unremarkable.
 
 ## E.3 · Knowingly missing
 
@@ -839,10 +921,13 @@ pushes the opposite way to the `resume`-overload bug, so the two partially mask 
  ❌ TEAM CAPTAIN            unnamed — and only they can submit
 ```
 
-Three mechanical defects recorded in [`SESSION-2026-08-01.md`](SESSION-2026-08-01.md) §6 that belong
-here too: **a CSV reload doubles the data**; **`CH_DATABASE` is silently ignored**; and
-**`sql/80_content.sql` hard-codes `sonyliv`**, so its views read production's dictionary from any other
-database — which is exactly the shape of the unseen-day run (`sonyliv_unseen`).
+The three mechanical defects recorded in [`SESSION-2026-08-01.md`](SESSION-2026-08-01.md) §6 that used
+to belong here are **all fixed**: the CSV reload that doubled the data and the silently-ignored
+`CH_DATABASE` at `6355048` (guard evidence in `evidence/load-guard.txt`), and
+`sql/80_content.sql`'s hard-coded `sonyliv` at `370a74c`
+([ADR 0010](adr/0010-content-views-are-database-agnostic-and-label-their-ambiguity.md)) — which
+mattered because its views read production's dictionary from any other database, exactly the shape of
+the unseen-day run (`sonyliv_unseen`).
 
 Three more improvements not tracked elsewhere: **`session_start_epoch` is never used** by the model,
 though it is the only exactly-reliable start signal (0 ms deviation across all 10,866 sessions) and is
@@ -853,9 +938,9 @@ mandated session-aware vs session-independent comparison can only run at the coa
 ## E.4 · What we can honestly say today
 
 > *"We built a foreground-only concurrency model on ClickHouse that excludes backgrounded and paused
-> time. We proved the exclusion matters — 34.5% of apparent watch time, and a 22.1% over-count
+> time. We proved the exclusion matters — 33.6% of apparent watch time, and a 21.3% over-count
 > eliminated at the peak minute. The serving layer is an hour-clipped delta table, 6,600× smaller than
-> per-minute explosion, and it reconciles exactly against raw events on every one of 3,725 minutes.
+> per-minute explosion, and it reconciles exactly against raw events on every one of 17,028 minutes.
 > Every design decision was settled by a measurement, and four overturned our own prior plan. We know
 > of three definitional questions we cannot resolve without the answer key, we have measured what each
 > is worth, and we can show the envelope."*
@@ -867,19 +952,27 @@ Every sentence there is backed. What we **cannot** say is "it is fast" (unmeasur
 
 ```
  ✅ FIX THE GATE          DONE in 81c0161. Coverage 5 → 17,028 minutes.
+ ✅ TIE BUG               DONE in 0c0f020 (ADR 0009). `>` → `>=` in BOTH
+                          30_build_intervals and 90_reconcile — they share the
+                          SPEC, so both moved together. PEAK 2,887 → 2,917.
+ ✅ any() ON THE LAST 4   DONE in 5743b39 (ADR 0009). One hash at max_threads
+                          1/8/32, was three. Peak and hours unmoved, as expected.
+ ✅ NORMALISE DIMENSIONS  DONE in ac04975 (ADR 0011). Query-time rule.
 
  0  MAKE THE REPO PUBLIC  ~1 min   a required artifact. Currently PRIVATE.
                                    Nothing else on this list matters if this
                                    is missed. Needs a human.
- 1  TIE BUG               ~15 min  41.5h / 2.1%. A one-character change (> to >=)
-                                   in BOTH 30_build_intervals and 90_reconcile —
-                                   they share the SPEC, so both must move together.
- 2  RESUME RULE           ~1 h     up to 189.2h / 9.7%. Needs the mentor answer
-                                   (doubts/02) or a stated, measured default.
- 3  any() ON THE LAST 4   ~30 min  same non-determinism already fixed for the
-                                   other three dimensions in 8bfeeb2.
- 4  NORMALISE DIMENSIONS  ~30 min  or state the limit out loud.
- 5  DECK                  starts at H18 regardless of code state.
+ 1  RESUME RULE           ~1 h     up to 189.2h / 9.6%. Now the largest open
+                                   number by some distance. Needs the mentor
+                                   answer (doubts/02) or a stated, measured
+                                   default.
+ 2  any() IN 40_deltas    ~30 min  the LAST any() in the pipeline. ADR 0009
+                                   fixed the derivation and filed this; the
+                                   delta layer still re-introduces it.
+ 3  RE-MEASURE PERMISSIVE ~20 min  the unclosed-pause spread (2,887 vs 3,018)
+                                   is stale on BOTH arms — rebuild with
+                                   UNCLOSED_PAUSE_TO_RUN_END=0 to restore it.
+ 4  DECK                  starts at H18 regardless of code state.
 
  ⏸ /bench                 parked by the operator — see E.3 for the reasoning
                           and the counter-argument.

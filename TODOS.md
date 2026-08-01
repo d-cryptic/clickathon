@@ -36,35 +36,48 @@
       hybrid**: gaps for backgrounding + explicit pause/resume. Fixed in `sql/30_build_intervals.sql`.
 - [x] **[H1] GATE ③** — zero events before session_start (no negative skew); 2.2% of sessions emit
       events up to **2,081 s** after VideoSessionEnd. Watermark W >= ~2,100 s.
-- [x] **[H2]** `session_intervals` built — `sql/30_build_intervals.sql`. 30,769 intervals over all
+- [x] **[H2]** `session_intervals` built — `sql/30_build_intervals.sql`. **30,323** intervals over all
       10,866 sessions, 0 invalid. Hand-verified against a raw timeline; reconcile at the peak minute
-      gives 2,886 active vs 3,708 naive session-overlap, with 0 unbacked sessions.
+      gives **2,917** active vs 3,708 naive session-overlap, with 0 unbacked sessions.
+      *(Was 30,769 / 2,886 before [ADR 0009](docs/adr/0009-same-second-resume-and-deterministic-attribution.md).)*
 - [x] **[H2a]** **Unclosed-pause rule — RESOLVED into a switch.** `UNCLOSED_PAUSE_TO_RUN_END`
       (1 = conservative, shipped; 0 = permissive) in `sql/30_build_intervals.sql` AND
-      `sql/90_reconcile.sql` — both, in lockstep. Measured: PEAK 2,887 vs 3,018, +4.5% on the graded
-      number (hours +5.09%). Gate verified in all three states. Still ask mentor Q2. Original:
+      `sql/90_reconcile.sql` — both, in lockstep. Measured at `cf80acc`: PEAK 2,887 vs 3,018, +4.5% on
+      the graded number (hours +5.09%). Gate verified in all three states. Still ask mentor Q2.
+      ⚠️ **Both arms predate the ADR 0009 tie fix.** The conservative arm is now PEAK 2,917 /
+      1,978.1 h; the permissive arm has **not** been re-run, so the +4.5% / +5.09% spread is stale.
+      Deliberately not rescaled — see the new `[H2a-remeasure]` item below. Original:
 - [~] **[H2a]** ~~DECIDE~~ unclosed-pause rule. 23% of pauses never resume. Both rules now MEASURED
       end to end: conservative (shipped) 1,949.3 h vs permissive 2,048.6 h — **+99.3 h, 5.09%**.
       The earlier "~19,800 min" estimate was ~3x too high; that time is mostly already excluded by the
       gap rule, the two overlap. Conservative is the safer default against an exact ground truth.
       **Operator call — see ADR 0007.**
+- [ ] **[H2a-remeasure]** **Re-measure the permissive arm on the fixed derivation.** ADR 0009 moved
+      the conservative arm (PEAK 2,887 → 2,917, 1,949.3 h → 1,978.1 h) but nothing re-ran
+      `UNCLOSED_PAUSE_TO_RUN_END = 0`, so every quoted spread for this switch (+131 viewers, +4.5%,
+      +99.3 h, +5.09%) compares two different derivations and cannot be repaired by arithmetic.
+      Rebuild with the switch flipped, re-run the gate, and restore the pair. ~20 min. Until then the
+      docs carry the `cf80acc` numbers labelled as historical rather than a rescaled guess.
 
 ## Next
 
 - [x] **[H3]** `cc_minute_delta` hour-clipped (ADR 0003) + `v_concurrency_minute` — **done**.
-      `sql/40_deltas.sql`; 24,958 delta rows from 30,769 intervals. Reconcile PASSES on all 3,725
-      minutes against the interval expansion, peak 2,887 both ways. Serving reads 299 KB vs 2.55 MB
-      for the expansion — 8.5x less I/O, 23 ms. Rebuild: `tools/build-model.sh`.
+      `sql/40_deltas.sql`; **28,074** delta rows from **30,323** intervals. Reconcile PASSES on all
+      **3,732** minutes against the interval expansion, peak **2,917** both ways *(re-run 2026-08-01)*.
+      Serving reads 299 KB vs 2.55 MB for the expansion — 8.5x less I/O, 23 ms *(I/O and latency not
+      re-measured at the new row count)*. Rebuild: `tools/build-model.sh`.
 - [x] **[H4]** `/reconcile` passing on 5 minutes — **PASSES**. `tools/reconcile.sh` recomputes truth
-      from `ev_raw` alone (window functions, not the model's arraySplit) and compares: peak 2,887,
-      both boundaries, two arbitrary — all zero delta. Evidence in `evidence/reconcile.txt`.
+      from `ev_raw` alone (window functions, not the model's arraySplit) and compares: peak **2,917**,
+      both boundaries, two arbitrary — all zero delta. Since `81c0161` it covers **17,028 minutes**,
+      0 mismatched. Evidence in `evidence/reconcile.txt`.
       Negative-tested: injecting one bad delta row makes it exit 1.
 - [~] **[H4/H8]** Truncation test proving open-session absorption — **built and run**:
       `tools/truncation-test.sh` + `sql/70_truncation_test.sql`, isolated in the `sonyliv_trunc`
       database, evidence in `evidence/truncation.txt`. Cuts the stream at the peak (52.6% of
       sessions open), absorbs 447,081 late events by ADR 0006 correction-by-diff, compares against
       a from-scratch build on every minute. **It does NOT converge as shipped** — +37 on the peak
-      minute (2,924 vs 2,887). ADR 0006's arithmetic is exact; the fault is the version column.
+      minute (2,924 vs 2,887, both as measured at `388a845`, pre-ADR-0009; not re-run). ADR 0006's
+      arithmetic is exact; the fault is the version column.
       **Remaining for H4: the finalizer + watermark itself.** Set `W = 2400s` (measured: the 2,081s
       straggler tail binds, not truncation, which only damages the last 60s).
 - [x] **[H4-fix]** DONE (388a845) `session_intervals` → `ReplacingMergeTree(build_version)` with a monotonic
@@ -96,8 +109,11 @@
 - [~] **[DIMS]** Filter-dimension value normalisation — **decided and built, NOT wired**.
       `sql/15_normalise.sql` (UDFs + `v_cc_minute_delta_norm`, `v_concurrency_minute_audio_norm`,
       `v_dimension_drift`) and [ADR 0011](docs/adr/0011-normalise-filter-dimensions-at-query-time.md).
-      Measured: peak Hindi **1,768 → 2,180 (+23.3%)**; total peak **2,887 unchanged**; query cost
-      **zero** (both filters read the same 28,101 rows / 137 KiB). Normalising inside the derivation
+      Measured at `ac04975`: peak Hindi **1,768 → 2,180 (+23.3%)**; total peak **2,887 unchanged**;
+      query cost **zero** (both filters read the same 28,101 rows / 137 KiB). *(That branch forked
+      from `8af15cb`, before the ADR 0009 tie fix. Re-measured 2026-08-01 on the current model: peak
+      Hindi **1,791 → 2,213, +23.6%**, total peak **2,917 unchanged** — same conclusion.)*
+      Normalising inside the derivation
       was built and measured as **worse** — 202 intervals degraded onto a sentinel — so
       `30_build_intervals.sql` needs no change. **Remaining, for the derivation owner:**
       (a) add `apply sql/15_normalise.sql` to `tools/build-model.sh` between `10` and `20`;
