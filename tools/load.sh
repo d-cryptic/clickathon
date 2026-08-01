@@ -403,6 +403,38 @@ Pick one, on purpose:
   tools/load.sh --append  ${DB_FLAG}...   add to them knowingly (e.g. a second day-file)"
       ;;
     replace)
+      # Queue Q36, from Codex audit 005. --replace TRUNCATEs ev_raw and
+      # content_dim, and against the GRADED database that destroys the raw
+      # events every answer is derived from. The graded-write guards added on
+      # 2026-08-02 covered build-model.sh and apply-sql.sh's DROP/TRUNCATE and
+      # never covered this path at all — so the most destructive operation in
+      # the repo was also the least guarded.
+      #
+      # ev_raw is the one thing a rebuild cannot recover from: both prior
+      # incidents were survivable *because* ev_raw was intact.
+      #
+      # Announcing the loss is not the same as requiring consent. This asks.
+      readonly GRADED_DB=sonyliv
+      if [ "$DB" = "$GRADED_DB" ] && [ "${REPLACE_GRADED:-}" != yes ]; then
+        cat >&2 <<EOF
+
+tools/load.sh: REFUSING to --replace the graded database '$GRADED_DB'.
+
+  This TRUNCATEs $GRADED_DB.ev_raw ($RAW_BEFORE rows) and
+  $GRADED_DB.content_dim ($CONTENT_BEFORE rows). ev_raw is the raw event stream
+  every served answer is derived from, and unlike the model tiers it CANNOT be
+  rebuilt — it can only be re-loaded from the CSV, if you still have it.
+
+  Both graded-database incidents were recoverable precisely because ev_raw was
+  untouched. This is the operation that would remove that safety net.
+
+  If you genuinely intend to reload the graded raw data:
+    REPLACE_GRADED=yes TARGET=cloud tools/load.sh --replace ...
+
+  For anything else, target a scratch database:  --database <name>
+EOF
+        exit 1
+      fi
       echo
       echo "############################################################"
       echo "# --replace: TRUNCATING $DB ON TARGET=$TARGET"
