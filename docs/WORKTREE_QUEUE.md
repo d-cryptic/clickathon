@@ -129,6 +129,38 @@ instruction is to ask before touching schema. The fix is a local `DROP TABLE def
 followed by `tools/apply-sql.sh sql/00_schema.sql` and a local rebuild. Related to Q16 (ADR 0018),
 which unified *which* database each target resolves to but not *what shape* the local one is in.
 
+## 🔴 The graded database is still on PRE-ADR-0016 shapes — do not run the publisher against it
+
+Verified read-only 2026-08-01, immediately after ADR 0016 merged:
+
+```
+ mv_user_minute      STILL EXISTS on sonyliv   (ADR 0016 retired it)
+ cc_user_minute      SharedAggregatingMergeTree (ADR 0016 makes it ReplacingMergeTree(computed_at))
+```
+
+**This is expected, not a defect.** ADR 0016 says in its own summary: *"nothing applied to
+`sonyliv`."* The code and the proof are in the repo; the graded database was deliberately left alone
+because applying a schema change to it is an operator decision.
+
+**But two things follow, and both are traps:**
+
+1. **Running `tools/publish.sh` against `sonyliv` right now would meet a table whose engine does not
+   match what the code expects.** The publisher's `users` phase writes replace-semantics rows into
+   what is still a set-union table. Its cursor is at epoch and it has never run there — **keep it
+   that way** until the migration happens.
+2. **Every claim that "the publisher owns all four tiers" describes the CODE, not the graded
+   service.** True of the repo, not yet of what we are scored on. Docs must not blur the two — this
+   is the same overstatement class that Q4 spent a whole task correcting.
+
+The user tier currently reads the correct **2,844** because `tools/build-model.sh` TRUNCATEs
+`cc_user_minute` before every rebuild, so the set-union retraction bug has no opportunity to
+accumulate. That is a rebuild masking a latent defect, not the defect being absent.
+
+**The migration path already exists**: `build-model.sh` step 2/6 detects a non-`ReplacingMergeTree`
+`cc_user_minute`, drops it with `mv_user_minute`, and lets `sql/45_user_concurrency.sql` recreate it.
+So the next **authorised** graded rebuild (`REBUILD_GRADED=yes`) migrates it. That is an operator
+call — see [CLAUDE.local.md](../CLAUDE.local.md): ask before touching the schema.
+
 ## 🔴 The spawn defect that caused a production incident
 
 `sc worktree create` bases a new worktree on **`main`**, NOT on the target branch, even after
