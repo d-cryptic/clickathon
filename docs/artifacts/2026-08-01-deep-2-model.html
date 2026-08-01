@@ -166,10 +166,11 @@
       <tr><td><b>cc_minute_delta</b></td><td>AggregatingMergeTree</td><td class="n">28,073</td><td>minute concurrency, any dimension filter</td></tr>
       <tr><td><b>cc_hour_agg</b></td><td>ReplacingMergeTree(computed_at)</td><td class="n">26,254</td><td>hour + day peak and average · 8-level cube</td></tr>
       <tr><td><b>cc_minute_stateless</b></td><td>AggregatingMergeTree</td><td class="n">91,292</td><td>the session-independent comparison</td></tr>
-      <tr><td><b>cc_user_minute</b></td><td>AggregatingMergeTree</td><td class="n">91,692</td><td>distinct users — uniqExact, never a sum</td></tr>
+      <tr><td><b>cc_user_minute</b></td><td>ReplacingMergeTree(computed_at) — ADR 0016</td><td class="n">91,692</td><td>distinct users — replaceable uniqExact buckets, never a sum; retraction = an empty state at a newer version</td></tr>
       <tr><td><b>dict_content</b></td><td>COMPLEX_KEY_HASHED</td><td class="n">33,464</td><td>title / video_type / category at query time</td></tr>
     </table>
   </div>
+  <p class="note"><b>Engine note (ADR 0016):</b> <span style="font-family:var(--mono)">cc_user_minute</span> was re-engined from a set-union AggregatingMergeTree — union has no inverse, so the MV could never retract a user — to replaceable buckets, with <span style="font-family:var(--mono)">mv_user_minute</span> retired. The graded database migrates to this shape on its next <span style="font-family:var(--mono)">make model</span>; row count is unchanged.</p>
   <div class="split" style="margin-top:.3rem">
     <div><h4>Why ReplacingMergeTree(build_version)</h4><p class="note"><span style="font-family:var(--mono)">(interval_end)</span> assumes re-derivation only ever <em>extends</em> an interval. It does not — tail grace can overshoot a true end, so a stale longer row wins forever. Measured: 316 intervals too long, 315 stuck open, <b class="no">+37 on the peak</b>.</p></div>
     <div><h4>Why COMPLEX_KEY_HASHED</h4><p class="note">A simple-key dictionary keys on <span style="font-family:var(--mono)">UInt64</span> internally regardless of declared type, so it cannot look up the planted <b class="no">−987654322</b>. It loads fine and throws on lookup — the worst shape a bug can have.</p></div>

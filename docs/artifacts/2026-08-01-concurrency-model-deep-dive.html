@@ -193,6 +193,30 @@ li::marker{color:var(--faint)}
       <code>docs/MENTOR_QUESTIONS.md</code>.
     </p>
   </div>
+
+  <div class="call risk">
+    <div class="ct">Second amendment · 2026-08-01 (evening) · what the first amendment got wrong, and what superseded the design</div>
+    <ul>
+      <li><strong>"There is no cadence" was itself wrong.</strong> Mixed together, the 41
+      <code>VideoHeartbeat</code> sub-streams look aperiodic; separated, the three largest each tick at
+      <strong>exactly 40.0 s</strong> (p50 = p90). The 150s threshold still stands, but every
+      "there is no cadence" clause here is superseded by <code>doubts/01</code>.</li>
+      <li><strong>The headline was re-baselined by ADR 0009</strong> (same-second pause/resume tie):
+      peak <b>2,887 → 2,917</b>, counted watch time <b>1,949.3 h → 1,978.1 h</b>. Every watch-hours
+      figure in this document is the pre-fix number.</li>
+      <li><strong>§E2's two-tier architecture was retired, not built.</strong> ADR 0013's incremental
+      publisher made correction-by-diff (§E3) the <em>only</em> update path — the hot tier is
+      unnecessary and ADR 0005 is <strong>closed, will not be built</strong>. ADR 0016 extended the
+      publisher to all four serving tiers. §09 statuses as of tonight: 0003 accepted in practice,
+      0004 superseded in part by 0013, 0005 closed, 0006 <strong>accepted and live</strong>;
+      the record now runs to ADR 0018.</li>
+      <li><strong>The largest open question was found after this document:</strong> whether
+      "concurrent at minute M" means <em>any overlap</em> (shipped) or <em>presence at the instant
+      M:00</em> — worth <b>2,507 vs 2,917, −14.1%</b> on the peak (<code>doubts/09</code>).</li>
+    </ul>
+    <p>This page is kept as a dated design record; for current state read <code>WALKTHROUGH.md</code>
+    and the four-part deep-dive series (<code>deep-1-data … deep-4-scale-ops</code>).</p>
+  </div>
 </section>
 
 <!-- ================= SCOREBOARD ================= -->

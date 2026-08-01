@@ -158,8 +158,8 @@
       <tr><td>window views vs brute force</td><td>rolling and tumbling against a self-join</td><td class="n yes">0 mismatches</td></tr>
       <tr><td>tie-break determinism</td><td>same answer at max_threads 1 / 8 / 32</td><td class="n yes">identical hashes</td></tr>
       <tr><td>load guard</td><td>a second load is refused, not silently doubled</td><td class="n yes">27 assertions</td></tr>
-      <tr><td>/bench</td><td>latency AND bytes read on the benchmark shapes</td><td class="n no">absent — query set not in hand</td></tr>
-      <tr><td>tail-sensitivity sweep</td><td>how far the answer moves across defensible tunables</td><td class="n warn">partially — see 3.7</td></tr>
+      <tr><td>/bench</td><td>latency AND bytes read on the benchmark shapes</td><td class="n yes">13-query reconstruction (official set never released) · largest read 814 KiB · ev_raw never touched</td></tr>
+      <tr><td>tail-sensitivity sweep</td><td>how far the answer moves across defensible tunables</td><td class="n yes">measured by the cross-model audit — see 3.7</td></tr>
     </table>
   </div>
 </figure>
@@ -186,16 +186,16 @@
   <figcaption><span class="num">3.7</span><span class="cap">What the gate structurally cannot see</span></figcaption>
   <div class="panel">
     <div class="bars">
-      <div class="bar"><span>resume semantics</span><div class="btrack"><div class="bfill" style="width:100%;background:var(--flag)"></div></div><span class="bval">9.7%</span></div>
-      <div class="bar"><span>heartbeat cadence 40 vs 60 s</span><div class="btrack"><div class="bfill" style="width:91%;background:var(--flag)"></div></div><span class="bval">≤8.8%</span></div>
-      <div class="bar"><span>unclosed-pause rule</span><div class="btrack"><div class="bfill" style="width:52%;background:var(--paused)"></div></div><span class="bval">5.09%</span></div>
-      <div class="bar"><span>…the same rule, at the PEAK</span><div class="btrack"><div class="bfill" style="width:46%;background:var(--paused)"></div></div><span class="bval">+4.5%</span></div>
-      <div class="bar"><span>minute-boundary convention</span><div class="btrack"><div class="bfill" style="width:4%;background:var(--gone)"></div></div><span class="bval">1 viewer</span></div>
+      <div class="bar"><span>minute membership (doubts/09)</span><div class="btrack"><div class="bfill" style="width:100%;background:var(--flag)"></div></div><span class="bval">−14.1%</span></div>
+      <div class="bar"><span>resume semantics</span><div class="btrack"><div class="bfill" style="width:68%;background:var(--flag)"></div></div><span class="bval">9.6%</span></div>
+      <div class="bar"><span>heartbeat cadence 40 vs 60 s</span><div class="btrack"><div class="bfill" style="width:61%;background:var(--flag)"></div></div><span class="bval">≤8.6%</span></div>
+      <div class="bar"><span>unclosed-pause rule <em style="font-style:normal;color:var(--muted)">(pre-0009 measurement)</em></span><div class="btrack"><div class="bfill" style="width:32%;background:var(--paused)"></div></div><span class="bval">+131 pk</span></div>
+      <div class="bar"><span>minute-boundary tie</span><div class="btrack"><div class="bfill" style="width:3%;background:var(--gone)"></div></div><span class="bval">1 viewer</span></div>
     </div>
   </div>
   <div class="flagbox">
     <h3>Why no test can catch these</h3>
-    <p>The gate recomputes truth from <span style="font-family:var(--mono)">ev_raw</span> using <b>the same definition it is testing</b>. Change the rule in both places and it agrees with itself. A 9.7% definitional error passes every test we own, on every run, silently — which is exactly why these are mentor questions rather than engineering work.</p>
+    <p>The gate recomputes truth from <span style="font-family:var(--mono)">ev_raw</span> using <b>the same definition it is testing</b>. Change the rule in both places and it agrees with itself. The biggest fork — does "concurrent at minute M" mean <em>any overlap</em> (shipped) or <em>present at the instant M:00</em>, how a sampled gauge reads? — moves the peak <b>2,917 → 2,507, −14.1%</b> (doubts/09) and passes every test we own, on every run, silently. The unclosed-pause spread (+131 peak) was measured pre-ADR-0009 and its permissive arm has not been re-run — quoted as historical. These are mentor questions, not engineering work.</p>
   </div>
   <p class="note">The tunable sweep makes the envelope concrete: across gap ∈ {120, 150, 180} × tail ∈ {0, 60, 150} the peak spans <b>2,756 → 3,132</b>, a 13.6% range. Our shipped point is 150/60 → 2,917.</p>
 </figure>
@@ -229,17 +229,19 @@
         <tr><td>sort key 17.3×</td><td class="n yes">✓</td></tr>
         <tr><td>row ceiling holds at 100×</td><td class="n yes">✓</td></tr>
         <tr><td>the gate can fail — negative-tested 4 ways</td><td class="n yes">✓</td></tr>
+        <tr><td>bench: 13 shapes ≤ 814 KiB read, 7–45 ms server</td><td class="n yes">✓</td></tr>
+        <tr><td>publisher maintains all 4 tiers = rebuild (scratch)</td><td class="n yes">✓</td></tr>
       </table>
     </div>
     <div>
       <h4 style="color:var(--flag)">Not yet</h4>
       <table>
         <tr><td>matches the private ground truth</td><td class="n no">unprovable</td></tr>
-        <tr><td>dashboard-grade latency, measured</td><td class="n no">no /bench</td></tr>
-        <tr><td>publisher keeps user + hour tiers current</td><td class="n no">not maintained</td></tr>
-        <tr><td>publication deployed on the graded DB</td><td class="n no">not installed</td></tr>
+        <tr><td>the official benchmark query set</td><td class="n no">never released — ours is a reconstruction</td></tr>
+        <tr><td>a committed publisher run on the graded DB</td><td class="n no">schema installed, zero runs — still batch-rebuilt</td></tr>
         <tr><td>dedup inert at 7-dimension filter grain</td><td class="n no">6 attributions change</td></tr>
         <tr><td>safe under crash / concurrent publishers</td><td class="n no">by inspection only</td></tr>
+        <tr><td>gate's peak-minute pick tie-broken (ADR 0014)</td><td class="n no">reconcile still bare argMax</td></tr>
       </table>
     </div>
   </div>
