@@ -1,0 +1,20 @@
+CRUEL knob 'structural' · seed 20260822 · day 2026-08-22 UTC · data/cruel-structural-raw.csv
+events 507 (+header) · sessions 16 · truth minutes 85 (32 SPEC_ONLY)
+designed peak 10 @ 2026-08-22 17:40 UTC (spec projection; SPEC_ONLY minutes are a policy, not a truth)
+
+hazards:
+  - sr_shared one sid on two devices at once (hour 03, SPEC_ONLY)
+  - sd0 byte-duplicate rows x3 — must not move any number
+  - sd1 3x VideoSessionStart, 2x VideoSessionEnd — bare timestamps per spec
+  - sd2 heartbeats 40-180s AFTER VideoSessionEnd extend the run ('ended is not sealed')
+  - sd3 orphan resume (no pause) — spec: no effect
+  - sd4 orphan pause at +300s — conservative rule: active [start, pause], NO tail
+  - sd5 orphan AppBackgrounded with beats continuing at 79s — spec keeps it fully active (bg is a generic timestamp; doubts/10 disputes exactly this)
+  - sd6 one sid, two clusters 35 min apart — two runs, both counted, one session
+  - su* one user u_cr_multi holding 8 simultaneous sessions — session peak 8, USER peak 1
+
+UNDEFINED — spec projection recorded, needs an organiser ruling:
+  - session 'vs_cr_sr_shared': one video_session_id interleaved from two platforms/users simultaneously; spec merges to ONE session (true viewers: 2)
+
+questions for the organisers:
+  - A session id reused simultaneously on two devices (interleaved events, two platforms): one concurrent viewer or two?
