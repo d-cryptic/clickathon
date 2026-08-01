@@ -5,7 +5,7 @@
 > watch** — the one thing `demo/run.sh` cannot show. Four beats: the curve building, a
 > platform/country filter answering mid-replay, a **late arrival correcting already-published
 > history in place**, and the committed reconcile gate passing at the end. Rehearsed end to end:
-> 905,558 events in 168 s, 29 incremental publish runs, **zero rebuilds**, gate green on 17,028
+> 905,558 events in 160 s, 47 incremental publish runs, **zero rebuilds**, gate green on 17,028
 > minutes at peak 2,917. **It says nothing about the graded service:** `sonyliv` is batch-rebuilt,
 > its publisher has committed **zero** runs, and its cursor is at epoch. Read "What is real and what
 > is staged" before presenting.
@@ -51,11 +51,13 @@ service entirely out of the loop.
 
 ## What you are watching
 
+A real frame from the committed transcript:
+
 ```
-09:41→09:28  │▇▇▇▆▆▅▅▅▆▆▇█▇▆·····················│ cc 43  pk 43  lag 10s  q 50
-└─ replay clock                                     └─ concurrency at the absorbed edge
-      └─ absorbed through (the gap IS the publish lag)      └─ peak so far
-                                                                    └─ queue depth
+10:31→10:24  │▁▁▂▂▂▂▂▂▂▃▃▃▃▃▂▂▂▂▂▂▃▄▅▅▇▇█·····················│ cc 104  pk 105  lag 6s  q 369
+  │      └─ absorbed through — the gap to the replay clock IS the publish lag
+  └─ replay clock                    cc ─┘  concurrency at the absorbed edge
+                                        pk ─┘  peak so far    lag ─┘   q ─┘ queue depth
 ```
 
 - **Two clocks.** The replay clock is where the stream is; *absorbed-through* is the newest event
@@ -87,23 +89,32 @@ one uninterrupted run on the local container. Numbers, not adjectives.
 
 | | |
 |---|---|
-| ingested | **905,558 events** in 39 ticks over **168 s** (9,060 s of event time at 60×) |
-| publisher | **29 committed runs**, 36,025 session-derivations, **0 rebuilds, 0 `TRUNCATE`s** |
-| serving layer | 41,788 delta rows · 30,323 intervals |
+| ingested | **905,558 events** in 47 ticks over **160 s** (9,060 s of event time at 60×) |
+| publisher | **47 committed runs**, 44,048 session-derivations, **0 rebuilds, 0 `TRUNCATE`s** |
+| serving layer | 46,628 delta rows · 30,323 intervals |
 | peak served | **2,917** at 10:56 — the correct peak for this day |
-| publish lag | median **11 s**, max **29 s** wall clock across 44 frames (this is a 60× stress figure) |
-| queue depth | peaks at **5,140** sessions during the 10:30–11:00 burst, drains to 0 |
-| filter latency | **386 ms** (platform) and **328 ms** (country) *while the publisher was running*; the same queries measured **32–73 ms** on an idle database. Contention with a concurrent publish is the difference — quote the honest number, and use `/bench` for rigorous latency work |
-| late arrival | minute 09:58: **35 → 51 (+16)**, corrected in place |
-| ADR 0023 dip | 44 samples, **18 landed mid-publish**, 2 more caught by the drop guard; deepest suppressed sample **−58% (1,909 → 796)** |
+| publish lag | median **6 s**, max **12 s** wall clock across 50 frames (a 60× stress figure, not a production one) |
+| queue depth | peaks at **4,479** sessions during the 10:30–11:00 burst, drains to 0 |
+| filter latency | **134 ms** (platform, 6 rows) and **28 ms** (country) mid-replay, with the publisher running and 0 retries needed. Use `/bench` for rigorous latency work — this is a demo timing, wall clock from the client |
+| late arrival | minute 09:58: **35 → 51 (+16)**, corrected in place; observed passing through 46 as successive batches landed |
+| ADR 0023 dip | 50 samples, **3 landed mid-publish** (charted as `~`), 0 needed the drop guard; deepest suppressed sample **−86% (1,909 → 259)** |
 | gate | **17,028 minutes compared, 0 mismatched, max_abs_diff 0** |
-| total | 206 s wall clock including setup |
+| total | 169 s wall clock including setup |
 
-Two of these deserve emphasis. **18 of 44 samples landed mid-publish** — that is not a rare race, it
-is 40% of reads, and it is why the gating below exists rather than being optional. And the gate
-comparing **17,028 minutes with zero mismatches** is the whole argument: the curve was assembled by
-29 incremental corrections and a late injection, and it landed in exactly the same place a
-from-scratch rebuild would have.
+Three of these deserve emphasis.
+
+**The deepest suppressed sample was −86% (1,909 → 259)** — independently reproducing ADR 0023's
+−87.8% on different data, a different database and a different code path. The dip is not theoretical
+and it is not rare enough to ignore; it is simply not charted.
+
+**Only 3 of 50 samples landed mid-publish.** An earlier iteration of this script hit 18 of 44,
+because its chart edge chased the region the publisher was actively rewriting. Deriving the edge
+from outstanding work instead (below) moved it out of the blast radius — the dip did not change, our
+exposure to it did.
+
+**The gate compared 17,028 minutes with zero mismatches.** That is the whole argument: the curve was
+assembled by 47 incremental corrections plus a late injection reaching back into published history,
+and it landed in exactly the same place a from-scratch rebuild would have.
 
 ## What is real and what is staged
 
@@ -114,7 +125,7 @@ from-scratch rebuild would have.
 | **Scratch, not graded** | Everything runs in a database this script creates and destroys (default `sonyliv_t7replay`). The script **refuses** to target `sonyliv` or `default`, and refuses to run at all if `PUBLISH_ALLOW_PROD=1`. |
 | **The graded service does none of this** | `sonyliv` is **batch-rebuilt**. Its publisher has committed **zero** runs and its cursor is at epoch. Its `cc_user_minute` is still pre-ADR-0016 (`SharedAggregatingMergeTree`, `mv_user_minute` live), so running the publisher against it would write replace-semantics rows into a set-union table and silently inflate the user tier. **Nothing in this replay is running in the graded service, and it must not be.** |
 | **Time is compressed 60×** | Sessions open, heartbeat and close in the right *order* and the right *relative* spacing, but 60× faster. Ingest is therefore ~60× the real rate. |
-| **Publish lag here is a 60× stress figure** | Measured median 11 s, max 29 s wall clock, with the queue reaching 5,140 sessions during the 10:30–11:00 burst and the absorbed edge falling tens of event-minutes behind. That is what happens when you feed a publisher an hour of a national live event in one minute. It is **not** a production freshness number and must not be quoted as one — at 1× the same work arrives 60× slower. |
+| **Publish lag here is a 60× stress figure** | Measured median 6 s, max 12 s wall clock, with the queue reaching 4,479 sessions during the 10:30–11:00 burst and the absorbed edge falling tens of event-minutes behind. That is what happens when you feed a publisher an hour of a national live event in one minute. It is **not** a production freshness number and must not be quoted as one — at 1× the same work arrives 60× slower. |
 | **`PUBLISH_SETTLE_S=3`, not the default 5** | Settle is the floor on publish lag and the one assumption in the publisher's design (no insert takes longer than settle between `now64(3)` and its rows being visible). 3 s is safe for a single-writer local replay; it is a demo tuning, not a recommendation. |
 | **History is preloaded** | Everything before 09:00 is bulk-loaded and published before the replay starts. A live-event day does not begin with an empty serving layer. The replay covers 09:00 → 11:31, which is the ramp, the peak (2,917 at 10:56) and the drain. |
 | **The stream is staged, not re-parsed** | The CSV-loaded events are copied once into a `replay_source` table in the scratch database, so a tick is a server-side slice rather than 800k rows over the wire fifty times. Same rows, same lineage: local reads the container's CSV-loaded `ev_raw`; `--target cloud` reads graded `sonyliv.ev_raw` **read-only**. |
@@ -143,16 +154,38 @@ filter returns an **empty table**. ADR 0023 documents the magnitude of the dip b
 mode, which reads as a broken filter rather than as staleness. That is why the filter beat waits for
 a safe window (and says so when it had to).
 
-### The chart edge is held back on purpose
+### Where the chart edge comes from
 
 The right-hand edge is **not** `max(minute)` in `cc_minute_delta`. A batch's intervals all *close* at
 the end of their coverage, so the newest published minute is opens-minus-closes ≈ 0 until later
-batches publish the sessions still active there — charting it drops the curve off a cliff every
-frame (measured once as `cc 3` on a curve sitting at ~35). The edge is instead derived from the
-publisher's own bookkeeping — the newest event time among markings at or before the committed
-cursor — then held back by one tick of event time plus two interval tails, and kept **monotonic** so
-a straggler cannot rewind the chart. This is the same "leave the trailing window alone" rule as
-`PUBLISH_SETTLE_S`, applied to reads. It is a margin, not a proof.
+batches publish the sessions still active there — charting it drops the curve off a cliff on every
+frame (measured as `cc 3` and `cc 5` on curves sitting at ~35).
+
+Two attempts were needed to get this right, and the second is the one to understand:
+
+1. **Newest absorbed event, backed off by a fixed margin.** Rejected. `max(max_event_ts)` over
+   absorbed markings *overshoots* — one long-running session carries a `max_event_ts` far ahead of
+   the rest while minutes below it are still missing sessions. A margin makes the overshoot rarer,
+   never impossible, and a margin wide enough to always be safe is wide enough to look stale.
+2. **The oldest event time not yet committed.** Used. Everything strictly before it is published, so
+   it is exact rather than approximate: one query for the earliest `min_event_ts` among markings
+   later than the committed cursor. It is keyed on the *committed* cursor, not on
+   `cc_publish_consumed`, so a claimed-but-uncommitted run still counts as outstanding.
+
+Instability *within* an in-flight run is deliberately **not** handled here — that is what phase
+gating is for. Pinning the edge to an in-flight batch instead drags it back by hours, because a
+batch's read window is widened to cover each session's prior published intervals (measured: an edge
+of 08:09 while the stream was at 11:04). The edge is also held **monotonic**, so the straggler
+injection — whose marking legitimately reaches back into published history — stalls it for a beat
+rather than rewinding the chart.
+
+Getting this right is what took mid-publish samples from 18-in-44 down to 3-in-50.
+
+> **A trap worth stealing.** In ClickHouse, `min()`/`max()`/`argMax()` over **zero rows** return the
+> column type's *default*, not `NULL` — so `ifNull(min(x), fallback)` silently yields the epoch
+> instead of the fallback. Here that produced `epoch − 60s`, which underflows `toUnixTimestamp` to
+> 4294967236 and renders as the year **2106** — surfacing as a chart edge of "06:27" with the stream
+> at 09:00. Emptiness is tested with `count()`, and the result is floored at the window start.
 
 ## Does it agree with the truth?
 

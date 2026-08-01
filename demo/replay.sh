@@ -298,11 +298,32 @@ hr
 # after its statement returns, so `claimed` can briefly outlive a landed
 # negation) — the drop guard below catches that residue.
 # ---------------------------------------------------------------------------
+# BOTH 'committed' and 'aborted' are terminal. 'aborted' arrives with the
+# publisher-safety work (Q8 recovery sweep) and does not exist in every version
+# of sql/12_publish.sql — the predicate is written so it is correct either way:
+# where the phase is absent the countIf simply never matches it. Without this a
+# rolled-back run reads as permanently in flight and the gating goes stale.
+#
+# Note the empty-vs-NULL trap: argMax over ZERO rows returns the type's default
+# — an empty String — not NULL, so ifNull() does not fire and an idle publisher
+# reads as ''. That silently arms the drop guard (which only applies while a run
+# is in flight) on every idle sample, so the emptiness is normalised here.
 phase_now() {
-  qdb1 "SELECT ifNull((SELECT argMax(phase, at) FROM cc_publish_runs
-          WHERE run_id IN (SELECT run_id FROM cc_publish_runs
-                           GROUP BY run_id HAVING countIf(phase = 'committed') = 0)), 'idle')"
+  local p
+  p=$(qdb1 "SELECT (SELECT argMax(phase, at) FROM cc_publish_runs
+              WHERE run_id IN (SELECT run_id FROM cc_publish_runs
+                               GROUP BY run_id
+                               HAVING countIf(phase IN ('committed', 'aborted')) = 0))")
+  printf '%s' "${p:-idle}"
 }
+# The phases during which cc_minute_delta holds -deltas(old) and not yet
+# +deltas(new). 'claimed'/'claiming' are safe (nothing written to the serving
+# table yet); everything from 'emitted' on is safe for the MINUTE tier.
+#
+# Forward-compatible with ADR 0023's one-block fix by construction: once the
+# corrections are staged and land in a single swap, the phase names change to
+# staged_neg/staged_pos/swapped, none of which match here — so every sample is
+# treated as safe, which is exactly right, because the dip is gone.
 phase_unsafe() { case "$1" in negated|derived|pruned) return 0 ;; *) return 1 ;; esac; }
 
 # safe_read <sql> — a scalar read BRACKETED by phase probes. Returns the value,
@@ -333,25 +354,52 @@ safe_read() {
 # The gap between this and the clock IS the freshness, and it is displayed
 # rather than smoothed away.
 #
-# TRAILING MARGIN. max(max_event_ts) is the newest event in the absorbed
-# markings, which OVERSHOOTS: one long-running session in the batch can carry a
-# max_event_ts well ahead of the rest, while minutes just below it are still
-# missing sessions that later batches will publish. Reading there prints a
-# minute mid-assembly — measured once as cc 3 on a curve sitting at ~35.
+# DERIVED FROM PENDING WORK, not from a margin. The obvious edge —
+# max(max_event_ts) among absorbed markings — OVERSHOOTS: one long-running
+# session can carry a max_event_ts far ahead of the rest while minutes below it
+# are still missing sessions that later batches will publish. Reading there
+# prints a minute mid-assembly (measured: cc 3 and cc 5 on curves sitting at
+# ~35). Backing that off by a fixed margin only makes the overshoot less
+# frequent, not impossible — a margin wide enough to always be safe would be
+# wide enough to make the demo look stale.
 #
-# So the edge is held back by one tick of event time plus two interval tails.
-# This is the same "leave the trailing window alone" rule as the publisher's
-# PUBLISH_SETTLE_S, applied to reads instead of writes; every streaming
-# dashboard has one. It is a margin, not a proof — which is why the edge is
-# also held MONOTONIC below, so a late-arriving marking cannot rewind the chart.
-TRAIL_S=$(( SPEED * TICK_S + 120 ))
+# The exact edge is the oldest event time whose publication is NOT YET
+# COMMITTED, because everything strictly before it has been published. That is
+# one query over the change log: the earliest event in any marking later than
+# the committed cursor. With nothing outstanding the publisher is caught up and
+# the edge is simply the newest event absorbed.
+#
+# Keyed on the COMMITTED cursor, not on cc_publish_consumed: a claimed-but-
+# uncommitted run's markings must still count as outstanding, since its new
+# events are not in the serving table yet. Instability *within* an in-flight run
+# is a separate concern and is handled by phase gating, not here — pinning the
+# edge to an in-flight batch instead would drag it back by hours, because a
+# batch's read window is widened to cover each session's PRIOR published
+# intervals (measured: an edge of 08:09 while the stream was at 11:04).
+#
+# min_event_ts is per MARKING — the events in one insert block — so for a
+# session that has been open for hours this is the current tick, not the
+# session's start. Held MONOTONIC by the caller, so the straggler injection
+# (whose marking legitimately reaches back into published history) stalls the
+# edge for a beat instead of rewinding the chart.
+# NOTE the empty-aggregate trap, which bit this function and phase_now() both:
+# min()/max()/argMax() over ZERO rows return the column type's DEFAULT, not
+# NULL, so `ifNull(min(...), fallback)` never fires and you silently get the
+# epoch. Here that produced `epoch - 60s`, which underflows toUnixTimestamp to
+# 4294967236 and renders as the year 2106 — observed as a chart edge of "06:27"
+# with the stream at 09:00. Emptiness is therefore tested with count(), and the
+# result is floored at the window start so no underflow can reach the renderer.
 served_minute() {
-  qdb1 "SELECT toString(toUnixTimestamp(toStartOfMinute(least(
-          ifNull((SELECT max(max_event_ts) FROM session_dirty
-                  WHERE marked_at <= (SELECT max(cursor_to) FROM cc_publish_runs
-                                      WHERE phase = 'committed')),
-                 toDateTime64($FROM_E, 3)) - INTERVAL $TRAIL_S SECOND,
-          toDateTime64($1, 3)))))"
+  qdb1 "WITH
+          (SELECT max(cursor_to) FROM cc_publish_runs WHERE phase = 'committed') AS cur,
+          (SELECT if(count() = 0, NULL, min(min_event_ts)) FROM session_dirty
+             WHERE cur IS NULL OR marked_at > cur) AS outstanding,
+          (SELECT if(count() = 0, NULL, max(max_event_ts)) FROM session_dirty) AS absorbed
+        SELECT toString(toUnixTimestamp(toStartOfMinute(greatest(
+          toDateTime64($FROM_E, 3),
+          least(
+            ifNull(outstanding - INTERVAL 60 SECOND, ifNull(absorbed, toDateTime64($FROM_E, 3))),
+            toDateTime64($1, 3))))))"
 }
 
 concurrent_at() { # concurrent_at <epoch> — served concurrency at one minute
