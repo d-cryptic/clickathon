@@ -73,8 +73,12 @@ three questions in [`evidence/source-contract/README.md`](../evidence/source-con
   the loader's own guards. If content metadata was not re-delivered, run with the raw CSV only: the
   gate reports every id as unresolved, which is exactly what serving would do (A9/R10).
 
-This doubles as a dress rehearsal of the loader's positional header check (§2's first failure row)
-on a database whose loss costs nothing.
+This doubles as a dress rehearsal of the loader's header-shape check (§2's first failure row)
+on a database whose loss costs nothing. Columns map **by name** since ADR 0024: a reordered
+header is safe, a new column is carried into `extra`, and only a missing or duplicated one is a
+decision. `tools/contract-runner-agreement.sh` asserts that this step-zero gate and
+`tools/unseen-run.sh` agree about which files are loadable — they did not, until Q37
+(`evidence/q37/`).
 
 ---
 
@@ -98,7 +102,7 @@ Wall clock, measured. Columns: synthetic 6,887 · holdout 30,097 · replay 849,8
 
 | # | Phase | Verifies | 6.9k | 30k | 850k |
 |---|---|---|---:|---:|---:|
-| 0 | preflight | CSV header matches the loader's **positional** column list; DB empty; SQL fingerprint recorded | <1 s | <1 s | <1 s |
+| 0 | preflight | CSV header carries the columns the loader needs (**by name**; new ones are announced and carried into `extra`); data rows counted as RFC-4180 records, not lines; DB empty; SQL fingerprint recorded | <1 s | <1 s | <1 s |
 | 1 | schema `00`, `10` | tables + `mv_stateless` exist **before** the load — it is the only populator of `cc_minute_stateless`, there is no backfill | 5 s | 5 s | 5 s |
 | 2 | load `tools/load.sh` | `count(ev_raw)` **equals** the CSV data-row count; `cc_minute_stateless` non-empty | 12 s | 9 s | 18 s |
 | 3 | intervals `30` | `session_intervals` non-empty; prints intervals / open / active hours | 2 s | 4 s | 3 s |
@@ -138,7 +142,10 @@ say so next to the answer (ADR 0014; ties are normal — 5 of 7 delivered days h
 
 | Symptom | Cause | Do this |
 |---|---|---|
-| `raw CSV header does not match what tools/load.sh inserts` | new/renamed/reordered column | **Do not "fix" it by editing the header.** `tools/load.sh` maps columns by POSITION through `input(...)`. Update `RAW_COLS` and the `INSERT … SELECT` column list in `tools/load.sh`, then re-run. |
+| `REFUSING: missing columns no flag overrides: …` | `event_timestamp` or `video_session_id` absent | No flag overrides these — no interval can be derived without them. The file is wrong, or it is not the file you think it is. |
+| `REFUSING: duplicate header columns: …` | the same name twice | Two halves of a mistake. Fix the file; do not pick one. |
+| `MISSING columns (n): …` then `load.sh FAILED` | a non-essential column absent | A missing column is a decision, not a silent `''`. Re-run with `--allow-missing <cols>`; that dimension is then BLANK for the whole file. |
+| `NEW columns (n): … -> carried into `extra`` | a new filter column | **Not an error, and nothing to fix.** ADR 0024: it is carried by name and queryable the same day as `extra['<name>']`. Do not edit `tools/load.sh` — it maps by name, not position. |
 | `ev_raw holds N rows, the CSV has M data rows` | partial load, or an append onto a previous load | The script drops the DB first, so this means the load itself failed midway. Re-run; if it repeats, load in two halves and compare. |
 | `cc_minute_stateless is EMPTY after the load` | schema applied *after* the data | Drop the database and re-run. Ordering is not optional. |
 | `session_intervals is empty` | the derivation matched nothing — usually a timestamp-unit problem | `SELECT min(event_timestamp), max(event_timestamp) FROM <db>.ev_raw`. If you see 1970 or 56000, the source is **not** epoch millis and `tools/load.sh` divides by 1000 unconditionally. |

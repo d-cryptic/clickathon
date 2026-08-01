@@ -31,6 +31,7 @@
 | `scale-load.sql` | the generator itself — `INSERT ... SELECT FROM numbers_mt`, all server-side. Deterministic: every draw is `cityHash64(session, salt)`, so `(S, SEED)` regenerates the same stream |
 | `scale-fidelity.sql` | real vs synthetic on the shape metrics the model reads. This is what makes the scale timings falsifiable |
 | `unseen-run.sh <raw.csv> <content.csv\|none>` | **THE UNSEEN-DAY RUN** — whole path in an isolated scratch DB (`UNSEEN_DB=`, pick a FRESH name), ends on the verbatim gate and asserts its SUMMARY against the day's spine. Peak minutes resolve per ADR 0014. See [docs/RUNBOOK_UNSEEN.md](../docs/RUNBOOK_UNSEEN.md) |
+| `contract-runner-agreement.sh [fixture...]` | **THE TWO ENTRY POINTS MUST AGREE** — feeds the same CSV to the contract gate (RUNBOOK §0) and to `unseen-run.sh`, and fails if the gate PASSES a file the runner then REFUSES. Carries both-refuse controls so agreement cannot be earned by a guard that stopped guarding. Own scratch DBs. See [evidence/q37/](../evidence/q37/) |
 | `unseen-gen.sh` | manufacture a synthetic unseen day (every trap designed in, per-minute answer known analytically) → `data/unseen-synthetic-*.csv` + `evidence/unseen/designed-truth.tsv` |
 | `unseen-verify.sh` | compare the serving layer against the generator's designed truth (a third implementation of the counting spec) and probe each trap. Writes `evidence/unseen/verify.txt` |
 | `../demo/chaos.sh <beat>` | demo fault injection (`stall_mv`, `stall_ingest`, …) |
