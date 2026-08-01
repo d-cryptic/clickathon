@@ -16,22 +16,21 @@
       PASSED. It also never compares an IDLE minute (207 of 1,364 on the holdout) — proven by
       fabricating 500 viewers at an idle minute and watching the gate pass. Derive the minutes from
       the data, assert the row count, add a spine. See docs/SESSION-2026-08-01.md §4.
-- [~] **[H*]** **Continuous publication — DONE for the interval + minute-delta tier ONLY** (ADR 0013).
+- [x] **[H*]** **Continuously updated aggregates — DONE for all four tiers** (ADR 0013 + ADR 0016).
       `sql/12_publish.sql` + `tools/publish.sh`: an MV marks which sessions each INSERT touched, a
-      finalizer re-derives only those and appends `-deltas(old) + deltas(new)`. Nothing truncated; the
-      one mutation is a lightweight `DELETE` pruning superseded interval rows per run. Proven in
-      `evidence/publish.txt` — `session_intervals` and `cc_minute_delta` (the only tables it maintains)
+      finalizer re-derives only those and appends `-deltas(old) + deltas(new)`. The one mutation is a
+      lightweight `DELETE` pruning superseded interval rows per run. Proven in `evidence/publish.txt` —
       byte-identical to a from-scratch rebuild at every stage, including a straggler 46 min behind the
       watermark corrected in **3.4 s** reading 11.6% of `ev_raw`.
-      ⚠️ **The publisher has ZERO references to `cc_hour_agg` or `cc_user_minute`** — hour/day peaks and
-      user concurrency still require the batch rebuild, so "continuously updated aggregates" is NOT
-      done as a whole (docs/WORKTREE_QUEUE.md **Q2**, ADR 0015 pre-assigned). Installed on `sonyliv`
-      but has **never committed a run** there (publish cursor at epoch, verified read-only 2026-08-01);
-      every live number comes from batch rebuilds. Follow-ons it deliberately did not do:
-  - [ ] **[H*]** Make the publisher maintain `cc_user_minute` and `cc_hour_agg` (or state loudly at
-        serving time that those tiers are only as fresh as the last batch rebuild). `mv_user_minute`'s
-        set union can add a user to a minute but cannot retract one, which is why `build-model.sh`
-        truncates it — Q2's convergence tests are the acceptance bar.
+      ADR 0013 alone maintained only `session_intervals` + `cc_minute_delta`, so hour/day peaks went
+      stale and user concurrency inflated (a `uniqExact` set union cannot retract). **ADR 0016 closes
+      that**: the `hours`/`users` phases re-derive the touched hour-cube rows and user-minute buckets,
+      `cc_user_minute` is replace-not-union so retraction is expressible, and `publish-test.sh` now
+      compares **all four tiers** across bootstrap, growth, shrink, dimension change, a 46-minute
+      straggler and 200 forced republications — 0 differing cells.
+      ⚠️ **Installed on `sonyliv` but has never committed a run there** (publish cursor at epoch,
+      verified read-only 2026-08-01) — every live number still comes from a batch rebuild. Going live
+      is a human's call; see ADR 0013's last section. Follow-ons it deliberately did not do:
   - [ ] **[H*]** Make `session_intervals` a view over an append-only per-run ledger, so the
         per-run lightweight `DELETE` (1.4 s, the dominant cost of a small batch) goes away. Touches
         tables other agents own.

@@ -140,6 +140,23 @@ running it unscoped would silently re-derive every session."
 }
 
 # ---------------------------------------------------------------------------
+# extract_insert <src> <dst>
+#
+# sql/45_user_concurrency.sql and sql/50_hour_agg.sql are multi-statement files
+# (DDL + INSERT + views) and the HTTP endpoint takes exactly one statement, so
+# the canonical re-derivation INSERT is cut out between its PUBLISH_EXTRACT
+# markers rather than reimplemented here — same no-drift rationale as the sed
+# templating above.
+# ---------------------------------------------------------------------------
+extract_insert() {
+  local src="$1" dst="$2"
+  sed -n '/PUBLISH_EXTRACT_BEGIN/,/PUBLISH_EXTRACT_END/p' "$src" > "$dst"
+  grep -q 'INSERT INTO' "$dst" || die "no INSERT between PUBLISH_EXTRACT markers in $src.
+The markers moved or were deleted. This is a HARD stop: without the extracted
+statement the hour/user tiers would silently stop being maintained."
+}
+
+# ---------------------------------------------------------------------------
 # mark <run_id> <phase> <cursor_from> <cursor_to> <sessions> <rows> <ms> <note>
 # The write-ahead log. Written AFTER the phase's statement returns.
 # ---------------------------------------------------------------------------
@@ -352,8 +369,68 @@ publish_once() {
     phase=emitted
   fi
 
-  # -- PHASE: commit --------------------------------------------------------
+  # -- PHASE: hours ---------------------------------------------------------
+  # Re-derive the hour tier for every hour this batch could have touched.
+  # Deltas are hour-clipped (ADR 0003), so an hour is self-contained and the
+  # canonical INSERT in sql/50_hour_agg.sql scoped to those hours reads nothing
+  # outside them; cc_hour_agg is ReplacingMergeTree(computed_at), so the
+  # re-derived rows SUPERSEDE — a plain insert, no mutation (ADR 0016).
+  #
+  # The touched-hour set comes from the batch's per-session read windows: every
+  # old interval lies inside [lo, hi] (the claim's completeness argument) and
+  # every new interval ends by hi + TAIL_S, so with close deltas landing at
+  # most one minute later, hours(lo .. hi + 2h) is a provable superset. A
+  # superset is all that is needed: re-deriving an untouched hour rewrites the
+  # identical row at a newer version.
   if [ "$phase" = emitted ]; then
+    local HOURS_IN
+    HOURS_IN="(SELECT toDateTime(h) FROM (SELECT DISTINCT arrayJoin(range(toUInt32(toStartOfHour(toDateTime(lo_event_ts))), toUInt32(toStartOfHour(toDateTime(hi_event_ts))) + 7201, 3600)) AS h FROM cc_publish_batch WHERE run_id = $run_id))"
+    extract_insert sql/50_hour_agg.sql "$TMP/hours_src.sql"
+    # The scope rides the ARRAY JOIN line, not the FROM line: WHERE must come
+    # AFTER an ARRAY JOIN clause or the statement does not parse.
+    template_or_die "$TMP/hours_src.sql" "$TMP/hours.sql" 'PUBLISH_HOURS' \
+      -e "s|^    ARRAY JOIN \\[0, 1, 2, 3, 4, 5, 6, 7\\] AS g\$|    ARRAY JOIN [0, 1, 2, 3, 4, 5, 6, 7] AS g WHERE toStartOfHour(minute) IN $HOURS_IN /*PUBLISH_HOURS*/|"
+    t0=$(now_ms)
+    qf "$TMP/hours.sql" "publish-${run_id}-hours" "&insert_deduplication_token=${run_id}:hours" >/dev/null
+    t1=$(now_ms); rows="$(written_rows "publish-${run_id}-hours")"
+    mark "$run_id" hours "$cursor_from" "$cursor_to" "$sessions" "$rows" "$((t1-t0))" ""
+    say "   hours     ${rows} hour-cube rows re-derived   $((t1-t0)) ms"
+    phase=hours
+  fi
+
+  # -- PHASE: users ---------------------------------------------------------
+  # Re-derive the user tier for every (minute, dims) bucket this batch could
+  # have touched. cc_user_minute is ReplacingMergeTree(computed_at) since ADR
+  # 0016: the canonical INSERT in sql/45_user_concurrency.sql recomputes each
+  # touched bucket IN FULL (all sessions covering it, not just the batch's) and
+  # the new state replaces the old one — which is what makes RETRACTION work,
+  # the thing the retired mv_user_minute's set union could never do. Buckets
+  # whose coverage vanished get an explicit empty state at the newer version.
+  #
+  # Touched minutes: same window argument as the hours phase, at minute grain —
+  # coverage ends by hi + TAIL_S, so minutes(lo .. hi + 4min) is a superset.
+  # The interval prefilter is the blast-radius bound: only intervals that can
+  # overlap the batch window are expanded, not all of session_intervals.
+  if [ "$phase" = hours ]; then
+    local MINS_IN
+    MINS_IN="(SELECT toDateTime(m) FROM (SELECT DISTINCT arrayJoin(range(toUInt32(toStartOfMinute(toDateTime(lo_event_ts))), toUInt32(toStartOfMinute(toDateTime(hi_event_ts))) + 241, 60)) AS m FROM cc_publish_batch WHERE run_id = $run_id))"
+    extract_insert sql/45_user_concurrency.sql "$TMP/users_src.sql"
+    template_or_die "$TMP/users_src.sql" "$TMP/users.sql" 'PUBLISH_USER_NEW' \
+      -e "s|^        FROM session_intervals FINAL\$|        FROM session_intervals FINAL WHERE interval_end >= toDateTime64('$LO',3) - INTERVAL 300 SECOND AND interval_start <= toDateTime64('$HI',3) + INTERVAL 300 SECOND /*PUBLISH_USER_PRE*/|" \
+      -e "s|^    WHERE 1 /\\* publish: new coverage \\*/\$|    WHERE minute IN $MINS_IN /*PUBLISH_USER_NEW*/|" \
+      -e "s|^    WHERE 1 /\\* publish: existing buckets \\*/\$|    WHERE minute IN $MINS_IN /*PUBLISH_USER_OLD*/|"
+    grep -q 'PUBLISH_USER_OLD' "$TMP/users.sql" || die "users template lost its existing-buckets scope"
+    grep -q 'PUBLISH_USER_PRE' "$TMP/users.sql" || die "users template lost its interval prefilter"
+    t0=$(now_ms)
+    qf "$TMP/users.sql" "publish-${run_id}-users" "&insert_deduplication_token=${run_id}:users" >/dev/null
+    t1=$(now_ms); rows="$(written_rows "publish-${run_id}-users")"
+    mark "$run_id" users "$cursor_from" "$cursor_to" "$sessions" "$rows" "$((t1-t0))" ""
+    say "   users     ${rows} user-minute buckets re-derived   $((t1-t0)) ms"
+    phase=users
+  fi
+
+  # -- PHASE: commit --------------------------------------------------------
+  if [ "$phase" = users ]; then
     mark "$run_id" committed "$cursor_from" "$cursor_to" "$sessions" 0 0 ""
     say "   committed cursor now $cursor_to"
   fi

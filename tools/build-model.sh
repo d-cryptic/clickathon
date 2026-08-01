@@ -2,8 +2,8 @@
 # tools/build-model.sh — rebuild the whole model from ev_raw, in order.
 #
 #   ev_raw -> session_intervals (30_build_intervals.sql)
+#          -> cc_user_minute    (45_user_concurrency.sql backfill — ADR 0016)
 #          -> cc_minute_delta   (40_deltas.sql)
-#          -> cc_user_minute    (mv_user_minute, fires on the intervals INSERT)
 #          -> cc_hour_agg       (50_hour_agg.sql)
 #
 # Order matters and the steps are NOT individually idempotent in the same way:
@@ -12,21 +12,25 @@
 #   cc_minute_delta is an AggregatingMergeTree of SUMS. A second insert without
 #     a TRUNCATE silently DOUBLES every number. There is no dedup to save you,
 #     and the result looks plausible — so this script truncates first, always.
-#   cc_user_minute is an AggregatingMergeTree of uniqExact SETS, fed by the MV
-#     mv_user_minute. A set union does NOT double on replay, which is exactly
-#     why this table went unnoticed: rebuilding identical intervals is a no-op
-#     on the number while tripling the storage. It breaks the moment a rebuild
-#     produces DIFFERENT intervals — the old and the new attribution then both
-#     survive, and a set union can only ADD users, never retract one. Measured
-#     (ADR 0012): user peak served 2,953 against a true 2,844. So it is
-#     truncated too — and BEFORE the intervals insert, because the MV writes
-#     during that insert and a truncate afterwards would delete the rebuild.
+#   cc_user_minute is, since ADR 0016, a ReplacingMergeTree(computed_at) of
+#     uniqExact states, populated by the canonical backfill INSERT inside
+#     sql/45_user_concurrency.sql — the MV that used to fire during the
+#     intervals insert is retired, because a per-block MV writes PARTIAL states
+#     and under replace semantics the newest write wins, so a partial state
+#     would erase a complete bucket. Re-applying 45 replaces every bucket it
+#     recomputes AND writes retraction tombstones for buckets that vanished, so
+#     the truncate here is storage hygiene (drop tombstone keys), not the
+#     correctness mechanism it used to be when the tier was a set union that
+#     could only ever grow (measured then: served 2,953 vs true 2,844,
+#     ADR 0012).
 #   cc_hour_agg is a ReplacingMergeTree keyed (dims, hour). A re-run REPLACES a
 #     matching key, so it cannot double — but it was not rebuilt here at all,
 #     so `make model` left the hour/day views serving a pre-fix number while
 #     the minute views served the new one (measured: 2,887 vs 2,917). It is
 #     truncated rather than replaced-in-place, because replacement cannot
 #     retract a (dims, hour) key the new derivation no longer produces.
+#     (The incremental publisher handles that same case without a truncate by
+#     writing all-zero rows that the views filter — ADR 0016.)
 #
 #   tools/build-model.sh              # local
 #   TARGET=cloud tools/build-model.sh # the graded service
@@ -54,33 +58,42 @@ gate() {
 
 echo "== target: $TARGET"
 
-echo "== 1/5  session_intervals + cc_user_minute (gap + pause, ADR 0001/0007)"
-# mv_user_minute is what repopulates cc_user_minute, and it only fires on an
-# INSERT into session_intervals. Truncating the table without the MV in place
-# would leave the user tier serving zeros — silently, since every view still
-# resolves. Refuse instead.
-if [ "$(q "SELECT count() FROM system.tables WHERE database = currentDatabase() AND name = 'mv_user_minute'" | tr -d '[:space:]')" != "1" ]; then
-  echo "!! mv_user_minute is missing — apply sql/45_user_concurrency.sql first," >&2
-  echo "!! or cc_user_minute will be truncated with nothing to refill it." >&2
-  exit 1
-fi
+echo "== 1/6  session_intervals (gap + pause, ADR 0001/0007)"
 q "TRUNCATE TABLE session_intervals" >/dev/null
-q "TRUNCATE TABLE IF EXISTS cc_user_minute" >/dev/null   # BEFORE the insert — see header
 TARGET="$TARGET" tools/apply-sql.sh sql/30_build_intervals.sql >/dev/null
 q "SELECT concat('   intervals: ', toString(count()), ' over ', toString(uniqExact(video_session_id)), ' sessions') FROM session_intervals FINAL FORMAT TSVRaw"
-q "SELECT concat('   user-minute rows: ', toString(count())) FROM cc_user_minute FORMAT TSVRaw"
 
-echo "== 2/5  cc_minute_delta (hour-clipped, ADR 0003)"
+echo "== 2/6  cc_user_minute (uniqExact per bucket, replaced not unioned — ADR 0016)"
+# A pre-ADR-0016 database carries the AggregatingMergeTree shape, whose set
+# union cannot retract a user. The engine cannot be ALTERed; the table is pure
+# derived state, so the migration IS the rebuild: drop and let 45 recreate.
+USER_ENGINE="$(q "SELECT engine FROM system.tables WHERE database = currentDatabase() AND name = 'cc_user_minute' FORMAT TSVRaw" | tr -d '[:space:]')"
+case "$USER_ENGINE" in
+  *ReplacingMergeTree* | "") : ;;   # current shape, or fresh — 45 creates it
+  *)
+    echo "   cc_user_minute is ${USER_ENGINE} (pre-ADR-0016) — dropping and recreating."
+    echo "   Derived state only; sql/45_user_concurrency.sql rebuilds it below."
+    q "DROP VIEW IF EXISTS mv_user_minute" >/dev/null
+    q "DROP TABLE cc_user_minute" >/dev/null
+    ;;
+esac
+# Truncate is storage hygiene here (drops retraction tombstones); the backfill
+# inside 45 replaces every bucket regardless. See the header.
+q "TRUNCATE TABLE IF EXISTS cc_user_minute" >/dev/null
+TARGET="$TARGET" tools/apply-sql.sh sql/45_user_concurrency.sql >/dev/null
+q "SELECT concat('   user-minute buckets: ', toString(count())) FROM cc_user_minute FINAL FORMAT TSVRaw"
+
+echo "== 3/6  cc_minute_delta (hour-clipped, ADR 0003)"
 q "TRUNCATE TABLE cc_minute_delta" >/dev/null
 TARGET="$TARGET" tools/apply-sql.sh sql/40_deltas.sql >/dev/null
 q "SELECT concat('   delta rows: ', toString(count()), '  opens ', toString(sum(starts)), '  closes ', toString(sum(ends))) FROM cc_minute_delta FORMAT TSVRaw"
 
-echo "== 3/5  cc_hour_agg (the hour tier, ADR 0003)"
+echo "== 4/6  cc_hour_agg (the hour tier, ADR 0003)"
 q "TRUNCATE TABLE IF EXISTS cc_hour_agg" >/dev/null   # IF EXISTS: 50_hour_agg.sql creates it just below
 TARGET="$TARGET" tools/apply-sql.sh sql/50_hour_agg.sql >/dev/null
 q "SELECT concat('   hour rows: ', toString(count()), '  peak ', toString(max(peak))) FROM cc_hour_agg FINAL WHERE platform='*' AND country='*' AND content_id=-1 FORMAT TSVRaw"
 
-echo "== 4/5  views"
+echo "== 5/6  views"
 TARGET="$TARGET" tools/apply-sql.sh sql/20_views.sql >/dev/null
 echo "   ok"
 
@@ -90,7 +103,7 @@ echo "   ok"
 # filter buckets and the drift audit does not exist. Everything in the file is
 # CREATE OR REPLACE, so re-running is free. It comes last because its views read
 # cc_minute_delta, which stage 2 builds.
-echo "== 5/5  normalisation UDFs + views (ADR 0011)"
+echo "== 6/6  normalisation UDFs + views (ADR 0011)"
 TARGET="$TARGET" tools/apply-sql.sh sql/15_normalise.sql >/dev/null
 echo "   ok"
 

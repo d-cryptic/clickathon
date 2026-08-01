@@ -3,7 +3,10 @@
 # tools/publish-test.sh — proof that the aggregates MOVE without a rebuild.
 #
 # ADR 0013 claims tools/publish.sh publishes incrementally and lands on exactly
-# the number a full recompute would. A claim is not evidence. This harness:
+# the number a full recompute would; ADR 0016 extends that claim to the USER
+# and HOUR/DAY tiers, which this harness's scratch databases previously did not
+# even instantiate — which is why their staleness was invisible to it. A claim
+# is not evidence. This harness:
 #
 #   1. builds the model on a truncated slice THROUGH THE INCREMENTAL PATH and
 #      shows it is byte-identical to a batch rebuild of the same slice;
@@ -11,10 +14,18 @@
 #      whole remaining stream, and one genuine STRAGGLER dated 46 minutes
 #      behind the watermark — and after each one shows the served number moved
 #      and still equals a from-scratch control build on EVERY minute;
-#   3. reads system.query_log back to show what each incremental run actually
+#   3. SHRINKS a published interval (a late pause pulls interval_end EARLIER —
+#      the case that broke the version column once) and FLIPS a published
+#      interval's dominant platform — the two retraction shapes a set-union
+#      user tier can never absorb (ADR 0016);
+#   4. reads system.query_log back to show what each incremental run actually
 #      touched, against what the rebuild touches;
-#   4. republishes an UNCHANGED session and shows the curve does not move —
+#   5. republishes an UNCHANGED session and shows the curve does not move —
 #      the property that makes over-consuming the change log safe.
+#
+# EVERY convergence check covers all four serving tiers: minute deltas,
+# intervals, user-minute buckets (v_user_concurrency_minute*), and the
+# hour/day cube (v_concurrency_hour / v_concurrency_day).
 #
 # ISOLATION. Two scratch databases, sonyliv_pub (live, published incrementally)
 # and sonyliv_pub_ctl (control, rebuilt from scratch). `sonyliv` is read with
@@ -77,13 +88,29 @@ cost() {  # cost <query_id>
       ORDER BY event_time DESC LIMIT 1"
 }
 
+# The canonical tier re-derivations live INSIDE multi-statement files (DDL +
+# INSERT + views); qfile speaks HTTP, which takes one statement. Cut the INSERT
+# out between its PUBLISH_EXTRACT markers — the same statement tools/publish.sh
+# templates, so the control rebuild provably runs the same derivation.
+extract_insert() {  # extract_insert <src> <dst>
+  sed -n '/PUBLISH_EXTRACT_BEGIN/,/PUBLISH_EXTRACT_END/p' "$1" > "$2"
+  grep -q 'INSERT INTO' "$2" || { echo "no INSERT between PUBLISH_EXTRACT markers in $1" >&2; exit 1; }
+}
+extract_insert sql/45_user_concurrency.sql "$TMP/ctl_users.sql"
+extract_insert sql/50_hour_agg.sql         "$TMP/ctl_hours.sql"
+
 # A full batch rebuild of the control database — the "recompute" answer, run
-# exactly the way tools/build-model.sh runs it (TRUNCATE both, re-derive all).
+# exactly the way tools/build-model.sh runs it (TRUNCATE every tier it owns,
+# re-derive all of it).
 control_rebuild() {  # control_rebuild <tag>
   q "TRUNCATE TABLE ${CTL}.session_intervals" >/dev/null
   qfile "$CTL" sql/30_build_intervals.sql "ctl-$1-intervals" >/dev/null
+  q "TRUNCATE TABLE ${CTL}.cc_user_minute" >/dev/null
+  qfile "$CTL" "$TMP/ctl_users.sql" "ctl-$1-users" >/dev/null
   q "TRUNCATE TABLE ${CTL}.cc_minute_delta" >/dev/null
   qfile "$CTL" sql/40_deltas.sql "ctl-$1-deltas" >/dev/null
+  q "TRUNCATE TABLE ${CTL}.cc_hour_agg" >/dev/null
+  qfile "$CTL" "$TMP/ctl_hours.sql" "ctl-$1-hours" >/dev/null
 }
 
 # The three-way comparison. Anything non-zero is a failure.
@@ -140,6 +167,45 @@ compare() {  # compare <label>
            toString(count()) FROM ${LIVE}.cc_minute_delta
     UNION ALL
     SELECT 8, 'cc_minute_delta rows — rebuild', toString(count()) FROM ${CTL}.cc_minute_delta
+    UNION ALL
+    SELECT 9, 'user cells differing (minute x dims)',
+           toString(countIf(ifNull(a.concurrent_users, -1) != ifNull(b.concurrent_users, -1)))
+    FROM ${LIVE}.v_user_concurrency_minute a
+    FULL OUTER JOIN ${CTL}.v_user_concurrency_minute b
+      USING (minute, platform, country, content_id)
+    UNION ALL
+    SELECT 10, 'user minutes differing (total)',
+           toString(countIf(ifNull(a.concurrent_users, -1) != ifNull(b.concurrent_users, -1)))
+    FROM ${LIVE}.v_user_concurrency_minute_total a
+    FULL OUTER JOIN ${CTL}.v_user_concurrency_minute_total b USING (minute)
+    UNION ALL
+    SELECT 11, 'user peak — incremental', toString(max(concurrent_users))
+    FROM ${LIVE}.v_user_concurrency_minute_total
+    UNION ALL
+    SELECT 12, 'user peak — rebuild', toString(max(concurrent_users))
+    FROM ${CTL}.v_user_concurrency_minute_total
+    UNION ALL
+    SELECT 13, 'hour-cube rows differing (peak, peak_minute or integral)',
+           toString(countIf(   ifNull(a.peak, -1)        != ifNull(b.peak, -1)
+                            OR ifNull(a.integral, -1)    != ifNull(b.integral, -1)
+                            OR ifNull(a.peak_minute, toDateTime(0))
+                               != ifNull(b.peak_minute, toDateTime(0))))
+    FROM ${LIVE}.v_concurrency_hour a
+    FULL OUTER JOIN ${CTL}.v_concurrency_hour b
+      USING (platform, country, content_id, hour)
+    UNION ALL
+    SELECT 14, 'day rows differing (peak, peak_minute or integral)',
+           toString(countIf(   ifNull(a.peak, -1)        != ifNull(b.peak, -1)
+                            OR ifNull(a.integral, -1)    != ifNull(b.integral, -1)
+                            OR ifNull(a.peak_minute, toDateTime(0))
+                               != ifNull(b.peak_minute, toDateTime(0))))
+    FROM ${LIVE}.v_concurrency_day a
+    FULL OUTER JOIN ${CTL}.v_concurrency_day b
+      USING (platform, country, content_id, day)
+    UNION ALL
+    SELECT 15, 'hour-tier peak — incremental', toString(max(peak)) FROM ${LIVE}.v_concurrency_hour_total
+    UNION ALL
+    SELECT 16, 'hour-tier peak — rebuild',     toString(max(peak)) FROM ${CTL}.v_concurrency_hour_total
   ) ORDER BY ord FORMAT PrettyCompact" | tee -a "$OUT"
 }
 
@@ -171,10 +237,14 @@ done
 # (rightly) refuses a --database that contradicts an exported one. Clearing it
 # for these two calls is how you say "yes, the scratch database, on purpose".
 env -u CH_DATABASE TARGET=cloud tools/apply-sql.sh --database "$LIVE" \
-  sql/00_schema.sql sql/10_intervals.sql sql/12_publish.sql sql/20_views.sql >/dev/null
+  sql/00_schema.sql sql/10_intervals.sql sql/12_publish.sql sql/20_views.sql \
+  sql/45_user_concurrency.sql sql/50_hour_agg.sql >/dev/null
 env -u CH_DATABASE TARGET=cloud tools/apply-sql.sh --database "$CTL" \
-  sql/00_schema.sql sql/10_intervals.sql sql/20_views.sql >/dev/null
+  sql/00_schema.sql sql/10_intervals.sql sql/20_views.sql \
+  sql/45_user_concurrency.sql sql/50_hour_agg.sql >/dev/null
 say "  ${LIVE} has the publication layer (sql/12_publish.sql); ${CTL} does not — it is rebuilt."
+say "  BOTH have the user tier (45) and the hour/day cube (50) this time: their"
+say "  absence is exactly why the previous harness could not see those tiers go stale."
 
 # ---------------------------------------------------------------------------
 say ""
@@ -241,6 +311,8 @@ say "  WHAT THE INCREMENTAL RUN TOUCHED, from system.query_log:"
 say "    negate   $(cost "publish-${RUN3}-negate")"
 say "    derive   $(cost "publish-${RUN3}-derive")"
 say "    emit     $(cost "publish-${RUN3}-emit")"
+say "    hours    $(cost "publish-${RUN3}-hours")"
+say "    users    $(cost "publish-${RUN3}-users")"
 say ""
 say "  the same update, done by RECOMPUTING (the control):"
 control_rebuild late5
@@ -313,6 +385,8 @@ say "    negate   $(cost "publish-${RUN5}-negate")"
 say "    derive   $(cost "publish-${RUN5}-derive")"
 say "    prune    $(cost "publish-${RUN5}-prune")"
 say "    emit     $(cost "publish-${RUN5}-emit")"
+say "    hours    $(cost "publish-${RUN5}-hours")"
+say "    users    $(cost "publish-${RUN5}-users")"
 say "  ev_raw holds $(qr "SELECT formatReadableQuantity(count()) FROM ${LIVE}.ev_raw") events over $(qr "SELECT toString(uniqExact(video_session_id)) FROM ${LIVE}.ev_raw") sessions."
 say ""
 say "  HOW MUCH OF ev_raw DOES A ONE-SESSION CORRECTION HAVE TO READ?"
@@ -381,7 +455,146 @@ compare straggler
 # ---------------------------------------------------------------------------
 say ""
 rule
-say "PHASE 6 — IDEMPOTENCE. Republish sessions whose events did NOT change."
+say "PHASE 6 — SHRINK. A late pause pulls a published interval_end EARLIER."
+say ""
+say "  A provisional interval carries TAIL_S = 60 s of grace past its last event."
+say "  A pause arriving inside that grace places the TRUE end earlier — the exact"
+say "  case that broke ReplacingMergeTree(interval_end) once (evidence/truncation.txt),"
+say "  and the case a set-union user tier can NEVER absorb: the user must be"
+say "  RETRACTED from the minute the tail no longer reaches (ADR 0016)."
+say ""
+# Pick a session whose published last interval ends exactly at last_event +
+# 60 s (tail-ended — the last segment reached its run end, no trailing
+# unclosed pause) and whose last event sits early enough in its minute that
+# losing 50 s of tail crosses a minute boundary. NOT filtered to open
+# sessions: on the complete file every session has a VideoSessionEnd, and the
+# tail applies regardless — events after the end event are real in this data
+# (2.2% of sessions, ADR 0007) and the model absorbs them the same way.
+# Deterministic: smallest qualifying session id.
+SHRINK_S="$(qr "SELECT video_session_id FROM (
+    SELECT video_session_id, max(event_timestamp) AS mx
+    FROM ${LIVE}.ev_raw
+    GROUP BY video_session_id
+    HAVING toSecond(mx) BETWEEN 5 AND 40
+  ) AS e
+  INNER JOIN (
+    SELECT video_session_id, max(interval_end) AS ie
+    FROM ${LIVE}.session_intervals FINAL
+    GROUP BY video_session_id
+  ) AS i USING (video_session_id)
+  WHERE i.ie = toDateTime64(toUnixTimestamp(e.mx) + 60, 3)
+    AND video_session_id != '${STRAGGLER_SESSION}'
+  ORDER BY video_session_id LIMIT 1")"
+[ -n "$SHRINK_S" ] || { echo "no shrink candidate found" >&2; exit 1; }
+SHRINK_MX="$(qr "SELECT toString(max(event_timestamp)) FROM ${LIVE}.ev_raw WHERE video_session_id = '${SHRINK_S}'")"
+M_LOST="$(qr "SELECT toString(toStartOfMinute(max(event_timestamp)) + INTERVAL 1 MINUTE) FROM ${LIVE}.ev_raw WHERE video_session_id = '${SHRINK_S}'")"
+say "  session ${SHRINK_S}"
+say "  last event ${SHRINK_MX} -> published end +60s; the pause lands at +10s, a"
+say "  heartbeat at +30s keeps the run alive past it, so the segment now ends AT"
+say "  the pause with no tail. Minute ${M_LOST} must LOSE this viewer."
+say ""
+say "  last interval BEFORE:"
+q "SELECT toString(interval_start) AS interval_start, toString(interval_end) AS interval_end, is_open
+   FROM ${LIVE}.session_intervals FINAL WHERE video_session_id = '${SHRINK_S}'
+   ORDER BY interval_start DESC LIMIT 1 FORMAT PrettyCompact" | tee -a "$OUT"
+say "  served at ${M_LOST} BEFORE:  sessions $(qr "SELECT toString(concurrent) FROM ${LIVE}.v_concurrency_minute_delta_total WHERE minute = toDateTime('${M_LOST}')" ), users $(qr "SELECT toString(concurrent_users) FROM ${LIVE}.v_user_concurrency_minute_total WHERE minute = toDateTime('${M_LOST}')")"
+
+for db in "$LIVE" "$CTL"; do
+  q "INSERT INTO ${db}.ev_raw
+     SELECT content_id, video_session_id, user_id, 'VideoHeartbeat' AS event_type,
+            ev.1 AS event, mx + toIntervalSecond(ev.2) AS event_timestamp,
+            platform, app_version, country, audio_language, subtitle_language,
+            player_version, session_start_epoch
+     FROM (
+       SELECT *, (SELECT max(event_timestamp) FROM ${db}.ev_raw
+                  WHERE video_session_id = '${SHRINK_S}') AS mx
+       FROM ${db}.ev_raw WHERE video_session_id = '${SHRINK_S}'
+       ORDER BY event_timestamp DESC LIMIT 1
+     )
+     ARRAY JOIN [('pause', 10), ('network-activity', 30)] AS ev" >/dev/null
+done
+say ""
+sleep "${SETTLE_WAIT:-6}"   # markings must SETTLE before the finalizer may consume them
+tools/publish.sh --database "$LIVE" 2>&1 | sed 's/^/    /' | tee -a "$OUT"
+say ""
+say "  last interval AFTER — the end moved EARLIER (tail surrendered to the pause):"
+q "SELECT toString(interval_start) AS interval_start, toString(interval_end) AS interval_end, is_open
+   FROM ${LIVE}.session_intervals FINAL WHERE video_session_id = '${SHRINK_S}'
+   ORDER BY interval_start DESC LIMIT 1 FORMAT PrettyCompact" | tee -a "$OUT"
+say "  served at ${M_LOST} AFTER:   sessions $(qr "SELECT toString(concurrent) FROM ${LIVE}.v_concurrency_minute_delta_total WHERE minute = toDateTime('${M_LOST}')" ), users $(qr "SELECT toString(ifNull(any(concurrent_users), 0)) FROM ${LIVE}.v_user_concurrency_minute_total WHERE minute = toDateTime('${M_LOST}')")"
+say ""
+control_rebuild shrink
+compare shrink
+
+# ---------------------------------------------------------------------------
+say ""
+rule
+say "PHASE 7 — DIMENSION CHANGE. Late events flip a published interval's platform."
+say ""
+say "  Dimension attribution is the DOMINANT value among an interval's events"
+say "  (ADR 0008/0009). A burst of late events under a new platform outvotes the"
+say "  old one, so the re-derived interval moves to a different dimension tuple:"
+say "  every minute it covers must be RETRACTED from the old platform's user"
+say "  buckets and hour curves, and credited to the new one's."
+say ""
+FLIP_S="$(qr "SELECT video_session_id FROM (
+    SELECT video_session_id, max(event_timestamp) AS mx, count() AS n
+    FROM ${LIVE}.ev_raw
+    GROUP BY video_session_id
+    HAVING n BETWEEN 5 AND 80 AND toSecond(mx) BETWEEN 5 AND 40
+  ) AS e
+  INNER JOIN (
+    SELECT video_session_id, max(interval_end) AS ie
+    FROM ${LIVE}.session_intervals FINAL
+    GROUP BY video_session_id
+  ) AS i USING (video_session_id)
+  WHERE i.ie = toDateTime64(toUnixTimestamp(e.mx) + 60, 3)
+    AND video_session_id NOT IN ('${STRAGGLER_SESSION}', '${SHRINK_S}')
+  ORDER BY video_session_id LIMIT 1")"
+[ -n "$FLIP_S" ] || { echo "no dimension-flip candidate found" >&2; exit 1; }
+# One more injected event than the session has in total guarantees a strict
+# majority in the last segment, whatever that segment's own count is.
+FLIP_N="$(qr "SELECT toString(count() + 1) FROM ${LIVE}.ev_raw WHERE video_session_id = '${FLIP_S}'")"
+say "  session ${FLIP_S} — injecting ${FLIP_N} heartbeats at 100 ms spacing under"
+say "  platform 'FlipOS-ADR0016' (harmless in scratch; any string is a valid dim)"
+say ""
+say "  intervals BEFORE, with their platform attribution:"
+q "SELECT toString(interval_start) AS interval_start, toString(interval_end) AS interval_end, platform
+   FROM ${LIVE}.session_intervals FINAL WHERE video_session_id = '${FLIP_S}'
+   ORDER BY interval_start FORMAT PrettyCompact" | tee -a "$OUT"
+
+for db in "$LIVE" "$CTL"; do
+  q "INSERT INTO ${db}.ev_raw
+     SELECT content_id, video_session_id, user_id, 'VideoHeartbeat' AS event_type,
+            'network-activity' AS event,
+            mx + toIntervalMillisecond(100 * (toUInt32(n) + 1)) AS event_timestamp,
+            'FlipOS-ADR0016' AS platform, app_version, country, audio_language,
+            subtitle_language, player_version, session_start_epoch
+     FROM (
+       SELECT *, (SELECT max(event_timestamp) FROM ${db}.ev_raw
+                  WHERE video_session_id = '${FLIP_S}') AS mx
+       FROM ${db}.ev_raw WHERE video_session_id = '${FLIP_S}'
+       ORDER BY event_timestamp DESC LIMIT 1
+     ) AS base
+     CROSS JOIN (SELECT number AS n FROM numbers(${FLIP_N})) AS ns" >/dev/null
+done
+say ""
+sleep "${SETTLE_WAIT:-6}"   # markings must SETTLE before the finalizer may consume them
+tools/publish.sh --database "$LIVE" 2>&1 | sed 's/^/    /' | tee -a "$OUT"
+say ""
+say "  intervals AFTER — the last interval now belongs to FlipOS-ADR0016, so its"
+say "  minutes changed dimension tuple, not just length:"
+q "SELECT toString(interval_start) AS interval_start, toString(interval_end) AS interval_end, platform
+   FROM ${LIVE}.session_intervals FINAL WHERE video_session_id = '${FLIP_S}'
+   ORDER BY interval_start FORMAT PrettyCompact" | tee -a "$OUT"
+say ""
+control_rebuild dimflip
+compare dimflip
+
+# ---------------------------------------------------------------------------
+say ""
+rule
+say "PHASE 8 — IDEMPOTENCE. Republish sessions whose events did NOT change."
 say ""
 say "  A resumed run, a replayed batch or an operator correction can all re-publish"
 say "  a session whose events did not change. That is only safe if -deltas(X) +"
@@ -405,11 +618,15 @@ compare idempotence
 # ---------------------------------------------------------------------------
 say ""
 rule
-say "PHASE 7 — THE COST LEDGER, per run, from cc_publish_runs"
+say "PHASE 9 — THE COST LEDGER, per run, from cc_publish_runs"
 q "SELECT run_id, toString(any(cursor_to)) AS cursor_to, max(sessions) AS sessions,
           sum(elapsed_ms) AS total_ms,
           sumIf(rows_written, phase='derived') AS intervals_written,
-          sumIf(rows_written, phase IN ('negated','emitted')) AS delta_rows_written
+          sumIf(rows_written, phase IN ('negated','emitted')) AS delta_rows_written,
+          sumIf(rows_written, phase='hours') AS hour_rows,
+          sumIf(rows_written, phase='users') AS user_buckets,
+          sumIf(elapsed_ms, phase='hours') AS hours_ms,
+          sumIf(elapsed_ms, phase='users') AS users_ms
    FROM ${LIVE}.cc_publish_runs GROUP BY run_id ORDER BY run_id FORMAT PrettyCompact" | tee -a "$OUT"
 say ""
 say "  freshness, as a downstream consumer would read it:"
@@ -418,7 +635,7 @@ q "SELECT * FROM ${LIVE}.v_cc_publish_lag FORMAT Vertical" | tee -a "$OUT"
 # ---------------------------------------------------------------------------
 say ""
 rule
-say "PHASE 8 — RE-MEASURING THE SHELVED PROJECTION on the finalizer's query shape."
+say "PHASE 10 — RE-MEASURING THE SHELVED PROJECTION on the finalizer's query shape."
 say ""
 say "  WALKTHROUGH §5 records proj_by_session as measured and NOT shipped: 27.7x on"
 say "  a single-session lookup, but \"the actual straggler path uses IN (subquery),"
@@ -469,7 +686,7 @@ say "  defect ADR 0010 fixed in sql/80_content.sql."
 # ---------------------------------------------------------------------------
 say ""
 rule
-say "PHASE 9 — ADOPTION COSTS NOTHING. Turn the publication layer on over a database"
+say "PHASE 11 — ADOPTION COSTS NOTHING. Turn the publication layer on over a database"
 say "          that was built the old way, and prove it does not re-derive history."
 say ""
 say "  ${CTL} has been rebuilt from scratch and has never had sql/12_publish.sql."
