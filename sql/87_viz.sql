@@ -11,6 +11,13 @@
 -- combination, not the dimension total — measured: ANDROID_PHONE reads 285
 -- where the true figure is 1,837 at the 2026-07-26 10:56 peak minute.
 -- ============================================================================
+-- ADR 0010, applied here 2026-08-02: the dictionary name is UNQUALIFIED. It
+-- said 'sonyliv.dict_content', which reads correctly on the graded database
+-- and silently answers from PRODUCTION'S catalog when this file is applied to
+-- any other — the unseen day builds the whole model in a separate database.
+-- Codex found it failing on a clean scratch DB during promotion check 2.
+-- The database comes from how the file is applied, never from the text.
+--
 
 -- ---------------------------------------------------------------------------
 -- NAIVE SESSION-SPAN. A session is "watching" from its first event to its
@@ -79,7 +86,7 @@ SELECT
     platform,
     country,
     content_id,
-    dictGet('sonyliv.dict_content', 'title', tuple(content_id)) AS title,
+    dictGet('dict_content', 'title', tuple(content_id)) AS title,
     app_version,
     audio_language,
     subtitle_language,

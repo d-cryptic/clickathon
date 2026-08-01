@@ -194,7 +194,15 @@ if [ "$DB" = "$GRADED_DB" ] && [ "${APPLY_GRADED_DESTRUCTIVE:-}" != yes ]; then
     # thorough and caught nothing that spanned a line break, which is how most
     # people write DDL. So: strip comments, collapse ALL whitespace to single
     # spaces, and match against one flat stream.
-    NORM="$(sed -e 's/--.*//' "$f" | tr '\n\t' '  ' | tr -s ' ')"
+    # Normalisation, third revision. Each round of Codex review found another
+    # way ordinary SQL walked past this scanner:
+    #   1. only DROP/TRUNCATE matched              -> six more forms added
+    #   2. a newline after DROP defeated everything -> collapse whitespace
+    #   3. CRLF line endings, and /* */ block comments used as separators
+    #      (`DROP/* x */TABLE`) -> both bypassed the collapse
+    # So: strip block comments FIRST (they can span lines and sit between
+    # keywords), then line comments, then flatten CR/LF/TAB, then squeeze.
+    NORM="$(perl -0pe 's{/\*.*?\*/}{ }gs' "$f" | sed -e 's/--.*//' | tr '\r\n\t' '   ' | tr -s ' ')"
     if printf '%s' "$NORM" | grep -qiE '(^| |;)(DROP|TRUNCATE|DETACH|RENAME TABLE|EXCHANGE TABLES|REPLACE TABLE|DELETE FROM|OPTIMIZE) ' \
        || printf '%s' "$NORM" | grep -qiE 'ALTER TABLE[^;]*(DELETE|UPDATE|DROP (COLUMN|PARTITION)|CLEAR COLUMN|MOVE PARTITION|REPLACE PARTITION|MATERIALIZE TTL|MODIFY COLUMN)'; then
       die "$f contains DROP or TRUNCATE and '$DB' is the GRADED database.
