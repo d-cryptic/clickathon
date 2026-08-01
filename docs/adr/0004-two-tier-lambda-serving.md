@@ -52,9 +52,14 @@ run**, writes `session_intervals` (`ReplacingMergeTree`, idempotent), and append
 - Open sessions are handled **by construction**, not by bookkeeping. A session with no
   `VideoSessionEnd` simply keeps renewing leases in the hot tier and stays provisional in the sealed
   tier until `W` passes it.
-- Re-derivation is bounded by *sessions touched*, not by history. A session is ~78 rows; re-deriving a
-  handful of them per seal batch is trivial, and `ev_raw`'s `ORDER BY (video_session_id, ...)` makes
-  each one a single contiguous range read.
+- Re-derivation is bounded by *sessions touched*, not by history. A session averages ~78 rows, so
+  re-deriving a handful per seal batch is trivial in absolute terms.
+  **Caveat:** since [ADR 0002](0002-order-by-time-bucket-then-platform.md) `ev_raw` leads with a
+  truncated hour rather than the session id, a per-session read is no longer one contiguous range.
+  This design is exactly the "single session lookup becomes hot" case ADR 0002 anticipated, and its
+  stated remedy applies — add a `PROJECTION` ordered by `video_session_id`, do not revert the key.
+  Measure the projection's effect at H4; until it exists, the finalizer's read cost is the main
+  unknown in this ADR.
 - The statement's mandated session-aware vs session-independent comparison becomes **structural rather
   than bolted on**: the hot tier *is* the session-independent model, the sealed tier *is* the
   session-aware one, and their live difference at the watermark is the freshness-vs-exactness trade-off

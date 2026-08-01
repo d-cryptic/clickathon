@@ -23,6 +23,9 @@
 - [ ] **[H4]** `/reconcile` passing on 5 minutes — **this is the gate, do not pass it by**
 - [ ] **[H4]** Finalizer + watermark; truncation test proving open-session absorption.
       ← **MVP LINE: sealed tier + stateless baseline is a complete submission from here**
+- [ ] **[H4]** `PROJECTION` on `ev_raw` ordered by `video_session_id` — the finalizer and the
+      straggler path are point lookups by session, which ADR 0002's key no longer serves. ADR 0002
+      names this remedy explicitly. **Measure it; do NOT revert ADR 0002.**
 - [ ] **[H5]** Hot tier: `mv_lease` → `cc_minute_hot` (`uniqExact`) + the stitched serving view (ADR 0004/0005)
 - [ ] **[H6]** `cc_hour_agg` (max + integral); peak/average at minute/hour/day grain with dimension filters
 - [ ] **[H7]** ClickStack up, `tools/clickstack-bootstrap.sh` — **instrument watermark lag**, not just ingestion lag
@@ -33,8 +36,8 @@
 
 - [ ] `/bench` on the full benchmark shapes; capture bytes read
 - [ ] Minimal concurrency chart (out of scope to polish — just make it show the curve + freshness)
-- [ ] ADRs for: ordering key, projection hedge, `video_type` materialisation
-      (0001–0006 are written; 0001 is **conditional on GATE ①**)
+- [ ] ADRs for: the `video_session_id` projection, `video_type` materialisation
+      (0001–0006 are written; 0001 is **conditional on GATE ①**; 0002 is main's, accepted + measured)
 - [ ] Deck: 15 slides mapped to the five scoring criteria
 - [ ] Rehearse the demo twice
 

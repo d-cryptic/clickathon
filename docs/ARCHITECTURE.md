@@ -9,8 +9,17 @@
 
 ## Layers
 
-**1 · `ev_raw`** — events exactly as delivered, `ORDER BY (video_session_id, event_timestamp)` so a
-session's history is one contiguous range read. Partitioned by day.
+**1 · `ev_raw`** — events exactly as delivered, `ORDER BY (toStartOfHour(event_timestamp), platform,
+video_session_id, event_timestamp)`, partitioned by day
+([ADR 0002](adr/0002-order-by-time-bucket-then-platform.md) — measured **17.3× better** on the
+dashboard shape than leading with the session id).
+
+> ⚠ **This design makes single-session lookup hot, and the key no longer serves it.** The finalizer
+> re-derives only *touched* sessions and straggler correction reads exactly one — both are point
+> lookups by `video_session_id`, which is now third in the key rather than first. ADR 0002 anticipated
+> precisely this and names the remedy: *"add a `PROJECTION` ordered by `video_session_id` rather than
+> reverting the key."* Add it at H4 and measure it — do **not** revert ADR 0002, whose 17.3× is on the
+> access pattern that runs far more often.
 
 **2 · `session_intervals`** — one row per contiguous *active* range. Derived by walking a session's
 events in time order and closing an interval when the heartbeat gap exceeds `HEARTBEAT_GAP_S`.
@@ -75,7 +84,9 @@ is the observable expression of the whole design.
 | Lease hot tier | compensating deltas | compensation needs the interval's previous end, which a stateless MV cannot know without a racy read-modify-write |
 | Two tiers | one | the comparison is the evidence that we exclude background time — and here it is structural, not bolted on |
 | Correction by diff | `ALTER … UPDATE` / partition rebuild | exactly as correct as a rebuild, of one session; cost scales with stragglers, not history |
-| Dimension-first sort key | time-first | dashboards filter then range-scan; measured 122× on a comparable A/B |
+| Dimension-first key **on the serving tables** | time-first | dashboards filter then range-scan; measured 122× on a comparable A/B |
+| Time-bucket-first key **on `ev_raw`** | session-id-first | measured 17.3× better on the dashboard shape, identical on the full interval rebuild ([ADR 0002](adr/0002-order-by-time-bucket-then-platform.md)) |
+| `PROJECTION` by `video_session_id` | reverting ADR 0002 | our finalizer and correction paths are point lookups by session; a projection restores them without losing the 17.3× |
 
 ## The premise this all rests on
 

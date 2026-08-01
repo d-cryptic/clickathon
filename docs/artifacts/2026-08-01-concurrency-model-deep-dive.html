@@ -1062,7 +1062,7 @@ avg_concurrency = sum(<span class="c-kw">least</span>(interval_end, B) - <span c
     <rect x="0" y="150" width="150" height="70" fill="var(--panel2)" stroke="var(--border)"/>
     <text x="75" y="180" class="sm" text-anchor="middle" style="fill:var(--fg)">ev_raw</text>
     <text x="75" y="196" class="sm" text-anchor="middle">append-only</text>
-    <text x="75" y="210" class="sm" text-anchor="middle">ORDER BY (sid, ts)</text>
+    <text x="75" y="210" class="sm" text-anchor="middle">ORDER BY (hour, platform, sid, ts)</text>
 
     <defs><marker id="ar4" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="var(--muted)"/></marker></defs>
 
@@ -1201,6 +1201,24 @@ avg_concurrency = sum(<span class="c-kw">least</span>(interval_end, B) - <span c
   <code>PROJECTION</code> reordered <code>(content_id, minute)</code> for content-first queries that skip
   the <code>platform</code> prefix.
 </p>
+<div class="call">
+  <div class="ct">A third hedge, forced by ADR 0002 — and anticipated by it</div>
+  <p>
+    <code>ev_raw</code> is ordered
+    <code>(toStartOfHour(event_timestamp), platform, video_session_id, event_timestamp)</code> — a
+    <strong>measured 17.3× better</strong> on the dashboard shape than leading with the session id.
+    But the E2 finalizer and the E3 correction path are both <em>point lookups by
+    <code>video_session_id</code></em>, which is now third in the key rather than first.
+  </p>
+  <p>
+    ADR 0002 called this exact case in advance: <em>"if a 'single session lookup' access pattern ever
+    becomes hot, add a <code>PROJECTION</code> ordered by <code>video_session_id</code> rather than
+    reverting the key."</em> This design is what makes it hot. So: <strong>add the projection at H4 and
+    measure it — do not revert ADR 0002</strong>, whose win is on the access pattern that runs orders of
+    magnitude more often. Until the projection exists, the finalizer's per-session read cost is the
+    largest unmeasured quantity in the evolved design.
+  </p>
+</div>
 
 <figure>
   <div class="figlabel">Figure 12 — Prefix pruning, and what a projection recovers</div>
@@ -1361,10 +1379,11 @@ avg_concurrency = sum(<span class="c-kw">least</span>(interval_end, B) - <span c
   <thead><tr><th>ADR</th><th>Decision</th><th class="m">Status</th></tr></thead>
   <tbody>
     <tr><td>0001</td><td>Heartbeat gaps over background events</td><td class="m warn">Accepted — <em>conditional on the §3.4 measurement</em></td></tr>
-    <tr><td>0002</td><td>Clip active intervals at hour boundaries when emitting deltas</td><td class="m ok">Proposed</td></tr>
-    <tr><td>0003</td><td>Two-tier serving: idempotent hot tier stitched to append-only sealed tier</td><td class="m ok">Proposed</td></tr>
-    <tr><td>0004</td><td>Heartbeat lease semantics for the hot tier</td><td class="m ok">Proposed</td></tr>
-    <tr><td>0005</td><td>Late arrivals corrected by deterministic diff, never by rebuild</td><td class="m ok">Proposed</td></tr>
+    <tr><td>0002</td><td>Lead the <code>ev_raw</code> sort key with a truncated hour, not the session id <span class="dim">(pre-existing on main)</span></td><td class="m ok">Accepted — measured 17.3×</td></tr>
+    <tr><td>0003</td><td>Clip active intervals at hour boundaries when emitting deltas</td><td class="m ok">Proposed</td></tr>
+    <tr><td>0004</td><td>Two-tier serving: idempotent hot tier stitched to append-only sealed tier</td><td class="m ok">Proposed</td></tr>
+    <tr><td>0005</td><td>Heartbeat lease semantics for the hot tier</td><td class="m ok">Proposed</td></tr>
+    <tr><td>0006</td><td>Late arrivals corrected by deterministic diff, never by rebuild</td><td class="m ok">Proposed</td></tr>
   </tbody>
 </table>
 </div>

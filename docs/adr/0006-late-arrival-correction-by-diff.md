@@ -27,9 +27,11 @@ Treat a straggler as a **deterministic recomputation of one session**, and store
 the old and new results.
 
 1. Identify the affected `video_session_id` and the sealed minute range its intervals touch.
-2. Re-derive that session's active intervals from `ev_raw` **including** the straggler. This is a single
-   contiguous range read, since `ev_raw` is `ORDER BY (video_session_id, event_timestamp)`, and a
-   session averages ~78 rows.
+2. Re-derive that session's active intervals from `ev_raw` **including** the straggler — a session
+   averages ~78 rows. Note that since [ADR 0002](0002-order-by-time-bucket-then-platform.md) `ev_raw`
+   leads with a truncated hour, this is a point lookup against a non-prefix column rather than a
+   contiguous range read; it depends on the `video_session_id` `PROJECTION` that ADR 0002 names as the
+   remedy for exactly this access pattern.
 3. Emit the hour-clipped deltas ([ADR 0003](0003-hour-clipped-interval-splitting.md)) for the new
    derivation, and the **negation** of the deltas for the old derivation.
 4. Append both. Never update, never delete.
