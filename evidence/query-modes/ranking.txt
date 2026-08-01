@@ -1,0 +1,61 @@
+# evidence/query-modes/ranking.txt — every query-mode shape, ranked by BYTES READ
+#
+# tag qmode-20260801T213411Z  commit 504cda7  server 26.2.1.525
+# cloud database=sonyliv_u3 (scratch, single generation, dev HEAD)
+# ev_raw=905558 session_intervals=30323 cc_minute_delta=28073 cc_hour_agg=26254
+# reconcile gate: PASS 3732 minutes, peak 2917
+#
+# Median of 3 runs, query caches OFF (use_query_cache=0, use_query_condition_cache=0).
+# rows/bytes come from X-ClickHouse-Summary, never from timing. Ranked on BYTES READ
+# and not on latency, because a warm cache flatters latency — same methodology as
+# evidence/query-performance.md. Every run's query id is in results/runs.tsv.
+
+  #  shape                                  mode                          rows read  bytes read  med ms
+     -------------------------------------- ---------------------------- ---------- ----------- -------
+  1  tr03_trap_fill_across_hour             TRAP (wrong on purpose)          30,884   2,523,530    54.6
+  2  tr04_trap_cube_level_unpinned          TRAP (wrong on purpose)          68,892   1,584,318    34.2
+  3  amb02_day_three_readings               AMBIGUITY (answer, not cost)     49,153   1,556,481    59.9
+  4  amb01_hour_three_readings              AMBIGUITY (answer, not cost)     59,391   1,368,041   113.1
+  5  tr01_trap_dimensioned_view_max         TRAP (wrong on purpose)          28,073     617,827    16.4
+  6  pm01_minute_total_range                point / minute                   34,815     597,993    33.7
+  7  im05_same_hour_ragged_total            interval / minute-range          34,815     597,993    37.5
+  8  im01_ragged_total                      interval / minute-range          34,815     597,993    59.1
+  9  pm03_minute_platform_range             point / minute                   24,577     491,521    51.8
+ 10  im03_ragged_platform                   interval / minute-range          24,577     491,521    33.7
+ 11  pm05_minute_total_series_lookup        point / minute                   56,146     449,168    14.4
+ 12  pm04_minute_platform_content_range     point / minute                   16,385     368,433    38.3
+ 13  im04_ragged_platform_content           interval / minute-range          16,385     368,433    57.5
+ 14  ih01_hour_series_day                   interval / hour-series            8,192     352,256    22.9
+ 15  tr02_trap_changepoint_view_lookup      TRAP (wrong on purpose)          28,073     336,876    14.2
+ 16  im06_minute_curve_range                interval / minute-range          26,623     319,465     9.9
+ 17  pm02_minute_total_direct               point / minute                   26,622     319,464     5.8
+ 18  ph03_hour_platform_content             point / hour                      8,192     286,720     9.7
+ 19  ph02_hour_platform                     point / hour                      8,192     286,720     9.7
+ 20  ph01_hour_total                        point / hour                      8,192     286,720    10.7
+ 21  pd03_day_platform_content              point / day                       8,192     286,720    12.0
+ 22  pd02_day_platform                      point / day                       8,192     286,720     8.8
+ 23  pd01_day_total                         point / day                       8,192     286,720     8.5
+ 24  im02_aligned_total                     interval / minute-range           8,193     278,529    25.0
+ 25  id01_13day_total                       interval / day-range              8,193     278,529    90.1
+
+All 25 shapes: 3/3 runs returned a byte-identical answer AND an identical read size.
+(tr04 needed an explicit ORDER BY to get there — a bare UNION ALL returned its two
+ branches in either order, same rows and same bytes but a different answer file.)
+
+READING THIS TABLE
+  * The floor is one MergeTree granule (8,192 rows) times the columns touched.
+    Everything at 8,192-8,193 rows sits AT that floor — nothing left to optimise.
+  * POINT MODE IS NOT CHEAPER THAN INTERVAL MODE. At hour and day grain a point IS
+    one stored row and costs the granule floor; at minute grain a point costs the
+    same partial-hour scan an interval does, because both read the same delta rows.
+    pm01/im05/im01 are byte-identical at 597,993 — one minute and 74 minutes cost the same.
+  * pm01 (597,993 B) vs pm02 (319,464 B): the v_cc_window_range form always probes the
+    hour tier even when the range holds no whole hours, so a bare point lookup pays
+    1.87x for provenance columns it does not need. Use pm02 to ASK, pm01 to AUDIT.
+  * RAGGED vs ALIGNED is the largest structural gap in this table: im01 (ragged,
+    597,993 B) vs im02 (aligned, 278,529 B) = 2.15x, over the SAME two hours. And
+    id01 spans 13 days for 278,529 B — identical to the 2-hour aligned range, because
+    an hour-aligned range is O(1 granule) in length. Ragged edges, not range length,
+    are what a minute-tier read costs.
+  * tr03 is the most expensive shape here precisely because it computes the wrong
+    answer AND the right one AND the independent truth side by side. It is a demo.

@@ -1,0 +1,28 @@
+Expression ((Project names + (Projection + ((WHERE + (Change column names to column identifiers + (Convert VIEW subquery result to VIEW table structure + (Materialize constants after VIEW subquery + (Project names + (Projection + (Change column names to column identifiers + (Project names + Projection)))))))) + (WHERE + Change column names to column identifiers)))))
+  Filter ((((WHERE + (Change column names to column identifiers + (Convert VIEW subquery result to VIEW table structure + (Materialize constants after VIEW subquery + (Project names + (Projection + (Change column names to column identifiers + (Project names + Projection)))))))) + (WHERE + Change column names to column identifiers)))[split])
+    ReadFromMergeTree (sonyliv_u3.cc_hour_agg)
+    Indexes:
+      MinMax
+        Keys:
+          hour
+        Condition: (hour in [1785060000, 1785060000])
+        Parts: 1/1
+        Granules: 4/4
+      Partition
+        Keys:
+          toYYYYMM(hour)
+        Condition: (toYYYYMM(hour) in [202607, 202607])
+        Parts: 1/1
+        Granules: 4/4
+      PrimaryKey
+        Keys:
+          platform
+          country
+          content_id
+          cube_level
+          hour
+        Condition: and((hour in [1785060000, 1785060000]), and((content_id in [-1, -1]), and((country in ['*', '*']), and((platform in ['ANDROID_PHONE', 'ANDROID_PHONE']), (cube_level in [1, 1])))))
+        Parts: 1/1
+        Granules: 1/4
+        Search Algorithm: generic exclusion search
+      Ranges: 1

@@ -1,0 +1,49 @@
+Expression ((Project names + (Projection + (WHERE + (Change column names to column identifiers + (Convert VIEW subquery result to VIEW table structure + (Materialize constants after VIEW subquery + (Project names + (Projection + (Change column names to column identifiers + (Project names + Projection)))))))))))
+  Aggregating
+    Union
+      Expression (((WHERE + (Change column names to column identifiers + (Convert VIEW subquery result to VIEW table structure + (Materialize constants after VIEW subquery + (Project names + (Projection + (Change column names to column identifiers + (Project names + Projection)))))))) + (Before GROUP BY + (Change column names to column identifiers + (Project names + (Projection + (Change column names to column identifiers + (Project names + Projection))))))))
+        Filter ((((WHERE + (Change column names to column identifiers + (Convert VIEW subquery result to VIEW table structure + (Materialize constants after VIEW subquery + (Project names + (Projection + (Change column names to column identifiers + (Project names + Projection)))))))) + (Before GROUP BY + (Change column names to column identifiers + (Project names + (Projection + (Change column names to column identifiers + (Project names + Projection))))))))[split])
+          Window
+            Window
+              Expression ((Before WINDOW + (Change column names to column identifiers + (Project names + Projection))) [lifted up part])
+                Sorting
+                  Expression ((Before WINDOW + (Change column names to column identifiers + (Project names + Projection))))
+                    Aggregating
+                      Expression ((Before GROUP BY + Change column names to column identifiers))
+                        ReadFromMergeTree (sonyliv_u3.cc_minute_delta)
+                        Indexes:
+                          MinMax
+                            Condition: true
+                            Parts: 7/7
+                            Granules: 10/10
+                          Partition
+                            Condition: true
+                            Parts: 7/7
+                            Granules: 10/10
+                          PrimaryKey
+                            Condition: true
+                            Parts: 7/7
+                            Granules: 10/10
+                          Ranges: 7
+      Expression (( + (Before GROUP BY + (Change column names to column identifiers + (Conversion before UNION + (Project names + (Projection + (Change column names to column identifiers + Project names))))))))
+        Filter ((( + (Before GROUP BY + (Change column names to column identifiers + (Conversion before UNION + (Project names + (Projection + (Change column names to column identifiers + Project names))))))))[split])
+          Distinct (DISTINCT)
+            Distinct (Preliminary DISTINCT)
+              Expression ((Projection + (Change column names to column identifiers + (Project names + (Projection + (Change column names to column identifiers + (Project names + Projection)))))))
+                Aggregating
+                  Expression ((Before GROUP BY + Change column names to column identifiers))
+                    ReadFromMergeTree (sonyliv_u3.cc_minute_delta)
+                    Indexes:
+                      MinMax
+                        Condition: true
+                        Parts: 7/7
+                        Granules: 10/10
+                      Partition
+                        Condition: true
+                        Parts: 7/7
+                        Granules: 10/10
+                      PrimaryKey
+                        Condition: true
+                        Parts: 7/7
+                        Granules: 10/10
+                      Ranges: 7
