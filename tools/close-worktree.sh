@@ -45,6 +45,11 @@ Push it first:  git -C $D push origin $BR
 Closing now would lose it."
 fi
 
+# KNOWN LIMITATION: "commits ahead" counts inherited merge commits too, so a
+# freshly-spawned worktree that has only done its step-zero `git merge origin/dev`
+# looks like it has work. Check `git diff origin/dev...HEAD` before overriding —
+# if the only diff came from the base branch, there is nothing original to lose.
+# Refusing in that case is the safe direction, so this is left as-is deliberately.
 printf 'safe to close %s (%s): %s\n' "$WT" "$BR" \
   "$([ "$MERGED" != no ] && echo "merged into $MERGED" || echo 'present on origin')"
 
