@@ -61,4 +61,9 @@
       The local container first-booted before that change and initdb never re-runs. No numeric error
       today (uniq is exact at this cardinality) but the guarantee is absent. Fix needs
       `docker compose down -v` + reload — **operator call, it destroys the local volume.**
+- [ ] **ASK A MENTOR** — 16 questions in [docs/MENTOR_QUESTIONS.md](docs/MENTOR_QUESTIONS.md), ranked.
+      Tier 1 (Q1 which heartbeats count · Q2 unclosed-pause rule · Q4 session-vs-user · Q5 timezone)
+      can invalidate the model, and **none of them are measurable from the data** — the ground truth is
+      private, so a wrong guess is silently wrong on every answer. Q2 is the same decision as `[H2a]`.
+      Record answers inline and update the affected ADR in the same commit.
 - [ ] **Team Captain** — only they can submit. Confirm who, and that they are awake before the freeze.
