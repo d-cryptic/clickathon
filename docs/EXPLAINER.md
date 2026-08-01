@@ -611,8 +611,17 @@ viewers that demonstrably were not receiving playback events.
 ## C.6 · What is not built
 
 ```
- ❌ CONTINUOUS PUBLISHING   the biggest scored gap. We batch-rebuild with `make model`.
-                            Only mv_stateless and mv_user_minute are real MVs.
+ 🟡 CONTINUOUS PUBLISHING   still the biggest scored gap — we batch-rebuild with `make model`,
+                            and only mv_stateless and mv_user_minute are real MVs.
+                            BUT the native answer is now VALIDATED, not theoretical:
+                            refreshable MVs work on this service (verified independently —
+                            allow_experimental_refreshable_materialized_view=1 and
+                            stop_refreshable_materialized_views_on_startup=0). One created
+                            in a scratch database populated itself in 8 seconds, 1,579 rows,
+                            with no scheduler and no application code. See
+                            docs/IMPROVEMENTS.md. It makes PUBLICATION automatic, not the
+                            DERIVATION incremental — which is still the difference between
+                            "rebuilt when someone remembers" and a stated freshness SLA.
  ❌ HOT TIER                BLOCKED, not unbuilt — ADR 0005 needs an operator decision.
  🟡 STRAGGLER PATH          arithmetic proven; not wired into a live path.
  ❌ /bench                  evidence/bench.txt and evidence/benchmark/ both MISSING.
