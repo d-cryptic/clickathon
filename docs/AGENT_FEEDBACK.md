@@ -83,3 +83,23 @@
   `sonyliv_unseen` still holding the previous rehearsal's state; a literal runbook run would have
   dropped it. Suggestion: default UNSEEN_DB to `sonyliv_unseen_$(whoami or slug)` or refuse when the
   DB exists non-empty.
+
+## 2026-08-02 · schema-drift / ADR 0024 session
+
+- **`tools/build-model.sh` still has the bug-11 env-clobber `tools/load.sh` was fixed for.** It
+  sources `.env` with `set -a` AFTER the caller's environment, so `CH_DATABASE_LOCAL=scratch
+  tools/build-model.sh` silently targets whatever `.env` says — this session asked for
+  `adr0024_drift` and the script TRUNCATEd `default.session_intervals` before dying on a schema
+  mismatch. Local-only damage, disclosed in the 2026-08-02 worksheet; the graded DB has its own
+  guard. The fix pattern already exists at the top of load.sh; build-model.sh (and a sweep of the
+  other `set -a && . ./.env` tools) should adopt it. Not fixed here — outside this session's
+  ownership list.
+- **`tools/reconcile.sh`'s local branch ignores the database entirely** (`docker exec …
+  clickhouse-client` with no `--database`, i.e. always `default`) and unconditionally overwrites
+  `evidence/reconcile.txt`. Running the gate against a scratch DB means bypassing the wrapper and
+  piping `sql/90_reconcile.sql` by hand. A `--database` flag matching load.sh/apply-sql.sh would
+  make the gate usable in the isolation pattern every other tool now follows.
+- **`tools/fetch_data.sh` overwrites the vendored spec docs' local preamble** and then warns
+  "UPSTREAM SPEC CHANGED" — a false alarm on every fresh worktree (the body is unchanged; only the
+  repo's own "vendored verbatim" banner is stripped). Either exclude the banner from the synced
+  region or hash only the upstream body.
