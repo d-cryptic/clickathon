@@ -151,6 +151,30 @@ referenced `$TARGET`, which that script never sets; under `set -u` the one-comma
 have **died at the gate I added to protect it**. Fixed. It was found because an agent re-read the
 file instead of trusting my commit message.
 
+## 4e · Y2 — preserved, deliberately NOT merged
+
+`chore/y2-the-three-defects` carries ~795 insertions touching
+`sql/30_build_intervals.sql`, `sql/45_user_concurrency.sql` and `sql/90_reconcile.sql` — the
+shared-spec trio — plus `evidence/adr-0031/` and three helper scripts.
+
+**I left it on its branch on purpose.** It is mid-work (halted at a permission prompt), unverified,
+and it changes the model. One of its three fixes is **Q35, which moves the peak 2,917 → 2,927** — a
+number we would submit. Merging unverified model changes that alter a submitted answer is the one
+thing this whole review structure exists to prevent, and doing it while you were asleep would have
+been worse than leaving it.
+
+**Unblock it, let it finish, then review Q35 as a decision rather than a merge.** ADR 0031 is
+supposed to present both readings — is a viewer who generated exactly one event watching for one
+cadence, or not at all? We currently answer "not at all" **by accident rather than by decision**, and
+that is the choice to make deliberately.
+
+## 4f · A new tool worth knowing about
+
+`tools/promotion-deps.sh <branch>` derives a promotion's file set from **references** rather than
+directory names, and reports what the candidate omits. Two of six rejections were that exact failure,
+found by hand both times. Run it before every future promotion — it found the last one in one
+command: the source-contract gate was shipping without the SQL it executes.
+
 ## 5 · Where to look when you wake
 
 ```bash
