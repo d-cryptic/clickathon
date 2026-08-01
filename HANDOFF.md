@@ -95,6 +95,41 @@ exactly `2,917 + N`. A spike lands in `sum(starts)`, not row count.
 peak **2,917 → 2,927** — that one **changes a number we would submit**, so it is a proposal, not a
 change. Y2 is on both.
 
+## 4b · What changed after this file was first written
+
+**The promotion method changed, and the reason is evidence.** Four attempts were rejected for the
+same root cause: cherry-picking commits onto `main` reconstructs a state by hand and misses
+follow-ups. Then a decisive test — `sql/50_hour_agg.sql` implements ADRs **0003, 0006, 0014, 0016 and
+0022**, i.e. waves 2, 3 and 6 at once. **No ADR-based partition of that file exists**, so the
+original wave plan was unachievable rather than merely slow.
+
+Waves are now partitioned by **file**, and a wave is built by **copying `dev`'s version of its files**
+rather than replaying commits. `dev` is the state where those claims are true and gate-green, so a
+copy cannot produce the defect that rejected the four attempts.
+
+**The first candidate built this way is `promo/w12-fileset`** — ten tooling files, `make ci` green,
+all four target paths and all three guards verified live, check 4a passed. It is with Codex now. If
+its verdict is PROMOTE, merge it to `main`; that is the first thing to check.
+
+**Two more defects were found and fixed overnight**, both by Codex audits:
+- `load.sh --replace` could TRUNCATE the graded database with no acknowledgement — and `ev_raw` is
+  the one thing a rebuild cannot recover. Both incidents this week were survivable *because* it was
+  intact. Now guarded.
+- The **one-command** unseen path never invoked the source-contract gate. The protection existed in
+  the runbook and not on the path anybody actually runs. Now wired in.
+
+**One correction to a number I published:** Q34 is **82** violating cells with 63 at zero sessions,
+not the 28 and 0 I reported. My query inner-joined `cc_user_minute` to `cc_minute_delta` on minute,
+but the delta table carries only change points — a dense table compared to a sparse one. Severity
+verdict unchanged; the sizing was wrong.
+
+## 4c · Blocked on you, beyond the two in §1
+
+**Y2 is halted at a permission prompt** (`sc-tunneled-cryostat-2015`) that I cannot approve —
+cross-worktree commands are denied to this session. Its work is preserved and pushed. It is the agent
+fixing Q34/Q35/U3-F1, **including Q35, which changes a number we would submit** (peak 2,917 → 2,927).
+Worth unblocking early.
+
 ## 5 · Where to look when you wake
 
 ```bash
