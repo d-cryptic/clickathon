@@ -286,7 +286,7 @@ an interval running <b>20:59:48 → 22:04:49</b> emits:
       <p style="font-size:14px">Per-hour <span class="mono">max</span> is a real number, not a fragment — so <span class="mono">cc_hour_agg</span> stores peak + integral per hour, and a day-grain peak reads <b class="accent">24 rows</b> per combination instead of 1,440 minutes.</p>
     </div>
   </div>
-  <p style="margin-top:16px" class="small">Rejected representation: per-minute explosion of all history (~185M rows vs ~28K — the "only works at
+  <p style="margin-top:16px" class="small">Rejected representation: per-minute explosion of all history (148,900 rows vs ~28K — the "only works at
     hackathon size" choice the statement names). We keep it only as an independent cross-check for the gate, documented as not the serving path.</p>
   <div class="foot"><span>ADR 0003 · sql/40_deltas.sql · docs/CONVENTIONS.md</span><span>append-only: nothing in the serving layer is ever updated in place</span></div>
 </section>
@@ -418,7 +418,7 @@ an interval running <b>20:59:48 → 22:04:49</b> emits:
           <div class="lbl">7 dimensions</div><div class="track"><div class="bar hi" style="width:76.2%"></div></div><div class="val">28,139 · 76.2%</div>
           <div class="lbl">the ceiling</div><div class="track" style="border-right:2px dashed #8a8a80"><div class="bar" style="width:100%; background:none; border:1px dashed #4a4a44"></div></div><div class="val">36,930</div>
         </div>
-        <p class="small" style="margin-top:10px">Whole table: 111 KiB. Per-minute explosion (~185M rows, ≈6,600× larger) has no such ceiling — that is why it isn't the serving path.</p>
+        <p class="small" style="margin-top:10px">Whole table: 111 KiB. Per-minute explosion (148,900 rows, ≈5.3× larger) has no such ceiling — that is why it isn't the serving path.</p>
       </div>
       <p style="margin-top:12px">Work scales with <b>change</b>, not history: the delta layer is O(intervals), rebuilds touch
         only sessions that changed, corrections cost O(stragglers). Hour-clipping means no query ever scans from t=0.</p>
