@@ -13,6 +13,12 @@ GO          ?= go
 GOFLAGS     ?=
 ARGS        ?=
 
+# The exact golangci-lint this repo expects — the same pin as devbox.json.
+# .golangci.yml is v2 schema; a v1 binary rejects it, and an unpinned v2 can
+# drift from CI. lint refuses to run anything else rather than silently using
+# whatever happens to be on PATH.
+GOLANGCI_LINT_VERSION := 2.12.2
+
 export CGO_ENABLED ?= 0
 
 .DEFAULT_GOAL := help
@@ -53,14 +59,31 @@ cover:
 cover-html: cover
 	$(GO) tool cover -html=$(COVER_FILE)
 
-## lint: golangci-lint over everything
+# lint-toolcheck: fail LOUDLY if the golangci-lint on PATH is not the pinned
+# version. A global v1.x against our v2 config, or a drifted v2, must stop the
+# build with instructions — not lint with whatever was installed last.
+.PHONY: lint-toolcheck
+lint-toolcheck:
+	@command -v golangci-lint >/dev/null 2>&1 || { \
+		echo "ERROR: golangci-lint not found on PATH."; \
+		echo "  This repo pins golangci-lint $(GOLANGCI_LINT_VERSION) via devbox.json."; \
+		echo "  Run 'direnv allow' (or 'devbox shell') to get the pinned toolchain."; \
+		exit 1; }
+	@golangci-lint version 2>/dev/null | head -1 | grep -qF "$(GOLANGCI_LINT_VERSION)" || { \
+		echo "ERROR: wrong golangci-lint on PATH:"; \
+		echo "  found:  $$(golangci-lint version 2>/dev/null | head -1)"; \
+		echo "  wanted: golangci-lint $(GOLANGCI_LINT_VERSION) (the devbox.json pin; .golangci.yml is v2 schema)"; \
+		echo "  Run 'direnv allow' (or 'devbox shell') so the pinned binary shadows the global one."; \
+		exit 1; }
+
+## lint: golangci-lint over everything (refuses to run an unpinned binary)
 .PHONY: lint
-lint:
+lint: lint-toolcheck
 	golangci-lint run ./...
 
 ## lint-fix: golangci-lint with autofix — hooks FIX, they do not just flag
 .PHONY: lint-fix
-lint-fix:
+lint-fix: lint-toolcheck
 	golangci-lint run --fix ./...
 
 ## fmt: gofmt + import grouping
