@@ -76,23 +76,42 @@ than reimplemented, so the test cannot drift from the model it tests.
 | Sub-check | What it catches | Status |
 |---|---|---|
 | control build vs production, every minute | non-determinism in the derivation | PASS — 2,887 @10:56 and 2,450 @11:10, exact |
-| incremental absorption vs control, every minute | anything that makes incremental ≠ rebuild | **FAIL as shipped** — 3 of 1,578 minutes, **+37 at the peak** |
+| incremental absorption vs control, every minute — **`build_version`, i.e. what production runs** | anything that makes incremental ≠ rebuild | **PASS** — `CONVERGES` on all 1,578 minutes, peak **2,887** (`evidence/truncation.txt`) |
+| the same, on the retained `interval_end` variant | that the test can still **detect** the historical defect | DIVERGES by design — 3 of 1,578 minutes, +37 at the peak. This is the regression guard firing, **not** a report that we have the bug |
 | delta arithmetic isolated from interval state | whether ADR 0006's negate-and-re-emit is itself lossy | PASS — exact on all 1,578 minutes |
-| versioned `session_intervals` vs control | that the proposed fix actually fixes it | PASS — row for row identical, converges on all 1,578 minutes |
 
-**The bug this test found.** `session_intervals` is `ReplacingMergeTree(interval_end)`, which resolves
-duplicates by keeping the **largest** `interval_end`. `sql/10_intervals.sql` justifies that with "late
-heartbeats EXTEND an interval" — i.e. it assumes re-derivation is monotonically increasing. It is not.
-A provisional interval carries `TAIL_S = 60s` of grace because its run appeared to end; the completed
-derivation places the true end **earlier** (at a pause, or at a real `VideoSessionEnd` inside the
-grace window). The stale, longer row then outranks the correct one permanently and drags a stale
-`is_open = 1` with it. Measured: **316 intervals up to 60s too long, 315 stuck at `is_open = 1`,
-+1.3% on the headline peak.** Fix: a monotonic `build_version UInt64` as the version column.
+**This test is two-sided — read both rows before concluding anything.** `sql/70_truncation_test.sql`
+deliberately **keeps** a `ReplacingMergeTree(interval_end)` variant so the historical defect stays
+detectable; the `build_version` variant is the one production runs. Until `1dee090` this table said
+*"FAIL as shipped — 3 of 1,578 minutes, +37 at the peak"*, which was true when written and false
+after `388a845`.
 
-**Second finding.** `cc_minute_delta.starts`/`ends` are `SimpleAggregateFunction(sum, UInt64)`, so the
-negative corrective row ADR 0006 mandates is not representable. ClickHouse does **not** reject it — it
-wraps to `2^64 - n`. `sum()` still comes out right by modular arithmetic, but `max()` returns 1.8e19
-and any pre-merge single-row read is garbage. Make both `Int64`.
+**The bug this test found, and where it was fixed.** `session_intervals` *was*
+`ReplacingMergeTree(interval_end)`, which resolves duplicates by keeping the **largest**
+`interval_end` — justified with "late heartbeats EXTEND an interval", i.e. assuming re-derivation is
+monotonically increasing. It is not. A provisional interval carries `TAIL_S = 60s` of grace because
+its run appeared to end; the completed derivation places the true end **earlier** (at a pause, or at a
+real `VideoSessionEnd` inside the grace window). The stale, longer row then outranked the correct one
+permanently and dragged a stale `is_open = 1` with it. Measured: **316 intervals up to 60s too long,
+315 stuck at `is_open = 1`, +37 on the peak minute (2,924 vs 2,887, +1.3%).**
+
+- **Fixed in `388a845`** — `session_intervals` is now `ReplacingMergeTree(build_version)`, a monotonic
+  build counter; `cc_minute_delta.starts`/`ends` became `Int64` in the same commit.
+- **The test itself was repaired in `1dee090`** — it had broken on the ADR 0008 7-dimension schema
+  (hard-coded column lists, a dead `sed` anchor) and its verdict text still claimed the model did not
+  converge.
+- **Evidence:** `evidence/truncation.txt` — `CONVERGES  versioned incremental == production truth on
+  all 1578 minutes · peak 2887`, and `FIXED  versioned session_intervals is row-for-row identical to
+  a clean rebuild`. ⚠️ The trailing `VERDICT` block of that committed run predates the `1dee090`
+  verdict-text repair and still reads "does NOT converge"; the machine-compared lines above it are the
+  authoritative part, and the next regeneration of the file replaces the block with the two-sided
+  wording already in `tools/truncation-test.sh`.
+
+**Second finding — also fixed in `388a845`.** `cc_minute_delta.starts`/`ends` **were**
+`SimpleAggregateFunction(sum, UInt64)`, so the negative corrective row ADR 0006 mandates was not
+representable. ClickHouse does **not** reject it — it wraps to `2^64 - n`. `sum()` still comes out
+right by modular arithmetic, but `max()` returns 1.8e19 and any pre-merge single-row read is garbage.
+Both are `Int64` now.
 
 **Anti-patterns specific to this test:**
 
