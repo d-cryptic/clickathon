@@ -1,0 +1,30 @@
+=== LIVE-INTERVAL EVIDENCE · setup
+generated 2026-08-01T21:30:45Z
+scratch database: sonyliv_v3live   ·   sonyliv read-only (SELECT on ev_raw only)
+
+PHASE 0 — reset the scratch database
+  schema applied from sql/00_schema.sql, sql/10_intervals.sql, sql/20_views.sql
+
+PHASE 1 — copy the raw stream (13 canonical columns; graded ev_raw has a
+          drifted 14th, ingested_at, which is deliberately not carried)
+  events/sessions/first/last: 905558	10866	2026-07-14 15:43:58.144	2026-07-26 11:30:04.847
+
+PHASE 2 — the FINAL model: sql/30_build_intervals.sql then sql/40_deltas.sql
+  intervals / open rows / sessions: 30323	0	10866
+  delta rows / peak / peak minute:  28073	2917	2026-07-26 10:56:00
+
+PHASE 3 — the gate. sql/90_reconcile.sql recomputes concurrency from ev_raw
+          with an INDEPENDENT implementation and compares to the served tier.
+0	SUMMARY	minutes_compared=17028	mismatched=0	max_abs_diff=0	peak=2917	PASS
+2	sample	2026-07-14 15:43:00	1	1	0	PASS
+2	sample	2026-07-16 12:35:00	0	0	0	PASS
+2	sample	2026-07-17 08:56:00	0	0	0	PASS
+2	sample	2026-07-26 10:56:00	2917	2917	0	PASS
+2	sample	2026-07-26 11:30:00	197	197	0	PASS
+
+PHASE 4 — cross-check: interval EXPANSION must equal the served DELTA curve.
+          The sweep in 10-asof-sweep.sh counts by expansion, so this is what
+          licenses reading its output as 'what the dashboard would serve'.
+minutes_compared=1470  mismatched=0  max_abs_diff=0  PASS
+
+setup done.

@@ -25,6 +25,7 @@ what is verified, what is broken, and what is still missing, in one page.
 | **Understand the whole problem from scratch, in plain English** | [docs/EXPLAINER.md](docs/EXPLAINER.md) — the ask, what is really in the data, and why the obvious approach is wrong |
 | **Answer "which sessions count, and what does it cost me when you are wrong?"** | [docs/BUSINESS_RULES.md](docs/BUSINESS_RULES.md) — the inclusion ledger, the cost of error in both directions, decision→tier mapping, and a straight answer on billing |
 | Understand the concurrency model and why | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| **Answer "what about sessions that are still open?"** | [docs/LIVE_INTERVALS.md](docs/LIVE_INTERVALS.md) — the live edge under-reports **−14.8%** and is exact beyond **240 s**; labelling proposal in [ADR 0029](docs/adr/0029-provisional-and-final-buckets-labelled-off-the-watermark.md) |
 | Know the field names / event types / data shape | [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) |
 | Write SQL the way this repo writes SQL | [docs/CONVENTIONS.md](docs/CONVENTIONS.md) |
 | **Set up the Go toolchain / write Go here** | [docs/GO.md](docs/GO.md) — `direnv allow`, then `make ci` |

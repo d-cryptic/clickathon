@@ -1,0 +1,10 @@
+=== LIVE-INTERVAL EVIDENCE · as-of-T sweep
+generated 2026-08-01T21:35:08Z   ·   scratch database: sonyliv_v3live
+
+cuts: 32  (5-minute grid 09:00→11:30, plus the 10:56 peak minute)
+................................
+derivations stored: 32 cuts, 279524 intervals
+building the per-cut curve against a dense minute spine ...
+curve rows: 542537
+
+sweep done.
