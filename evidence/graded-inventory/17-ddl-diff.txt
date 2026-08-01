@@ -1,0 +1,108 @@
+identical after normalization: 37
+  = cc_hour_agg
+  = cc_minute_stateless
+  = cc_publish_batch
+  = cc_publish_consumed
+  = cc_publish_runs
+  = content_dim
+  = dict_content
+  = ev_raw
+  = mv_session_dirty
+  = mv_stateless
+  = session_dirty
+  = session_intervals
+  = v_cc_minute_delta_norm
+  = v_cc_publish_lag
+  = v_cc_tumbling_dim
+  = v_cc_tumbling_hour
+  = v_cc_tumbling_total
+  = v_cc_watermark
+  = v_concurrency_category_now
+  = v_concurrency_minute
+  = v_concurrency_minute_audio_norm
+  = v_concurrency_minute_category
+  = v_concurrency_minute_content
+  = v_concurrency_minute_delta_total
+  = v_concurrency_minute_intervals
+  = v_concurrency_minute_intervals_dim
+  = v_concurrency_minute_naive
+  = v_concurrency_minute_stateless
+  = v_concurrency_minute_title
+  = v_concurrency_minute_total
+  = v_concurrency_minute_video_type
+  = v_concurrency_title_now
+  = v_concurrency_video_type_now
+  = v_content_orphan_check
+  = v_content_title_collisions
+  = v_dimension_drift
+  = v_dimension_drift_summary
+
+drifted: 21
+
+!! cc_minute_delta — BODY DIFFERS
+   repo : CREATE TABLE cc_minute_delta (minute DateTime, platform LowCardinality(String), country LowCardinality(String), content_id Int64, subtitle_language LowCardinality(String), player_version LowCardinality(String), audio_language LowCardinality(String), app_version LowCardinality(String), delta SimpleAggregateFunction(sum, Int64), starts SimpleAggregateFunction(sum, Int64), ends SimpleAggregateFunction(sum, Int64)) ENGINE = AggregatingMergeTree PARTITION BY toYYYYMMDD(minute) ORDER BY (platform, country, content_id, minute, subtitle_language, player_version, audio_language, app_version)
+   cloud: CREATE TABLE cc_minute_delta (minute DateTime, platform LowCardinality(String), country LowCardinality(String), content_id Int64, subtitle_language LowCardinality(String), player_version LowCardinality(String), audio_language LowCardinality(String), app_version LowCardinality(String), delta SimpleAggregateFunction(sum, Int64), starts SimpleAggregateFunction(sum, Int64), ends SimpleAggregateFunction(sum, Int64)) ENGINE = AggregatingMergeTree PARTITION BY toYYYYMMDD(minute) PRIMARY KEY (platform, country, content_id, minute) ORDER BY (platform, country, content_id, minute, subtitle_language, pla
+
+!! cc_user_minute — BODY DIFFERS
+   repo : CREATE TABLE cc_user_minute (minute DateTime, platform LowCardinality(String), country LowCardinality(String), content_id Int64, active_state AggregateFunction(uniqExact, String), computed_at DateTime64(3) DEFAULT now64(3)) ENGINE = ReplacingMergeTree(computed_at) PARTITION BY toYYYYMMDD(minute) ORDER BY (platform, country, content_id, minute)
+   cloud: CREATE TABLE cc_user_minute (minute DateTime, platform LowCardinality(String), country LowCardinality(String), content_id Int64, active_state AggregateFunction(uniqExact, String)) ENGINE = AggregatingMergeTree PARTITION BY toYYYYMMDD(minute) ORDER BY (platform, country, content_id, minute)
+
+!! mv_user_minute — ONLY ON CLOUD
+
+!! v_cc_by_app_version — ONLY ON CLOUD
+
+!! v_cc_by_audio_language — ONLY ON CLOUD
+
+!! v_cc_by_country — ONLY ON CLOUD
+
+!! v_cc_by_platform — ONLY ON CLOUD
+
+!! v_cc_by_player_version — ONLY ON CLOUD
+
+!! v_cc_by_subtitle_language — ONLY ON CLOUD
+
+!! v_cc_minute_series — BODY DIFFERS
+   repo : CREATE VIEW v_cc_minute_series (platform LowCardinality(String), country LowCardinality(String), content_id Int64, minute DateTime, concurrent Int64) AS WITH change_points AS (SELECT platform, country, content_id, toStartOfHour(minute) AS hour, minute, sum(delta) AS d FROM cc_minute_delta GROUP BY platform, country, content_id, hour, minute), curve AS (SELECT platform, country, content_id, hour, minute AS chg_minute, toInt64(sum(d) OVER w_run) AS concurrent, leadInFrame(toUInt32(minute), 1, toUInt32(toUInt32(hour) + 3600)) OVER w_fwd - toUInt32(minute) AS hold_s FROM change_points WINDOW w_run
+   cloud: CREATE VIEW v_cc_minute_series (platform LowCardinality(String), country LowCardinality(String), content_id Int64, minute DateTime, concurrent Int64) AS WITH change_points AS (SELECT platform, country, content_id, toStartOfHour(minute) AS hour, minute, sum(delta) AS d FROM cc_minute_delta GROUP BY platform, country, content_id, hour, minute), curve AS (SELECT platform, country, content_id, hour, minute AS chg_minute, toInt64(sum(d) OVER w_run) AS concurrent, leadInFrame(toUInt32(minute), 1, toUInt32(toUInt32(hour) + 3600)) OVER w_fwd - toUInt32(minute) AS hold_s FROM change_points WINDOW
+
+!! v_cc_minute_series_total — BODY DIFFERS
+   repo : CREATE VIEW v_cc_minute_series_total (minute DateTime, concurrent Int64) AS WITH change_points AS (SELECT toStartOfHour(minute) AS hour, minute, sum(delta) AS d FROM cc_minute_delta GROUP BY hour, minute), curve AS (SELECT hour, minute AS chg_minute, toInt64(sum(d) OVER w_run) AS concurrent, leadInFrame(toUInt32(minute), 1, toUInt32(toUInt32(hour) + 3600)) OVER w_fwd - toUInt32(minute) AS hold_s FROM change_points WINDOW w_run AS (PARTITION BY hour ORDER BY minute ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), w_fwd AS (PARTITION BY hour ORDER BY minute ASC ROWS BETWEEN CURRENT ROW AND
+   cloud: CREATE VIEW v_cc_minute_series_total (minute DateTime, concurrent Int64) AS WITH change_points AS (SELECT toStartOfHour(minute) AS hour, minute, sum(delta) AS d FROM cc_minute_delta GROUP BY hour, minute), curve AS (SELECT hour, minute AS chg_minute, toInt64(sum(d) OVER w_run) AS concurrent, leadInFrame(toUInt32(minute), 1, toUInt32(toUInt32(hour) + 3600)) OVER w_fwd - toUInt32(minute) AS hold_s FROM change_points WINDOW
+
+!! v_cc_rolling_dim — BODY DIFFERS
+   repo : CREATE VIEW v_cc_rolling_dim (platform LowCardinality(String), country LowCardinality(String), content_id Int64, minute DateTime, concurrent Int64, peak_5m Int64, peak_15m Int64, peak_60m Int64, peak_5m_minute DateTime, peak_15m_minute DateTime, peak_60m_minute DateTime, integral_5m Int64, integral_15m Int64, integral_60m Int64, avg_5m Float64, avg_15m Float64, avg_60m Float64, obs_5m UInt64, obs_15m UInt64, obs_60m UInt64) AS SELECT platform, country, content_id, minute, concurrent, max(concurrent) OVER w5 AS peak_5m, max(concurrent) OVER w15 AS peak_15m, max(concurrent) OVER w60 AS peak_60m,
+   cloud: CREATE VIEW v_cc_rolling_dim (platform LowCardinality(String), country LowCardinality(String), content_id Int64, minute DateTime, concurrent Int64, peak_5m Int64, peak_15m Int64, peak_60m Int64, integral_5m Int64, integral_15m Int64, integral_60m Int64, avg_5m Float64, avg_15m Float64, avg_60m Float64, obs_5m UInt64, obs_15m UInt64, obs_60m UInt64) AS SELECT platform, country, content_id, minute, concurrent, max(concurrent) OVER w5 AS peak_5m, max(concurrent) OVER w15 AS peak_15m, max(concurrent) OVER w60 AS peak_60m, sum(concurrent) OVER w5 * 60 AS integral_5m, sum(concurrent) OVER w15 * 60 A
+
+!! v_cc_rolling_total — BODY DIFFERS
+   repo : CREATE VIEW v_cc_rolling_total (minute DateTime, concurrent Int64, peak_5m Int64, peak_15m Int64, peak_60m Int64, peak_5m_minute DateTime, peak_15m_minute DateTime, peak_60m_minute DateTime, integral_5m Int64, integral_15m Int64, integral_60m Int64, avg_5m Float64, avg_15m Float64, avg_60m Float64, obs_5m UInt64, obs_15m UInt64, obs_60m UInt64) AS SELECT minute, concurrent, max(concurrent) OVER w5 AS peak_5m, max(concurrent) OVER w15 AS peak_15m, max(concurrent) OVER w60 AS peak_60m, argMax(minute, (concurrent, -toInt64(toUInt32(minute)))) OVER w5 AS peak_5m_minute, argMax(minute, (concurrent,
+   cloud: CREATE VIEW v_cc_rolling_total (minute DateTime, concurrent Int64, peak_5m Int64, peak_15m Int64, peak_60m Int64, integral_5m Int64, integral_15m Int64, integral_60m Int64, avg_5m Float64, avg_15m Float64, avg_60m Float64, obs_5m UInt64, obs_15m UInt64, obs_60m UInt64) AS SELECT minute, concurrent, max(concurrent) OVER w5 AS peak_5m, max(concurrent) OVER w15 AS peak_15m, max(concurrent) OVER w60 AS peak_60m, sum(concurrent) OVER w5 * 60 AS integral_5m, sum(concurrent) OVER w15 * 60 AS integral_15m, sum(concurrent) OVER w60 * 60 AS integral_60m, (sum(concurrent) OVER w5 * 60) / (5 * 60) AS avg_
+
+!! v_cc_window_range — BODY DIFFERS
+   repo : CREATE VIEW v_cc_window_range AS WITH toDateTime({p_start:DateTime}) AS rs, toDateTime({p_end:DateTime}) AS re, toUInt32(if((toUInt32(rs) % 3600) = 0, toUInt32(rs), (intDiv(toUInt32(rs), 3600) + 1) * 3600)) AS whole_lo, toUInt32(intDiv(toUInt32(re), 3600) * 3600) AS whole_hi, whole AS (SELECT max(peak) AS pk, argMax(peak_minute, (peak, -toInt64(toUInt32(peak_minute)))) AS pk_min, sum(integral) AS ig, count() AS hrs FROM cc_hour_agg FINAL WHERE (platform = {p_platform:String}) AND (country = {p_country:String}) AND (content_id = {p_content_id:Int64}) AND (hour >= toDateTime(whole_lo)) AND (hour
+   cloud: CREATE VIEW v_cc_window_range AS WITH toDateTime({p_start:DateTime}) AS rs, toDateTime({p_end:DateTime}) AS re, toUInt32(if((toUInt32(rs) % 3600) = 0, toUInt32(rs), (intDiv(toUInt32(rs), 3600) + 1) * 3600)) AS whole_lo, toUInt32(intDiv(toUInt32(re), 3600) * 3600) AS whole_hi, whole AS (SELECT max(peak) AS pk, sum(integral) AS ig, count() AS hrs FROM cc_hour_agg FINAL WHERE (platform = {p_platform:String}) AND (country = {p_country:String}) AND (content_id = {p_content_id:Int64}) AND (hour >= toDateTime(whole_lo)) AND (hour < toDateTime(whole_hi))), partial_hours AS (SELECT arrayJoin(arrayDisti
+
+!! v_concurrency_day — BODY DIFFERS
+   repo : CREATE VIEW v_concurrency_day (platform LowCardinality(String), country LowCardinality(String), content_id Int64, day Date, peak Int64, peak_minute DateTime, integral Int64, avg_concurrent Float64, active_hours UInt64) AS SELECT platform, country, content_id, toDate(hour) AS day, max(cc_hour_agg.peak) AS peak, argMax(cc_hour_agg.peak_minute, (cc_hour_agg.peak, -toInt64(toUInt32(cc_hour_agg.peak_minute)))) AS peak_minute, sum(cc_hour_agg.integral) AS integral, sum(cc_hour_agg.integral) / 86400 AS avg_concurrent, count() AS active_hours FROM cc_hour_agg FINAL WHERE (cc_hour_agg.peak != 0) OR (cc
+   cloud: CREATE VIEW v_concurrency_day (platform LowCardinality(String), country LowCardinality(String), content_id Int64, day Date, peak Int64, peak_minute DateTime, integral Int64, avg_concurrent Float64, active_hours UInt64) AS SELECT platform, country, content_id, toDate(hour) AS day, max(cc_hour_agg.peak) AS peak, argMax(cc_hour_agg.peak_minute, (cc_hour_agg.peak, -toInt64(toUInt32(cc_hour_agg.peak_minute)))) AS peak_minute, sum(cc_hour_agg.integral) AS integral, sum(cc_hour_agg.integral) / 86400 AS avg_concurrent, count() AS active_hours FROM cc_hour_agg FINAL GROUP BY platform, country, content_
+
+!! v_concurrency_day_total — BODY DIFFERS
+   repo : CREATE VIEW v_concurrency_day_total (day Date, peak Int64, peak_minute DateTime, integral Int64, avg_concurrent Float64, active_hours UInt64) AS SELECT toDate(hour) AS day, max(cc_hour_agg.peak) AS peak, argMax(cc_hour_agg.peak_minute, (cc_hour_agg.peak, -toInt64(toUInt32(cc_hour_agg.peak_minute)))) AS peak_minute, sum(cc_hour_agg.integral) AS integral, sum(cc_hour_agg.integral) / 86400 AS avg_concurrent, count() AS active_hours FROM cc_hour_agg FINAL WHERE (platform = '*') AND (country = '*') AND (content_id = -1) AND ((cc_hour_agg.peak != 0) OR (cc_hour_agg.integral != 0)) GROUP BY day
+   cloud: CREATE VIEW v_concurrency_day_total (day Date, peak Int64, peak_minute DateTime, integral Int64, avg_concurrent Float64, active_hours UInt64) AS SELECT toDate(hour) AS day, max(cc_hour_agg.peak) AS peak, argMax(cc_hour_agg.peak_minute, (cc_hour_agg.peak, -toInt64(toUInt32(cc_hour_agg.peak_minute)))) AS peak_minute, sum(cc_hour_agg.integral) AS integral, sum(cc_hour_agg.integral) / 86400 AS avg_concurrent, count() AS active_hours FROM cc_hour_agg FINAL WHERE (platform = '*') AND (country = '*') AND (content_id = -1) GROUP BY day
+
+!! v_concurrency_hour — BODY DIFFERS
+   repo : CREATE VIEW v_concurrency_hour (platform LowCardinality(String), country LowCardinality(String), content_id Int64, hour DateTime, peak Int64, peak_minute DateTime, integral Int64, avg_concurrent Float64) AS SELECT platform, country, content_id, hour, peak, peak_minute, integral, integral / 3600 AS avg_concurrent FROM cc_hour_agg FINAL WHERE (peak != 0) OR (integral != 0)
+   cloud: CREATE VIEW v_concurrency_hour (platform LowCardinality(String), country LowCardinality(String), content_id Int64, hour DateTime, peak Int64, peak_minute DateTime, integral Int64, avg_concurrent Float64) AS SELECT platform, country, content_id, hour, peak, peak_minute, integral, integral / 3600 AS avg_concurrent FROM cc_hour_agg FINAL
+
+!! v_concurrency_hour_total — BODY DIFFERS
+   repo : CREATE VIEW v_concurrency_hour_total (hour DateTime, peak Int64, peak_minute DateTime, integral Int64, avg_concurrent Float64) AS SELECT hour, peak, peak_minute, integral, integral / 3600 AS avg_concurrent FROM cc_hour_agg FINAL WHERE (platform = '*') AND (country = '*') AND (content_id = -1) AND ((peak != 0) OR (integral != 0))
+   cloud: CREATE VIEW v_concurrency_hour_total (hour DateTime, peak Int64, peak_minute DateTime, integral Int64, avg_concurrent Float64) AS SELECT hour, peak, peak_minute, integral, integral / 3600 AS avg_concurrent FROM cc_hour_agg FINAL WHERE (platform = '*') AND (country = '*') AND (content_id = -1)
+
+!! v_session_minutes — ONLY ON CLOUD
+
+!! v_user_concurrency_minute — BODY DIFFERS
+   repo : CREATE VIEW v_user_concurrency_minute (minute DateTime, platform LowCardinality(String), country LowCardinality(String), content_id Int64, concurrent_users UInt64) AS SELECT minute, platform, country, content_id, uniqExactMerge(active_state) AS concurrent_users FROM cc_user_minute FINAL GROUP BY minute, platform, country, content_id HAVING concurrent_users > 0
+   cloud: CREATE VIEW v_user_concurrency_minute (minute DateTime, platform LowCardinality(String), country LowCardinality(String), content_id Int64, concurrent_users UInt64) AS SELECT minute, platform, country, content_id, uniqExactMerge(active_state) AS concurrent_users FROM cc_user_minute GROUP BY minute, platform, country, content_id
+
+!! v_user_concurrency_minute_total — BODY DIFFERS
+   repo : CREATE VIEW v_user_concurrency_minute_total (minute DateTime, concurrent_users UInt64) AS SELECT minute, uniqExactMerge(active_state) AS concurrent_users FROM cc_user_minute FINAL GROUP BY minute HAVING concurrent_users > 0
+   cloud: CREATE VIEW v_user_concurrency_minute_total (minute DateTime, concurrent_users UInt64) AS SELECT minute, uniqExactMerge(active_state) AS concurrent_users FROM cc_user_minute GROUP BY minute

@@ -1,0 +1,5 @@
+filter_level	rows_compared	peak_mismatch	verdict
+0	7	2	FAIL
+1	25	12	FAIL
+2	7	2	FAIL
+4	3524	164	FAIL
