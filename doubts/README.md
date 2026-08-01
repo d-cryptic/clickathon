@@ -43,6 +43,17 @@ supersede or sharpen the version in `MENTOR_QUESTIONS.md`:
   (totals) and is wrong at the grain the model now serves (7 dimensions): the attribution vote counts
   events, so duplicates vote. The question — does the ground truth dedup before attributing? — only
   exists because the finer measurement was taken.
+- **07, 08, 09 come from the adversarial audit** (`evidence/adversarial/README.md`), which rebuilt the
+  interval derivation in a scratch database under **21 alternative readings** of conventions the model
+  and the gate share, and measured each against the graded headline. Ten came back safe at ≤0.1%.
+  Three moved enough to deserve a mentor: **07** tail credit at explicit stops (−141 peak, −7.1% of
+  hours), **08** second-truncation inverting pause/resume order (−52), and **09** minute membership
+  read as instant sampling (**−410, −14.1%** — the largest fork we have measured anywhere).
+- **09 is the one to ask first, and it partly subsumes 05.** Both deepen Q8. 05 isolates the end
+  boundary and is worth one viewer; 09 asks whether membership means any-overlap or
+  presence-at-the-instant and is worth 410. A mentor answering 09 probably settles 05 for free; a
+  mentor answering only 05 leaves the expensive half open. **09 was filed as `06` by the audit and
+  renumbered on merge** — the grain dossier had already taken 06. Nothing else cited it in between.
 
 ## Rules for this folder
 

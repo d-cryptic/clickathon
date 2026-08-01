@@ -5,7 +5,7 @@
 > full interval derivation in a scratch DB (`adv_q19`, local — the graded `sonyliv` was only ever
 > SELECTed) under **21 alternative readings** of those shared conventions and measured each against the
 > headline (peak **2,917** @ 2026-07-26 10:56 · **1,978.1 h**). Three movers got dossiers: minute
-> membership **−410 / −14.1%** ([doubts/06](../../doubts/06-minute-membership.md)), tail credit at
+> membership **−410 / −14.1%** ([doubts/09](../../doubts/09-minute-membership-instant-reading.md)), tail credit at
 > explicit stops **−141 / −4.8%** ([07](../../doubts/07-tail-credit-at-explicit-stops.md)), and
 > second-truncation inverting pause/resume order **−52 / −1.8%**
 > ([08](../../doubts/08-second-truncation-inverts-pause-resume.md)). Ten assumptions measured **safe**
@@ -55,7 +55,7 @@ Baseline: peak **2,917**, hours **1,978.1**. Δ% against those.
 
 | # | Assumption (shipped reading) | Alternative reading | Distinguishing input | Peak | Hours | Verdict |
 |---|---|---|---|---|---|---|
-| 1 | Minute membership: active for **any part** of minute M counts at M | active at the **instant** M:00 | every interval not aligned to :00 | **2,507 (−14.1%)** | n/a | **mentor ruling — [doubts/06](../../doubts/06-minute-membership.md)** (measures mentor Q8) |
+| 1 | Minute membership: active for **any part** of minute M counts at M | active at the **instant** M:00 | every interval not aligned to :00 | **2,507 (−14.1%)** | n/a | **mentor ruling — [doubts/09](../../doubts/09-minute-membership-instant-reading.md)** (measures mentor Q8) |
 | 2 | 60 s tail grace after **every** run end | no tail where the run ends at an explicit stop (`VideoSessionEnd` or trailing `pause`) | 10,758 runs end at an end event; 2,898 at a pause | **2,776 (−4.8%)** | **1,837.2 (−7.1%)** | **probably wrong (pause half) / mentor (end half) — [doubts/07](../../doubts/07-tail-credit-at-explicit-stops.md)** |
 | 3 | Unclosed pause → paused to run end (conservative) | permissive: paused to next event | 6,124 unclosed pauses | 3,036 (+4.1%) | 2,070.0 (+4.6%) | known fork (Q2/ADR 0007) — **numbers refreshed post-ADR 0009**; ADR/skill still cite 3,018 / 2,048.6 |
 | 4 | `TAIL_S = 60` ("one cadence") | 40 s = one cadence at the **measured** 40 s beat (doubts/01) | every run end | 2,872 (−1.5%) | 1,928.2 (−2.5%) | folded into [doubts/07](../../doubts/07-tail-credit-at-explicit-stops.md); slope ≈ **2.4 viewers per tail-second** (sweep 0→120 s: 2,758→3,047) |

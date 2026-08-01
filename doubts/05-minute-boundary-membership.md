@@ -9,6 +9,11 @@
 > serving SQL, so a green gate **cannot choose between the two readings**. **Deepens Q8 in
 > [docs/MENTOR_QUESTIONS.md](../docs/MENTOR_QUESTIONS.md).**
 
+> **Read with [09](09-minute-membership-instant-reading.md).** This dossier isolates the **end
+> boundary** and is worth one viewer. 09 asks the broader form of the same question — any-overlap
+> versus presence-at-the-instant — and is worth **410**. Both deepen mentor Q8; 09 is the one to ask
+> first, and an answer to it may settle this one for free.
+
 **Status:** open · **Evidence measured:** 2026-08-01, ClickHouse Cloud `sonyliv`, current model
 (30,323 intervals · 1,978.1 h · peak 2,917 · gate green over 17,028 minutes)
 

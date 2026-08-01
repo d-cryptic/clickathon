@@ -1,4 +1,4 @@
-# 06 · "Concurrent at minute M" — any overlap, or present at the instant M begins? Worth 410 viewers
+# 09 · "Concurrent at minute M" — any overlap, or present at the instant M begins? Worth 410 viewers
 
 > **Summary:** Our model counts a session at minute M if it was active for **any part** of M. The
 > other common reading — active **at the instant M:00** (how a sampled/gauge metric reads) — gives a
@@ -7,6 +7,13 @@
 > unclosed pauses (4.6%). The gate cannot see it: `sql/90_reconcile.sql` expands truth with the same
 > inclusive-minute convention the model uses, so both sides agree by construction. **Measures mentor
 > Q8 in [docs/MENTOR_QUESTIONS.md](../docs/MENTOR_QUESTIONS.md), which was previously unquantified.**
+
+> **Read with [05](05-minute-boundary-membership.md).** Both dossiers probe minute membership and
+> both deepen mentor **Q8**, but they ask different halves and the stakes are nothing alike. 05 asks
+> only about the **end boundary** — does an interval ending exactly at 10:56:00 belong to 10:56? —
+> and moves the peak by **one viewer** (2,917 → 2,916). This one asks whether membership means *any
+> overlap* or *presence at the instant*, and moves it by **410** (2,917 → 2,507). If a mentor answers
+> only the narrow question, 09 stays open. **Ask this one first.**
 
 **Status:** open · **Evidence measured:** 2026-08-01, local scratch `adv_q19` rebuilt verbatim from
 `sql/30_build_intervals.sql` (baseline reproduces the graded 2,917 / 1,978.1 h exactly)
