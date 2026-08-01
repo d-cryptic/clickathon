@@ -166,14 +166,20 @@ CH_DATABASE_LOCAL=default in .env, or pass --database default."
 # Only DROP and TRUNCATE are gated. CREATE and CREATE OR REPLACE are how views
 # and UDFs are legitimately applied to `sonyliv`, and gating those would turn
 # this into ceremony people learn to route around.
-GRADED_DB="${GRADED_DB:-sonyliv}"
+# NOT overridable — see tools/build-model.sh for the reasoning. Codex found the
+# same hole in both guards on 2026-08-02.
+readonly GRADED_DB=sonyliv
 if [ "$DB" = "$GRADED_DB" ] && [ "${APPLY_GRADED_DESTRUCTIVE:-}" != yes ]; then
   for f in "${FILES[@]}"; do
     [ -f "$f" ] || continue
     # Strip `--` comments first: ADR 0010's own commentary QUOTES a DROP, and a
     # guard that greps comments as code blocks a clean run. The unseen-day
     # rehearsal hit exactly that (finding R2).
-    if sed 's/--.*//' "$f" | grep -qiE '(^|[[:space:];])(DROP|TRUNCATE)[[:space:]]'; then
+    # Broadened after Codex 2026-08-02: the original pattern caught only DROP and
+    # TRUNCATE, missing every other executable form that destroys or replaces data —
+    # ALTER ... DELETE/DROP COLUMN/UPDATE, DETACH, RENAME, EXCHANGE, REPLACE TABLE.
+    if sed 's/--.*//' "$f" | grep -qiE '(^|[[:space:];])(DROP|TRUNCATE|DETACH|RENAME[[:space:]]+TABLE|EXCHANGE[[:space:]]+TABLES|REPLACE[[:space:]]+TABLE)[[:space:]]' \
+       || sed 's/--.*//' "$f" | grep -qiE 'ALTER[[:space:]]+TABLE[^;]*(DELETE|UPDATE|DROP[[:space:]]+(COLUMN|PARTITION)|CLEAR[[:space:]]+COLUMN)'; then
       die "$f contains DROP or TRUNCATE and '$DB' is the GRADED database.
 
 Applying it destroys answers we are scored on, and there is no undo. If that is

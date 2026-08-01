@@ -81,7 +81,13 @@ gate() {
 # So: rebuilding the graded database is allowed, but it must be DELIBERATE.
 # Set REBUILD_GRADED=yes for that one invocation. Every other target — local,
 # any scratch database — is unaffected and needs no ceremony.
-GRADED_DB="${GRADED_DB:-sonyliv}"
+# NOT overridable. Cross-model validation (Codex, 2026-08-02) found that
+# `GRADED_DB="${GRADED_DB:-sonyliv}"` let any caller disable this guard with
+# GRADED_DB=anything — verified by the orchestrator, which reached stage 2/6 of a
+# graded rebuild without either authorisation flag. A guard whose subject is
+# caller-controlled is not a guard. `readonly` makes a later assignment fail
+# loudly instead of silently widening the hole.
+readonly GRADED_DB=sonyliv
 if [ "$TARGET" = cloud ]; then
   TARGET_DB="${CH_DATABASE:-}"
   if [ "$TARGET_DB" = "$GRADED_DB" ] && [ "${REBUILD_GRADED:-}" != yes ]; then
