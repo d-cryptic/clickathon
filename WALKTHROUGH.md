@@ -77,7 +77,7 @@ tools/fetch_data.sh                # CSVs (sha256-pinned) AND the three spec doc
 tools/load.sh                      # or TARGET=cloud tools/load.sh
 make model                         # intervals -> deltas -> views -> reconcile   (~11 s on Cloud)
 make reconcile                     # THE GATE — exits 1 on any mismatch
-make clickstack-cloud              # provision HyperDX sources, dashboard, saved searches
+make clickstack-cloud              # provision HyperDX: 24 sources, SIX dashboards, saved searches
 ```
 
 ---

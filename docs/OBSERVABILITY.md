@@ -8,6 +8,14 @@
 > the OTLP/HTTP JSON mapping is small and stable and the SDK's log bridge is still experimental. Every
 > claim below was executed, not reasoned about — see "Verified end to end".
 
+**The hosted twin.** The ClickHouse Cloud service has **no OTLP path** (no `otel_*` tables), so the
+metrics below cannot land there. `tools/clickstack-cloud.sh` therefore builds **"SonyLIV pipeline
+health (cloud)"** on the hosted HyperDX from the same three signals cloud-natively: `v_cc_watermark`
+directly, build stages from `system.query_log` with the exact filters `internal/pipelinehealth`
+uses, and reconcile-gate *runs* by their read set (`ev_raw` AND `cc_minute_delta`). What the hosted
+twin cannot show is the gate's PASS/FAIL **verdict** — that lives in `evidence/reconcile.txt` and in
+`sonyliv.reconcile.gate_pass` here, which is precisely why this OTLP emitter still earns its keep.
+
 ## Why this file exists
 
 The rubric test is: *if I delete ClickStack, does the demo stop doing something a judge saw?* Before
