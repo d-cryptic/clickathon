@@ -130,6 +130,27 @@ cross-worktree commands are denied to this session. Its work is preserved and pu
 fixing Q34/Q35/U3-F1, **including Q35, which changes a number we would submit** (peak 2,917 → 2,927).
 Worth unblocking early.
 
+## 4d · Final overnight state
+
+**`dev` verified end to end at the close:** gate PASSED (17,028 minutes, 0 mismatched), `make ci`
+green, tiers coherent — `ev_raw` 905,558 · intervals 30,323 · deltas 28,073 · hour peak 2,917 ·
+user peak 2,844.
+
+**`promo/core` is the candidate to land.** 64 files byte-identical to `dev`, passing checks 1, 2, 3,
+4b and 6 on the first attempt — the first of six candidates to do that. It needs only Codex check 5,
+and its validator is one of the three stalled sessions.
+
+**All four Codex audit findings are closed**, three of them by direct work rather than by an agent:
+Q36 (`--replace` guard), Q38 (real timings, 1.7–2.1× the runbook's), Q39a (the inverted anchor,
+withdrawn not softened), Q39b (three stale business statements). **Q37 alone remains open** — the
+contract gate and the runner disagree about a valid file — and its partial work is safe on
+`fix/contract-gate-runner-agreement`.
+
+**One bug I introduced and an agent caught.** My source-contract block in `tools/unseen-run.sh`
+referenced `$TARGET`, which that script never sets; under `set -u` the one-command unseen path would
+have **died at the gate I added to protect it**. Fixed. It was found because an agent re-read the
+file instead of trusting my commit message.
+
 ## 5 · Where to look when you wake
 
 ```bash
