@@ -16,6 +16,9 @@ released in the final hours. Full statement: [docs/PROBLEM.md](docs/PROBLEM.md).
 
 ## Where to go
 
+**Just waking up, or picking this up cold? Read [HANDOFF.md](HANDOFF.md) first** — what is blocked,
+what only a human can do, and where the promotion gate stands.
+
 **New here, or resuming after a break? Read [WALKTHROUGH.md](WALKTHROUGH.md) first** — what is built,
 what is verified, what is broken, and what is still missing, in one page.
 
