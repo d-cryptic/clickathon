@@ -351,9 +351,18 @@ analysis there is sound, but the *values* going into those keys need a normalisa
  title is NOT a key   2,773 titles shared by 2–4 content_ids
                       1,418 collisions span multiple CATEGORIES
                       → v_concurrency_minute_title merges distinct assets
+                      → 568 of 3,325 SERVED titles (17.1%) name >1 asset,
+                        incl. the #1 title 'wekek ked' (peak 433: live+vod)
 ```
 
 Dossier: [doubts/03](../doubts/03-content-catalog.md).
+
+**Since handled** ([ADR 0009](adr/0009-content-views-are-database-agnostic-and-label-their-ambiguity.md)):
+the blank `video_type` is labelled `'(blank)'` — kept distinct from `'(unknown)'`, which means a
+dictionary *miss* and nothing else — and `v_concurrency_minute_title` now carries
+`catalog_content_ids` so a merged label cannot be read as one asset. Same ADR fixed a
+cross-database leak: those views hard-coded `dictGet('sonyliv.dict_content', …)`, so on the unseen
+day they would have answered from **production's** catalog.
 
 ## B.9 · Duplicates, ordering, and ties
 

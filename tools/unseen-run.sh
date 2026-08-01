@@ -86,8 +86,11 @@ run_file() {
 }
 
 # A rendered file that still names another database would be silent and
-# catastrophic. sql/80_content.sql hard-codes `sonyliv` in six dictGet calls and
-# in the dictionary SOURCE, so this is not hypothetical.
+# catastrophic. This is not hypothetical: sql/80_content.sql used to hard-code
+# `sonyliv` in six dictGet calls and in the dictionary SOURCE. ADR 0009 removed
+# them, so today this guard finds nothing to rewrite there — which is exactly
+# why it stays. It is the standing check that the defect does not come back, in
+# that file or any other.
 assert_isolated() {
   if [ "$DB" != "$PROD" ] && grep -qE "(\bsonyliv\.|'sonyliv'|sonyliv_trunc)" "$1"; then
     die "rendered file $1 still names another database:
