@@ -31,13 +31,20 @@ touched ten files.
 | Q15 | `fix/ci-and-coverage` | `Makefile`, `.golangci.yml`, Go **test** files | — |
 | Q16 | `fix/target-resolution` | `internal/config/`, `tools/ch`, `.env.example` | **0018** |
 | Q18 | `chore/unseen-day-rehearsal` | `docs/RUNBOOK_UNSEEN.md`, `tools/unseen-*.sh`, `evidence/unseen/` | — |
+| Q8–Q11 | `docs/publisher-state-machine-safety` | `tools/publish*.sh`, `sql/12_publish.sql` — crash window, publisher lease, insert identity, retention bound | **0019** |
 | Q19 | `docs/headline-assumption-audit` | `evidence/adversarial/`, `doubts/06+` — attack assumptions the gate shares with the model | — |
 | — | `feat/problem-space-research` | idle · 9 unmerged commits · **competing design, needs a human call** | — |
 
-**Held back deliberately.** Q8–Q11 (publisher crash window, concurrent publishers, `marked_at`
-identity, retention bound) all live in `tools/publish.sh` and `sql/12_publish.sql`, which Q2
-owns right now. They are queued behind it, not forgotten. Q7 and Q17 (doc hygiene) overlap the
-files `docs/scope-claims` holds.
+**Unblocked 2026-08-01.** Q8–Q11 were queued behind Q2 because they share `tools/publish.sh` and
+`sql/12_publish.sql`. Q2 merged, so they are now claimed above — with the warning that ADR 0016
+added two phases (`hours`, `users`) to the very state machine they harden. Q7 landed inside the
+scope-claims pass. Q17 is closed: 2 of the 7 dangling links were real rot and are fixed; the other
+5 live in `docs/upstream/`, a verbatim vendored copy whose `data/` links describe the upstream
+layout and whose CSVs are gitignored here — both files now say so, and a future link scan should
+skip that directory rather than "fix" it.
+
+**ADR numbers in flight:** 0015 held by the unmerged `feat/problem-space-research`; 0016 publisher
+tiers (**merged**); 0017 grain dossiers; 0018 target resolution; 0019 publisher safety.
 
 ## Tier 0 · Correctness, and it is invisible to our own gate
 
