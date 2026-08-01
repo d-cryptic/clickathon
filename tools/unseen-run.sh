@@ -348,7 +348,12 @@ phase "2b SOURCE CONTRACT — is this file what we think it is?"
 # Probe 3 (toYear NOT BETWEEN 2020 AND 2035) is what catches it.
 if [ -x tools/validate-source-contract.sh ]; then
   CONTRACT_ARGS=""
-  [ "$TARGET" = cloud ] && CONTRACT_ARGS="-c"
+  # This script always targets Cloud — it builds through the `ch` container
+  # against $CH_HOST, and has no local path at all. An earlier version of
+  # this line read "$TARGET", which this script NEVER SETS: under `set -u`
+  # that is an unbound-variable abort, so the one-command unseen path would
+  # have died AT the contract gate — the step added to protect it.
+  CONTRACT_ARGS="-c"
   if tools/validate-source-contract.sh $CONTRACT_ARGS --database "$DB" 2>&1 | tee -a "$OUT"; then
     say "  source contract: no FAIL — proceeding to derive the model."
   else
