@@ -34,3 +34,17 @@
   number — `evidence/capture.sh` may be worth auditing for the same trap.
 - **`sql/60_projection.sql` hard-codes `sonyliv.`** so it cannot be applied to a scratch database.
   Same defect class ADR 0010 fixed in `sql/80_content.sql`; worth a sweep for others.
+
+## 2026-08-01 · clickstack-dashboards session
+
+- **The worktree was cut behind `dev` while the service ran dev's model.** First reconcile run
+  failed with a 2,887-vs-2,917 split that looked like a model bug and was actually branch skew.
+  Suggestion: `sc worktree create` sessions targeting `dev` should start from `dev`, or
+  WALKTHROUGH should say "reset onto dev before trusting any gate output".
+- **"Provisioned" ≠ "renders."** The user-concurrency tiles had been silently broken since the
+  `concurrent_users` rename — POST/PUT return 200 for tiles whose column no longer exists. The only
+  test that catches this is executing the tile (MCP `query_tile`). Worth wiring into a check
+  script before demos.
+- **The max-combo trap cost the old dashboard its three breakdown tiles** (285 shown vs 1,837
+  true). The arithmetic rules in ARCHITECTURE.md cover sums; "max() over a finer grain" deserved a
+  line too — added to CLICKSTACK.md.

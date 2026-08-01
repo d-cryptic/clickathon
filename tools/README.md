@@ -19,7 +19,8 @@
 | `load-guard-test.sh` | negative tests for the two above: makes them refuse a double load and proves a load lands in the database that was asked for. Own scratch databases, dropped on exit; never writes `sonyliv` |
 | `clickstack-bootstrap.sh` | headless ClickStack setup; prints the OTLP ingestion key |
 | `clickstack-sources.sh` | point the SELF-HOSTED HyperDX at our concurrency views. Idempotent |
-| `clickstack-cloud.sh` | provision the HyperDX built into ClickHouse Cloud — sources, dashboard, saved searches — via the Cloud API. Idempotent |
+| `clickstack-cloud.sh` | provision the HyperDX built into ClickHouse Cloud — 24 sources, SIX dashboards, saved searches — via the Cloud API. Idempotent (dashboards converge by PUT) |
+| `clickstack-artifact.sh` | regenerate the offline demo fallback `docs/artifacts/2026-08-01-clickstack-dashboards.html` from live serving-view data |
 | `../evidence/capture.sh` | the evidence harness — parts, compression, pruning, latency, MV cost |
 | `../demo/chaos.sh <beat>` | demo fault injection (`stall_mv`, `stall_ingest`, …) |
 
