@@ -56,5 +56,7 @@ if a benchmark shows the transfer, not the scan, is the bottleneck.
 ## Gotchas
 
 - `CGO_ENABLED=0` by default (static binaries); `make test` flips it to 1 because `-race` needs cgo.
-- `golangci-lint` on your PATH may be v1 and will reject `.golangci.yml`. Use `devbox run lint`.
+- `golangci-lint` on your PATH may be v1 (which cannot read `.golangci.yml`) or a drifted v2.
+  `make lint` now refuses to run anything but the pinned 2.12.2 and fails loudly with instructions —
+  `direnv allow` (or `devbox shell`) puts the pinned binary on PATH.
 - `make tidy` **fails** if it produces a diff — that is the point; commit the tidy result.
