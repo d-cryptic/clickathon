@@ -11,6 +11,15 @@
 **Captured:** 2026-08-01 · hosted HyperDX in ClickHouse Cloud · connection `ClickathonProject` ·
 database `sonyliv` · all tiles read our own serving views, never raw events.
 
+**Verified rendering 2026-08-01**, all four headline tiles live on the graded service:
+
+```
+ Peak — ACCURATE (foreground-only)   2,917      ← the graded number
+ Peak — stateless baseline           2,894
+ Peak — NAIVE session-span           3,743      ← its OWN peak; see the note in §1
+ Peak — distinct users               2,844
+```
+
 ---
 
 ## 0 · The shape of it
@@ -73,6 +82,25 @@ The dashboard to open first, and the one the demo leads with.
 | **Three curves side by side** | three sources | **This trio is the deliverable.** The spec demands both models *and* a comparison; naive is the third for contrast |
 | **Distinct users** | `concurrent_users` | Users are **not summable** across dimensions — a `uniqExact` set union, never a delta sum |
 | **Rolling 15-min peak** | `Rolling windows (minute)` → `peak_15m` | Smooths the spike; see dashboard 4 |
+
+### ⚠ The naive tile reads **3,743**, but the deck says **3,708**. Both are right.
+
+They answer different questions, and a judge comparing the two will notice:
+
+```
+ 3,708  =  naive concurrency AT THE ACCURATE MODEL'S PEAK MINUTE (10:56)
+           the like-for-like comparison — same minute, three definitions
+           this is the 21.3% over-count figure
+
+ 3,743  =  naive's OWN peak, which lands at 10:59
+           a max() over the naive curve has no reason to peak at the same
+           minute the accurate curve does — and it doesn't
+```
+
+The number tile shows `max(concurrent)` over the whole range, so it necessarily reports 3,743. When
+quoting the over-count, use **3,708 vs 2,917 at 10:56** and say "at the peak minute" out loud. When
+pointing at the tile, say "naive peaks higher *and later*" — which is itself a good observation: the
+naive model keeps counting sessions after their viewers have gone.
 
 **How to read the trio.** The gap between naive and accurate *is* the answer:
 
@@ -254,6 +282,7 @@ enough to identify a shape without exploding on parameter values.
 
 | Trap | What happens | Fix |
 |---|---|---|
+| 🔴 **The Cloud service goes IDLE** | **every tile at once** shows *"Error loading chart, please check your query or try again later."* It looks exactly like a dead service or broken dashboards. It is neither | **wake it first:** `tools/ch -c "SELECT 1"` — takes ~30 s cold, then everything is warm. Make this **step 0** of the demo, above the time range |
 | **Default time range** | every panel empty — data ends 2026-07-26 | set **2026-07-14 → 2026-07-26** *before* screen-sharing |
 | **Summing `concurrent` across dimensions** | double counts: a session appears under several content_ids | use the `_total` sources, which re-merge the underlying states |
 | **Users vs sessions** | the user source exposes `concurrent_users`, not `concurrent` | a tile selecting the wrong column silently returns nothing |
