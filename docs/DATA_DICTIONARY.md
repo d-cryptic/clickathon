@@ -1,6 +1,6 @@
 # DATA_DICTIONARY — the SonyLIV event stream
 
-> **Summary:** Field-by-field reference for `ch-hackathon-raw-data.csv` (905,559 events) and
+> **Summary:** Field-by-field reference for `ch-hackathon-raw-data.csv` (905,558 events) and
 > `ch-hackathon-content-data.csv` (~33K titles), plus the **measured** shape of the provided file and
 > the four traps that decide whether the model survives the unseen day. `event_timestamp` is epoch
 > **milliseconds**. Backgrounding is **universal** (every session has one) and background/foreground
@@ -46,7 +46,9 @@ Both files are gitignored (223 MB). Get them with `tools/fetch_data.sh` — chec
 
 ```
 sessions               10,866
-events                905,559
+events                905,558        ← ClickHouse-parsed rows. `wc -l` says 905,559: that counts
+                                       the CSV header. Every other number here reproduced exactly
+                                       on the Cloud load; this one was the off-by-one.
 span                   2026-07-14 15:43:58 → 2026-07-26 11:30:04  (283.8 h ≈ 11.8 days)
 distinct content_id     3,357
 distinct platform          10

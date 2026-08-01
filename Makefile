@@ -85,6 +85,35 @@ tidy:
 verify: build
 	./$(BIN_DIR)/$(BINARY) verify -target cloud
 
+## stack-up: start ClickHouse + ClickStack (the oss profile)
+.PHONY: stack-up
+stack-up:
+	docker compose --profile oss up -d
+	@echo "waiting for ClickStack API ..."
+	@until curl -sf -o /dev/null http://localhost:8000/health; do sleep 2; done
+	@echo "ClickHouse :8123  ·  HyperDX UI :8080  ·  OTLP :4317/:4318"
+
+## stack-down: stop both containers (keeps volumes)
+.PHONY: stack-down
+stack-down:
+	docker compose --profile oss down
+
+## clickstack: bootstrap the team, then register our concurrency sources
+.PHONY: clickstack
+clickstack:
+	tools/clickstack-bootstrap.sh
+	tools/clickstack-sources.sh
+
+## sql-local: apply sql/*.sql to the local container
+.PHONY: sql-local
+sql-local:
+	tools/apply-sql.sh
+
+## sql-cloud: apply sql/*.sql to the graded Cloud service
+.PHONY: sql-cloud
+sql-cloud:
+	TARGET=cloud tools/apply-sql.sh
+
 ## hooks: point git at .githooks (fixing pre-commit hook)
 .PHONY: hooks
 hooks:

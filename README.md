@@ -37,6 +37,18 @@ make ci                       # tidy, vet, lint, test, build — same as GitHub 
 make verify                   # run the CLI against the Cloud service
 ```
 
+## See the curve
+
+The concurrency visualization is ClickStack, not a hand-rolled frontend — it doubles as the OSS
+integration. Detail in [docs/CLICKSTACK.md](docs/CLICKSTACK.md).
+
+```bash
+make stack-up && make clickstack   # ClickHouse + HyperDX, team, and our sources
+open http://localhost:8080         # source "Concurrency total (minute)"
+```
+Set the time range to **2026-07-14 → 2026-07-26**. The dataset is not "now", and HyperDX's default
+last-15-minutes window renders an empty chart that looks like a broken pipeline.
+
 ## The model, in one picture
 
 ```
