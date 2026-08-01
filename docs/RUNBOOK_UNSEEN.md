@@ -92,6 +92,9 @@ claims.
 | `session_intervals is empty` | the derivation matched nothing — usually a timestamp-unit problem | `SELECT min(event_timestamp), max(event_timestamp) FROM sonyliv_unseen.ev_raw`. If you see 1970 or 56000, the source is **not** epoch millis and `tools/load.sh` divides by 1000 unconditionally. |
 | `rendered file … still names another database` | `sql/80_content.sql` hard-codes `sonyliv` | That guard exists because the file really does. Extend `render()` in `tools/unseen-run.sh`; do not disable the guard. |
 | `GATE FAILED` with non-zero `mismatches` | a real disagreement between the serving layer and `ev_raw` | Get the offending minutes: re-run G2 without the summary wrapper and `WHERE served != truth`. Do **not** submit. |
+| `REFUSING TO LOAD: <db> already holds data` | you are loading on top of a previous load — the loader stopped before writing anything (A4) | Decide, do not retry blindly. Redoing a bad load: `tools/load.sh --replace …`. Adding a second file on purpose: `tools/load.sh --append …`. |
+| `database '<db>' does not exist on TARGET=local` | `.env` has no `CH_DATABASE_LOCAL` and `CH_DATABASE` names the Cloud database (A5) | Add `CH_DATABASE_LOCAL=default` to `.env`, or pass `--database default`. Do **not** create a local `sonyliv` — it would be empty and every local number would read 0. |
+| `--database X contradicts CH_DATABASE=Y` | the flag and the exported variable disagree (A5) | One of the two is not what you think. Make them agree or unset `CH_DATABASE` for that command. |
 | `the 'ch' docker container is not running` | docker down | `docker compose up -d`, wait for healthy, re-run. |
 | G0 prints `ZERO ROWS` | expected on any day that is not 2026-07-26 | See assumption **A1** below. Not a failure of this run. |
 
@@ -150,23 +153,46 @@ SELECT quantileExact(0.99)(d) FROM (                                    -- is GA
 
 If p99 has moved, `GAP_S` must be changed in **both** files, in the same edit.
 
-### A4 — re-loading the same CSV doubles the day; the schema comment says it does not
+### A4 — re-loading the same CSV doubles the day · **FIXED in the loader; the schema comment is still wrong**
 
 `sql/00_schema.sql:42-44` claims `non_replicated_deduplication_window = 1000` makes "a replayed batch
 idempotent — the unseen day may be re-loaded". Measured on Cloud 26.2.1.525: loading the identical
 30,097-row CSV twice left `ev_raw` at **60,194 rows** in two byte-identical parts
 (`20260725_0_0_0`, `20260725_1_1_0`, both 30,097 rows / 102,795 bytes). That setting is for
-non-replicated MergeTree; the Cloud engine is **SharedMergeTree**. `tools/unseen-run.sh` drops the
-database first. If you ever re-load by hand, `TRUNCATE TABLE ev_raw` first.
+non-replicated MergeTree; the Cloud engine is **SharedMergeTree**. The claim in the schema comment
+remains false — nothing about the fix below makes the *engine* idempotent.
 
-### A5 — `CH_DATABASE` in the environment is silently ignored
+`tools/load.sh` now **refuses** to load into `ev_raw`/`content_dim` when either already holds rows:
+it prints both counts, loads nothing, and exits 1. To redo a load, `--replace` (TRUNCATEs both
+tables, announcing the rows it destroys); to add a day-file on purpose, `--append` (announces what it
+is adding to). Verified by `tools/load-guard-test.sh` case 3, and the same test run against the
+pre-fix loader doubles the table instead. `tools/unseen-run.sh` is unaffected — it drops the database
+first, so its tables are empty when the loader checks.
 
-Every tool does `[ -f .env ] && set -a && . ./.env && set +a`, so `.env` **overwrites** anything
-passed in the environment. `CH_DATABASE=sonyliv_unseen tools/build-model.sh` writes to **`sonyliv`**.
-All of `build-model.sh`, `reconcile.sh`, `apply-sql.sh` and `truncation-test.sh` also `cd` to the repo
-root first, so they always read the repo's `.env`. **The only way to point them at another database is
-to edit `.env`.** `tools/load.sh` is the one exception (it does not `cd`), which is why
-`tools/unseen-run.sh` runs it from a sandbox directory holding an overridden `.env`.
+### A5 — `CH_DATABASE` in the environment was silently ignored · **FIXED in `load.sh` and `apply-sql.sh` only**
+
+Every tool does `[ -f .env ] && set -a && . ./.env && set +a`, so `.env` **overwrote** anything passed
+in the environment: `CH_DATABASE=sonyliv_unseen tools/build-model.sh` wrote to **`sonyliv`**. The
+local branches were worse — neither `load.sh` nor `apply-sql.sh` passed `--database` to
+`clickhouse-client` at all, so *every* local load and local apply landed in `default` whatever the
+configuration said.
+
+`tools/load.sh` and `tools/apply-sql.sh` now take `--database NAME`, rank it above the environment
+and the environment above `.env`, print the resolved name and where it came from, and hard-error
+rather than guess — including when a `--database` contradicts an exported `CH_DATABASE`, and when the
+database does not exist on the target. Both targets go through the same resolution, so a local run no
+longer silently means `default`.
+
+**`CH_DATABASE_LOCAL` is new.** `CH_DATABASE` names the *Cloud* database while the local container's
+data lives in `default`; put `CH_DATABASE_LOCAL=default` in `.env` or a local `make model` now stops
+with *"database 'sonyliv' does not exist on TARGET=local"* instead of quietly applying to `default`.
+`.env.example` does not carry the line yet.
+
+**Still unfixed:** `build-model.sh`, `reconcile.sh`, `truncation-test.sh` and `tools/ch` all `cd` to
+the repo root and let `.env` win, and `tools/ch`'s local branch has no database parameter at all — so
+the local gate reads `default` regardless. For those, editing `.env` is still the only lever.
+`tools/unseen-run.sh` now passes `--database "$DB"` *and* `CH_DATABASE="$DB"` to the loader (its
+sandbox `.env` is kept as a third, redundant guard).
 
 ### A6 — `sql/80_content.sql` hard-codes the `sonyliv` database
 

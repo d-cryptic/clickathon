@@ -1,19 +1,74 @@
 # tools/
 
 > **Summary:** Scripts the agent built to make its own job easier. When a manual sequence repeats
-> three times, it becomes a script here. Everything reads `.env`.
+> three times, it becomes a script here. Everything reads `.env`. **Which database a tool writes is
+> resolved and printed — see [Which database](#which-database-am-i-writing) below; `load.sh` and
+> `apply-sql.sh` obey `--database`, then the environment, then `.env`, and refuse rather than guess.**
 
 | Tool | Does |
 |---|---|
 | `fetch_data.sh [--force\|--verify]` | download the provided CSVs into `data/`, sha256-pinned. Run this before `load.sh` |
 | `ch [-c] "SQL"` | run a query — local by default, `-c` for Cloud |
 | `stats "SQL"` | run a query and print `X-ClickHouse-Summary` (rows/bytes/ms) — no `FLUSH LOGS` |
-| `load.sh [raw.csv] [content.csv]` | load the datasets, converting epoch **millis** → `DateTime64(3)` |
+| `load.sh [--database N] [--replace\|--append] [raw.csv] [content.csv]` | load the datasets, converting epoch **millis** → `DateTime64(3)`. **REFUSES if the tables already hold rows** — a re-load appends and doubles `ev_raw` silently |
 | `build-model.sh` | rebuild the model in order: intervals -> deltas -> views, then reconcile. TRUNCATEs first — deltas double if you do not |
 | `reconcile.sh` | **THE GATE** — recompute concurrency from `ev_raw` and compare. Exits 1 on any mismatch; writes `evidence/reconcile.txt` |
-| `apply-sql.sh [file...]` | apply `sql/*.sql` to local or `TARGET=cloud`. initdb only runs on first boot; Cloud has no mount at all |
+| `apply-sql.sh [--database N] [file...]` | apply `sql/*.sql` to local or `TARGET=cloud`. initdb only runs on first boot; Cloud has no mount at all |
+| `load-guard-test.sh` | negative tests for the two above: makes them refuse a double load and proves a load lands in the database that was asked for. Own scratch databases, dropped on exit; never writes `sonyliv` |
 | `clickstack-bootstrap.sh` | headless ClickStack setup; prints the OTLP ingestion key |
 | `clickstack-sources.sh` | point the SELF-HOSTED HyperDX at our concurrency views. Idempotent |
 | `clickstack-cloud.sh` | provision the HyperDX built into ClickHouse Cloud — sources, dashboard, saved searches — via the Cloud API. Idempotent |
 | `../evidence/capture.sh` | the evidence harness — parts, compression, pruning, latency, MV cost |
 | `../demo/chaos.sh <beat>` | demo fault injection (`stall_mv`, `stall_ingest`, …) |
+
+## Loading twice
+
+`INSERT` appends. `sql/00_schema.sql`'s claim that `non_replicated_deduplication_window` makes a
+replayed batch idempotent is **false on Cloud** (that setting is for non-replicated MergeTree; Cloud
+runs SharedMergeTree). Measured: the identical 30,097-row CSV loaded twice left `ev_raw` at **60,194
+rows**, no error — RUNBOOK [A4](../docs/RUNBOOK_UNSEEN.md#a4). So `load.sh` **refuses** to load into
+tables that already hold rows:
+
+| You want | Type |
+|---|---|
+| a clean load into an empty database | `tools/load.sh …` |
+| to redo a load that looked wrong | `tools/load.sh --replace …` — TRUNCATEs both tables, printing the row counts it destroys |
+| to add a second day-file on purpose | `tools/load.sh --append …` — prints what it is adding to |
+
+Refusal is the default because on the graded day the second run is nearly always "redo it" (one
+flag), while a stray re-run must never be able to double the day or destroy a good load. It exits
+**1** and loads nothing. `tools/unseen-run.sh` is unaffected: it drops its scratch database first.
+
+## Which database am I writing?
+
+`CH_DATABASE` used to be read *after* `. ./.env`, and `set -a` makes the file overwrite the
+environment — so `CH_DATABASE=scratch tools/load.sh` wrote to whatever `.env` said, usually the
+graded database (bug 11). The local branches passed no `--database` at all, so every local load and
+every local `apply-sql.sh` landed in `default` regardless of configuration.
+
+`load.sh` and `apply-sql.sh` now resolve one name, print it with its source, and refuse to guess:
+
+```
+TARGET=cloud   --database  >  $CH_DATABASE  >  .env CH_DATABASE  >  hard error
+TARGET=local   --database  >  $CH_DATABASE_LOCAL  >  $CH_DATABASE
+                           >  .env CH_DATABASE_LOCAL  >  .env CH_DATABASE  >  hard error
+```
+
+A `--database` that contradicts an exported `CH_DATABASE` is an error, not a preference. A database
+that does not exist on the target is an error *before* anything is written.
+
+**`CH_DATABASE_LOCAL` is new and you probably need it.** `CH_DATABASE` names the *Cloud* database
+(`.env.example` groups it under Cloud), while the local container keeps its data in `default`. Put
+
+```
+CH_DATABASE_LOCAL=default
+```
+
+in `.env` — without it a local `tools/build-model.sh` / `make model` now resolves to the Cloud name,
+does not find it locally, and says so instead of quietly writing to `default`. **`.env.example` does
+not carry this line yet** (that file is owned elsewhere); add it by hand when you copy it.
+
+Not every tool is fixed: `tools/ch`, `reconcile.sh`, `build-model.sh` and `truncation-test.sh` still
+`cd` to the repo root and let `.env` win, and `tools/ch`'s local branch still has no database
+parameter at all — so the local gate reads `default` whatever you set. Point them at another database
+by editing `.env`.
