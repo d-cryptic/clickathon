@@ -54,6 +54,8 @@ func run(ctx context.Context, args []string) error {
 	switch args[0] {
 	case "verify":
 		return cmdVerify(ctx, args[1:])
+	case "observe":
+		return cmdObserve(ctx, args[1:])
 	case "version":
 		fmt.Println(version)
 		return nil
@@ -70,12 +72,16 @@ func usage() {
 	fmt.Fprint(os.Stderr, `sonyliv — foreground-only concurrency at streaming scale
 
 usage:
-  sonyliv verify [-target local|cloud]   confirm the stack is up and show table state
-  sonyliv version                        print the build version
-  sonyliv help                           this message
+  sonyliv verify [-target local|cloud]    confirm the stack is up and show table state
+  sonyliv observe [-target local|cloud]   emit watermark lag, build-stage timing and the
+                                           reconcile gate outcome to ClickStack over OTLP
+                                           (-dry-run to print without emitting)
+  sonyliv version                         print the build version
+  sonyliv help                            this message
 
 Connection settings come from .env (see .env.example). TARGET=cloud selects the
-graded Cloud service; the default is local.
+graded Cloud service; the default is local. observe additionally reads
+CLICKSTACK_OTLP and CLICKSTACK_INGESTION_KEY (tools/clickstack-bootstrap.sh).
 `)
 }
 

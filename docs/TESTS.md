@@ -104,3 +104,31 @@ and any pre-merge single-row read is garbage. Make both `Int64`.
   arithmetic was exact and the fault was two layers upstream.
 - **Reading `session_intervals` without `FINAL`.** Pre-merge, the stale and fresh rows are both
   present and every count is doubled.
+
+
+## Self-observation (H7)
+
+`internal/otelemit`, `internal/pipelinehealth` · `go test ./internal/...` · see
+[OBSERVABILITY.md](OBSERVABILITY.md) for what `sonyliv observe` emits and why.
+
+| Test | Proves |
+|---|---|
+| `TestReadReconcileEvidence_Pass` | the gate-evidence parser reads the REAL box-drawing `evidence/reconcile.txt` format byte-for-byte, including the peak minute (2887 @ 10:56) — not a simplified stand-in |
+| `TestReadReconcileEvidence_Mismatch` | a failing gate is surfaced, not averaged away — pinned to the historical `+37 at the peak` defect TESTS.md already documents above |
+| `TestReconcileEvidence_PassOnEmptyIsFalse` | a format change that silently parses zero rows cannot read as "everything passed" |
+| `TestIntAttrEncodesAsJSONString` | OTLP/HTTP JSON's int64-as-decimal-string mapping is actually followed — a bare `int64` JSON field would lose precision above 2^53 |
+| `TestSeverityConstantsAreLowerCase` | `severity:error` saved searches keep matching — HyperDX stores `SeverityText` lower-cased (VERIFIED.md), and this is the one constant a careless edit would recapitalize |
+| `TestNewTraceID` / `TestNewSpanID` / `TestNewTraceIDIsRandom` | id shape (16/8 random bytes, lower-case hex) and that two runs do not collide |
+
+**Anti-pattern avoided:** re-deriving build-stage duration or benchmark-query latency by wrapping a
+client-side timer around a re-run query. `system.query_log` already has the real, server-measured
+number (and `granules_read`/`bytes_read`, which a client cannot know at all) — a client span would
+only ever be a strictly worse copy of data ClickHouse already recorded. See OBSERVABILITY.md's
+"what is deliberately not instrumented" section.
+
+**Not yet covered by an automated test:** the OTLP emission path itself (`internal/otelemit.Client`)
+has no unit test against a fake HTTP server — it was verified by hand against the real ClickStack
+collector instead (curl probes, then `sonyliv observe`, then reading the rows back out of
+`otel_metrics_gauge`/`otel_logs`/`otel_traces` — see OBSERVABILITY.md). A `httptest.Server`-backed
+test for the 401-without-a-key and non-2xx-wraps-body-in-error paths would be the next thing to add
+here.

@@ -31,6 +31,7 @@ what is verified, what is broken, and what is still missing, in one page.
 | Resume a dead session | newest file in [docs/worksheets/](docs/worksheets/) |
 | Run something (query, bench, reconcile, load) | [tools/README.md](tools/README.md) |
 | **Bring up ClickStack / see the concurrency chart** | [docs/CLICKSTACK.md](docs/CLICKSTACK.md) — `make stack-up && make clickstack` |
+| **See ClickStack observing OUR pipeline (watermark lag, build timing, reconcile gate)** | [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) — `sonyliv observe -target cloud` |
 | Know what is already **verified** vs assumed | [docs/VERIFIED.md](docs/VERIFIED.md) ← **read before trusting any ClickHouse claim** |
 | Record a design decision | [docs/adr/](docs/adr/) |
 | **Understand the model in depth, with diagrams** | [docs/artifacts/](docs/artifacts/) — open the newest `.html` in a browser |
