@@ -1,0 +1,70 @@
+# evidence/target-resolution.txt — one command, one database (ADR 0018)
+# Captured live on 2026-08-01 against TARGET=local (docker 'ch', ClickHouse 26.7.1.1315)
+# and TARGET=cloud (READ-ONLY queries only — the graded service was never written to).
+# Regenerate: the commands are inline below; every output block is verbatim.
+
+## 1. Same command, both targets — each resolves to exactly one database
+
+$ Q="SELECT currentDatabase() AS db, count() AS stateless_rows, (SELECT max(c) FROM (SELECT minute, uniqExactMerge(active_state) AS c FROM cc_minute_stateless GROUP BY minute)) AS peak FROM cc_minute_stateless"
+$ tools/ch "$Q"          # TARGET=local
+db	stateless_rows	peak
+default	91292	2894
+$ tools/ch -c "$Q"       # TARGET=cloud (read)
+db	stateless_rows	peak
+sonyliv	91292	2894
+
+# Identical numbers are the success condition: same 12-day file on both sides,
+# and — after the drift fix below — the same uniqExact schema. Before the fix the
+# local table could not even execute uniqExactMerge (its state was uniq/HLL).
+
+## 2. Misconfiguration fails loudly — never a silent server-default query
+
+$ mv .env /tmp/env.hold   # simulate a fresh clone with no configuration
+$ tools/ch "SELECT 1"
+tools/ch: no local database: set CH_DATABASE_LOCAL in .env (the local data lives in 'default') or export it. CH_DATABASE deliberately does NOT apply here — it names the graded Cloud database. See ADR 0018.
+(exit 1)
+$ tools/ch -c "SELECT 1"
+tools/ch: no cloud database: set CH_DATABASE in .env (the graded database) or export it. Refusing to fall back to the server default — see ADR 0018.
+(exit 1)
+$ mv /tmp/env.hold .env   # restored
+
+# With .env present but CH_DATABASE_LOCAL cleared, local still refuses to
+# borrow CH_DATABASE (the graded Cloud database) — the exact fallback that 404ed:
+$ CH_DATABASE_LOCAL= go run ./cmd/sonyliv verify -target local
+error: CH_DATABASE_LOCAL is not set — copy .env.example to .env and fill it in (the local container's data lives in `default`; CH_DATABASE is the Cloud database and does not apply to local — ADR 0018)
+exit status 1
+(exit 1)
+
+## 3. Environment beats .env, and CWD no longer matters
+
+$ CH_DATABASE_LOCAL=tie0014 tools/ch "SELECT currentDatabase()"
+tie0014
+$ (cd docs && ../tools/ch "SELECT currentDatabase()")   # used to silently lose .env
+default
+
+## 4. Schema drift, measured — local default vs Cloud sonyliv, column by column
+
+# Detection (rerunnable any time):
+#   tools/ch    "SELECT table, name, type FROM system.columns WHERE database='default' AND table NOT LIKE '%inner%' ORDER BY table, name" > local.tsv
+#   tools/ch -c "SELECT table, name, type FROM system.columns WHERE database='sonyliv' AND table NOT LIKE '%inner%' ORDER BY table, name" > cloud.tsv
+#   join on table|column, print rows where the types differ.
+
+# BEFORE (captured before the rebuild):
+  cc_minute_delta|ends	local=SimpleAggregateFunction(sum, UInt64)	cloud=SimpleAggregateFunction(sum, Int64)
+  cc_minute_delta|starts	local=SimpleAggregateFunction(sum, UInt64)	cloud=SimpleAggregateFunction(sum, Int64)
+  cc_minute_stateless|active_state	local=AggregateFunction(uniq, String)	cloud=AggregateFunction(uniqExact, String)
+  mv_stateless|active_state	local=AggregateFunction(uniq, String)	cloud=AggregateFunction(uniqExact, String)
+
+# AFTER (DROP + re-apply sql/10_intervals.sql + backfill from ev_raw, local only):
+  (no rows — 0 type differences remain on shared columns)
+
+# Numerical check of the rebuilt table against raw truth:
+  rebuilt rows	91292
+  minutes where table disagrees with ev_raw	0	of	3860
+
+# Note on the uniq drift's damage TODAY: zero. At this file's cardinality (peak
+# 2,894 distinct sessions/minute) the uniq estimator still answers exactly, so all
+# 3,860 minutes agreed even before the fix. That is what makes the drift insidious:
+# it passes every local check at 1x and starts lying quietly at the 100x scale test
+# (evidence/scale.txt), where per-minute cardinality crosses the estimator's exact
+# range. The type is the bug, not today's numbers.
