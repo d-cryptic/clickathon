@@ -1,18 +1,21 @@
 # MENTOR_QUESTIONS — what only the organisers can answer
 
-> **Summary:** Sixteen questions for a SonyLIV/ClickHouse mentor, ranked by how much the answer changes
-> what we build. The ground truth is **private**, so none of these can be measured our way out of — a
-> wrong guess is silently wrong on every benchmark answer and we would never see it. Tier 1 can
+> **Summary:** Seventeen questions for a SonyLIV/ClickHouse mentor, ranked by how much the answer
+> changes what we build. The ground truth is **private**, so none of these can be measured our way out
+> of — a wrong guess is silently wrong on every benchmark answer and we would never see it. Tier 1 can
 > invalidate the activity model itself (which heartbeat events count, the unclosed-pause rule,
-> session-vs-user, timezone, exact-vs-tolerance). Tier 2 is boundary semantics that are cheap now and
+> session-vs-user, timezone, exact-vs-tolerance, and **Q17 — the organiser's own docs say the heartbeat
+> is 1/min and the shipped data says 4.72/min**). Tier 2 is boundary semantics that are cheap now and
 > expensive at hour 18. Tier 3 is logistics. **Record answers inline as they arrive** — this file
 > becomes the spec we build against. Measured evidence backing these:
 > [ADR 0007](adr/0007-gate-answers-pause-needs-explicit-handling.md).
 
 ## How to use this
 
-- Ask **Tier 1 first**. If mentor time is short, questions 1, 2 and 4 are the ones that can force a
+- Ask **Tier 1 first**. If mentor time is short, questions 1, 2, 4 and 17 are the ones that can force a
   rewrite rather than a re-run.
+- **Numbering is append-only.** A new question goes on the end of its tier keeping the next free
+  number, so `Q4` means the same thing in every commit, ADR and worksheet that cites it.
 - Each question carries **our current assumption**, so the mentor can confirm or deny rather than
   compose an answer from scratch. That is the fastest possible use of their time.
 - **Write the answer into the `Answer:` line in the same sitting**, then update the affected ADR or
@@ -26,7 +29,10 @@
 > heartbeats **survive a pause**: 0.756/min, one event every ~79 seconds, comfortably inside any sane
 > gap threshold. So a gap-only model silently counts paused time as watching, which the statement
 > explicitly forbids. We've made the model a hybrid. What we can't determine from the data is where
-> you draw the line in the ground truth."
+> you draw the line in the ground truth. One more thing while we're here: your dataset doc says the
+> heartbeat is passed every minute — the file we got runs at **4.72/min with a p50 inter-arrival of
+> 0 seconds**, so we derived our thresholds from the data rather than the doc. If the ground truth
+> assumed a 1-minute beat, we'd want to know now rather than at submission." (Q17.)
 
 That shows we found the trap rather than fell into it, and it frames every question below as a
 definition question rather than a competence question.
@@ -53,8 +59,12 @@ activity runs at 1.17 beats/min — a quarter of the active rate, so neither cle
 clearly gone.
 
 **Ask:** Does an unclosed pause stay paused to the end of its run, or end at the next event?
-**Why it matters:** the two rules differ by **~19,800 minutes** (1,187,790 s) of credited active time.
-This is the single largest unresolved number in the model.
+**Why it matters:** run end to end over the real file, the two rules differ by **99.3 h — 5.09%** of
+counted watch time (conservative 1,949.3 h vs permissive 2,048.6 h). This is the single largest
+unresolved number in the model. *(An earlier draft of this line said ~19,800 minutes / 330 h, taken
+from the raw time following an unclosed pause; that overstated it ~3×, because most of that time is
+already excluded by the gap rule closing the run. Corrected per
+[ADR 0007](adr/0007-gate-answers-pause-needs-explicit-handling.md).)*
 **Our assumption:** conservative — stays paused to the end of the run; never credit time we cannot
 prove was active. Tracked as `[H2a]` in [TODOS.md](../TODOS.md).
 **Answer:** _unrecorded_
@@ -96,6 +106,33 @@ tail-credit rule in Q7 must be exactly right or merely close.
 **Our assumption:** exact — we use `uniqExact` throughout.
 **Answer:** _unrecorded_
 
+### Q17 · Your documentation says the heartbeat is every 1 minute. The shipped data says 4.72/min.
+`docs/upstream/dataset_details.md` states: *"The heartbeat event type is a periodic event which is
+currently passed every 1 minute."* Measured over the whole 905,558-event file, that is not what
+arrived. `VideoHeartbeat` inter-arrival **within a session** is **p50 0s, p90 40s, p99 49s**, mean
+12.4s, overall rate **4.72/min** — discrete, bursty player telemetry (`network-activity`,
+`buffer-health`, `video-resize`, `BufferStart`, `Seek`, `pause`, `resume`), with no 60-second period
+anywhere in it.
+
+**Ask:** Which is authoritative for the ground truth — the documented 1-minute beat, or the event
+stream you shipped us? Concretely: was the private ground truth computed with a rule that *assumes*
+a 1-minute cadence — "active for the 60 seconds following each heartbeat", or an inactivity timeout
+derived as N missed 60-second beats?
+**Why it matters:** every tunable in our activity model is a function of the cadence, so the two
+readings give different interval boundaries on every session in the file. We derived
+`HEARTBEAT_GAP_S = 150s` as ~3× the measured p99 of 49s; a 1-minute-cadence reading would naturally
+produce "2 or 3 missed beats" = 120s or 180s. Likewise `TAIL_GRACE_S = 60s` is only "one cadence" if
+a cadence exists — otherwise it is an arbitrary constant. If your generator emits at 1/min and the
+delivered file was enriched or resampled after that, we have tuned to an artefact of the delivery
+rather than to the model you scored, and **every number we report moves** — peak, average and
+per-minute concurrency alike, on the benchmark set and on the unseen day.
+**Our assumption:** the shipped data is authoritative. Thresholds are derived from the measured
+distribution, not from the documented cadence — recorded in
+[ADR 0007](adr/0007-gate-answers-pause-needs-explicit-handling.md) and implemented in
+`sql/30_build_intervals.sql`. If the answer is "assume 1/min", `HEARTBEAT_GAP_S` and `TAIL_GRACE_S`
+are one-line changes plus a `/reconcile` re-run — but we need to know before the benchmark set lands.
+**Answer:** _unrecorded_
+
 ---
 
 ## Tier 2 — boundary semantics · cheap now, expensive at hour 18
@@ -105,7 +142,10 @@ A session's last signal is at 10:05:00 and nothing follows.
 
 **Ask:** Is it active until 10:05:00 exactly, or credited some grace period past the last event?
 **Why it matters:** unfittable without being told, and it biases every interval in the dataset.
-**Our assumption:** one cadence of grace (`TAIL_GRACE_S`), a tunable in `sql/10_intervals.sql`.
+**Our assumption:** 60s of grace (`TAIL_GRACE_S`), a tunable in `sql/30_build_intervals.sql`. It was
+originally justified as "one cadence"; per Q17 there is no cadence, so it is now simply a constant we
+would like confirmed. Credited only where a run ends by silence — a segment ending at an explicit
+`pause` gets none.
 **Answer:** _unrecorded_
 
 ### Q8 · Minute membership
