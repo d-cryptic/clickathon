@@ -3,11 +3,12 @@
 > **Summary:** ClickStack does **two** jobs — it observes our pipeline over OTLP (ingestion lag,
 > query latency) and it *is* the concurrency visualization the statement asks for, so we ship no
 > custom frontend. **Two ways to run it. We use Option B:** HyperDX built into ClickHouse Cloud
-> (confirm via the `hyperdx-alert-internal` user) reads `sonyliv` directly — no credentials, no
-> connection, no IP allowlist — but sources are created by hand, since it authenticates off the
-> console session. **Option A** is the local all-in-one (`make stack-up && make clickstack`), fully
-> scriptable. Both chart `sql/20_views.sql`, because no chart tool can read an `AggregateFunction`
-> column. The dataset ends **2026-07-26**: the default "last 15 minutes" window renders empty.
+> (confirm via the `hyperdx-alert-internal` user) reads `sonyliv` directly — no connection string, no
+> IP allowlist. It **is** scriptable through the Cloud control-plane API
+> (`tools/clickstack-cloud-sources.sh`); the only manual step is opening HyperDX once, because a
+> source needs a `connection` id and no API creates one. **Option A** is the local all-in-one
+> (`make stack-up && make clickstack`). Both chart `sql/20_views.sql`, because no chart tool can read
+> an `AggregateFunction` column. Data ends **2026-07-26**: the default 15-minute window renders empty.
 
 ## Why ClickStack is the chart, not just the telemetry
 
