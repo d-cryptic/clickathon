@@ -129,6 +129,36 @@ instruction is to ask before touching schema. The fix is a local `DROP TABLE def
 followed by `tools/apply-sql.sh sql/00_schema.sql` and a local rebuild. Related to Q16 (ADR 0018),
 which unified *which* database each target resolves to but not *what shape* the local one is in.
 
+## 🔴 THE MIGRATION DEBT — three schema changes now live in code but not on the graded database
+
+Each was correct to defer (schema changes on a graded service are an operator call). Together they
+are a pending migration nobody has scheduled, and the risk is **each one is individually harmless
+while the set is not**: they all apply in one rebuild, and that rebuild has never been run.
+
+| ADR | Code says | Graded `sonyliv` has | Verified |
+|---|---|---|---|
+| **0016** | `cc_user_minute` is `ReplacingMergeTree(computed_at)`, `mv_user_minute` retired | `SharedAggregatingMergeTree`, **`mv_user_minute` still present** | read-only, 2026-08-01 |
+| **0021** | `proj_by_session` is a documented, database-agnostic projection | projection **is live** (applied 10:12, undocumented until found) | `system.mutations` |
+| **0022** | `cc_hour_agg` carries `cube_level` in the key | **no `cube_level` column** | `system.columns` |
+
+**What is safe right now.** Every graded answer is still correct: the hour peak reads 2,917 through
+the sentinel path, the user tier reads 2,844, and the gate passes on 17,028 minutes. ADR 0022's
+collision cannot fire because `ev_raw` has **0** rows with `content_id = -1`. The batch rebuild
+masks ADR 0016's retraction gap by truncating first.
+
+**What is not safe.** Running `tools/publish.sh` against `sonyliv` — its `users` phase writes
+replace-semantics rows into a set-union table. Its cursor is at epoch; **keep it there.**
+
+**The whole migration is one authorised rebuild**: `build-model.sh` step 2/6 already detects and
+migrates the `cc_user_minute` engine, and re-applying `sql/50_hour_agg.sql` brings `cube_level`.
+So `REBUILD_GRADED=yes TARGET=cloud tools/build-model.sh` from a clean tree does all three at once,
+followed by `/reconcile`. **Operator call** — [CLAUDE.local.md](../CLAUDE.local.md) says ask before
+touching schema, and the answer may legitimately be "not before the deadline".
+
+The thing to avoid is drifting further: every additional deferred change makes that one rebuild
+larger and less rehearsed. If the answer is "don't migrate", say so explicitly and stop shipping
+schema changes that assume it.
+
 ## 🔴 The graded database is still on PRE-ADR-0016 shapes — do not run the publisher against it
 
 Verified read-only 2026-08-01, immediately after ADR 0016 merged:
