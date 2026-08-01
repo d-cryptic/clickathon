@@ -224,6 +224,32 @@ Two independent reviews had said "two" and the number was three.
 with a caveat. And an attribution agreed by two reviews is still worth re-deriving — "two characters"
 was very nearly right, and very nearly is how a third difference stays invisible.
 
+## W1 rejected a second time — one finding fixed, one scoped, one my own brief's fault
+
+**The scanner gap is real and is an accident risk.** It missed **`DELETE FROM`** — ClickHouse's
+lightweight delete, ordinary SQL that nobody thinks of as an `ALTER` — plus `OPTIMIZE`,
+`MOVE PARTITION`, `REPLACE PARTITION`, `MATERIALIZE TTL` and `MODIFY COLUMN`. Fixed; `DELETE FROM` is
+the one that would have bitten, because it is the form a person writes without noticing it is
+destructive.
+
+**The exported-function and conditional-source bypasses are real but out of threat model.** They
+require someone to deliberately export a shell function shadowing a command the guard depends on.
+These guards exist to stop **accidents** — a stale base, a mistyped target, a scrolled-past banner —
+not a determined operator. Recording that scope explicitly rather than hardening against an attacker
+we do not have: an unbounded guard is one people route around. Anyone who disagrees should say so in
+an ADR, not silently widen the check.
+
+**Check 4b's failure is my brief's fault, not W1's.** The re-validation brief was generated from
+W2's by substitution and carried W2's wording — *"any mismatch is a failure"*. That is right for W2,
+which carries ADR 0009. W1 does not, so its 177-mismatch spec skew is **expected and already
+attributed** to `0c0f020`, exactly as W1's own earlier analysis proved by isolation. Codex applied
+the brief it was given, correctly. **A generated brief inherits assumptions that do not transfer** —
+the same class of error as the incomplete cherry-picks, one level up.
+
+**What survived:** ADR 0011's five UDFs, four views and the 1,774 → 2,196 Hindi pair; ADR 0014's
+98/98 hours with no bare live-view `argMax`; the 2,887 → 2,917 and 1,949.3 → 1,978.1 h headline; and
+ADR 0018's "every layer" claim now explicitly withdrawn and replaced with a measured per-layer table.
+
 ## ✅ The method changes: promote FILES to `dev`'s state, not COMMITS onto `main`
 
 All three rejections share one cause, and it is the method rather than the agents.

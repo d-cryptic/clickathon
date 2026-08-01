@@ -178,8 +178,14 @@ if [ "$DB" = "$GRADED_DB" ] && [ "${APPLY_GRADED_DESTRUCTIVE:-}" != yes ]; then
     # Broadened after Codex 2026-08-02: the original pattern caught only DROP and
     # TRUNCATE, missing every other executable form that destroys or replaces data —
     # ALTER ... DELETE/DROP COLUMN/UPDATE, DETACH, RENAME, EXCHANGE, REPLACE TABLE.
-    if sed 's/--.*//' "$f" | grep -qiE '(^|[[:space:];])(DROP|TRUNCATE|DETACH|RENAME[[:space:]]+TABLE|EXCHANGE[[:space:]]+TABLES|REPLACE[[:space:]]+TABLE)[[:space:]]' \
-       || sed 's/--.*//' "$f" | grep -qiE 'ALTER[[:space:]]+TABLE[^;]*(DELETE|UPDATE|DROP[[:space:]]+(COLUMN|PARTITION)|CLEAR[[:space:]]+COLUMN)'; then
+    # Broadened twice. First after Codex 2026-08-02 (only DROP/TRUNCATE were
+    # caught). Then again after Codex re-validation found the list still missed
+    # six executable destructive forms — notably `DELETE FROM`, ClickHouse's
+    # LIGHTWEIGHT delete, which is ordinary SQL somebody would write without
+    # thinking of it as an ALTER. That one is a real accident risk; the rest are
+    # rarer but equally destructive.
+    if sed 's/--.*//' "$f" | grep -qiE '(^|[[:space:];])(DROP|TRUNCATE|DETACH|RENAME[[:space:]]+TABLE|EXCHANGE[[:space:]]+TABLES|REPLACE[[:space:]]+TABLE|DELETE[[:space:]]+FROM|OPTIMIZE)[[:space:]]' \
+       || sed 's/--.*//' "$f" | grep -qiE 'ALTER[[:space:]]+TABLE[^;]*(DELETE|UPDATE|DROP[[:space:]]+(COLUMN|PARTITION)|CLEAR[[:space:]]+COLUMN|MOVE[[:space:]]+PARTITION|REPLACE[[:space:]]+PARTITION|MATERIALIZE[[:space:]]+TTL|MODIFY[[:space:]]+COLUMN)'; then
       die "$f contains DROP or TRUNCATE and '$DB' is the GRADED database.
 
 Applying it destroys answers we are scored on, and there is no undo. If that is
