@@ -16,8 +16,11 @@
 | open-session probe | the model absorbs sessions with no `VideoSessionEnd` | folded into the truncation test (52.6% of sessions are open at the cut) |
 | late-arrival probe | a heartbeat arriving after its minute was aggregated updates the served value | folded into the truncation test (447,081 events arrive after the cut) |
 | hour-clip probe | an interval spanning ≥3 hours reads correctly **at a minute inside the middle hour** — the case that fails if clipping is wrong | after any change to delta emission |
-| stitch-boundary probe | a query spanning the watermark neither double-counts nor drops the boundary minute | after any change to `W` or the serving view |
-| straggler probe | a heartbeat dated inside an already-sealed window moves the served value to match a brute-force recomputation from `ev_raw` | before the unseen run |
+| **continuous-publication test** | the aggregates move **without a rebuild** and land byte-identical to one. Covers the straggler, open-session, bootstrap and idempotence probes below in one run | `tools/publish-test.sh` — after any change to `sql/12_publish.sql`, `tools/publish.sh`, `sql/30_build_intervals.sql` or `sql/40_deltas.sql`. Evidence: `evidence/publish.txt` |
+| straggler probe | a heartbeat dated **46 minutes behind the watermark** moves the served value AND matches a from-scratch rebuild on all 1,579 minutes — not merely "the value changed", which is the anti-pattern ADR 0006 names | folded into the publication test |
+| vanishing-interval probe | a straggler bridging a gap merges two runs, so an `interval_start` ceases to exist; asserts **0 orphan rows** survive. `ReplacingMergeTree` cannot delete a key, so without the prune phase this silently over-counts for ever | folded into the publication test |
+| bootstrap-equals-steady-state probe | the FIRST publish run on an empty database (every session dirty) produces exactly what a batch rebuild produces — there is no separate initial-build path to drift | folded into the publication test |
+| publication idempotence probe | republishing 200 **unchanged** sessions moves 0 of 1,579 minutes — the property that makes replays, resumed runs and forced corrections safe | folded into the publication test |
 | tail-sensitivity sweep | peak/avg across `HEARTBEAT_GAP_S` ∈ {120,150,180} × `TAIL_GRACE_S` ∈ {0,60,150} — proves robustness, or names the point we knowingly chose | before submission |
 
 ## How to write a correctness test here

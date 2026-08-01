@@ -40,6 +40,7 @@ what is verified, what is broken, and what is still missing, in one page.
 | **Ask a mentor the questions that carry measured evidence** | [doubts/](doubts/) — evidence + exact wording + a decision table per answer. `02` is worth **9.7%** of our headline number |
 | **What happened in the last session, and every bug it found** | [docs/SESSION-2026-08-01.md](docs/SESSION-2026-08-01.md) |
 | **Run the unseen day** | [docs/RUNBOOK_UNSEEN.md](docs/RUNBOOK_UNSEEN.md) — read BEFORE the data drops |
+| **Understand how aggregates stay current (the incremental publisher)** | [ADR 0013](docs/adr/0013-continuous-publication-by-incremental-finalizer.md) — `make publish`, proven in [evidence/publish.txt](evidence/publish.txt) |
 | Observability / what we emit | [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) |
 | Leave feedback for the operator | [docs/AGENT_FEEDBACK.md](docs/AGENT_FEEDBACK.md) |
 

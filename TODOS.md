@@ -16,8 +16,21 @@
       PASSED. It also never compares an IDLE minute (207 of 1,364 on the holdout) — proven by
       fabricating 500 viewers at an idle minute and watching the gate pass. Derive the minutes from
       the data, assert the row count, add a spine. See docs/SESSION-2026-08-01.md §4.
-- [ ] **[H*]** Continuously updated aggregates. We batch-rebuild; only `mv_stateless` and
-      `mv_user_minute` are real MVs. This is the statement's "only works at hackathon size" line.
+- [x] **[H*]** **Continuously updated aggregates — DONE** (ADR 0013). `sql/12_publish.sql` +
+      `tools/publish.sh`: an MV marks which sessions each INSERT touched, a finalizer re-derives only
+      those and appends `-deltas(old) + deltas(new)`. Nothing truncated, nothing rebuilt. Proven in
+      `evidence/publish.txt` — byte-identical to a from-scratch rebuild at every stage, including a
+      straggler 46 min behind the watermark corrected in **3.4 s** reading 11.6% of `ev_raw`.
+      **NOT applied to `sonyliv`** — going live is a human's call, see ADR 0013's last section.
+      Two follow-ons it deliberately did not do:
+  - [ ] **[H*]** Make `session_intervals` a view over an append-only per-run ledger, so the
+        per-run lightweight `DELETE` (1.4 s, the dominant cost of a small batch) goes away. Touches
+        tables other agents own.
+  - [ ] **[H*]** Re-decide the `proj_by_session` projection. Re-measured on the finalizer's actual
+        query shape it takes a one-session read from 11.6% of `ev_raw` to **0.9%** (12.8x) for +91%
+        storage — the shelved "1.00x" was measured on a shape that full-scanned. Also
+        `sql/60_projection.sql` hard-codes `sonyliv.` and cannot be applied elsewhere (same defect
+        ADR 0010 fixed in `sql/80_content.sql`).
 - [ ] **[FIX]** Re-loading the same CSV DOUBLES the data — `non_replicated_deduplication_window`
       is for non-replicated MergeTree and Cloud is SharedMergeTree.
 - [ ] **[FIX]** `CH_DATABASE` in the environment is silently ignored by every tool.
