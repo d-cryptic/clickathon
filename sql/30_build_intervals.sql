@@ -17,9 +17,10 @@
 --                    forbids. This is the correction ADR 0007 mandates.
 --
 -- Re-running is safe: session_intervals is a ReplacingMergeTree keyed on
--- (video_session_id, interval_start) with interval_end as the version, so a
--- rebuild replaces rather than duplicates, and a late heartbeat EXTENDS an
--- interval instead of adding one.
+-- (video_session_id, interval_start), versioned on build_version, so the newest
+-- derivation always wins — whether the interval grew OR SHRANK. It used to be
+-- versioned on interval_end, which silently kept stale over-long intervals; see
+-- the engine comment in 10_intervals.sql and evidence/truncation.txt.
 -- ============================================================================
 
 INSERT INTO session_intervals
@@ -112,7 +113,10 @@ SELECT
     -- viewer paused at 11:04:29 and backgrounded at 11:04:31, so the tail was
     -- landing entirely inside a 24-minute background.
     toDateTime64(seg.2 + if(seg.2 = run_end, TAIL_S, 0), 3) AS interval_end,
-    is_open
+    is_open,
+    -- Monotonic across builds so the newest derivation always wins the replace,
+    -- whether the interval grew or shrank. now() is evaluated once per query.
+    toUInt64(toUnixTimestamp(now())) AS build_version
 FROM folded
 ARRAY JOIN
     arrayFilter(x -> x.2 > x.1,

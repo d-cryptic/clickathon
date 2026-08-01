@@ -8,7 +8,7 @@
 <meta name="cc-project" content="clickathon-project">
 <meta name="cc-date"    content="2026-08-01">
 <meta name="cc-title"   content="Foreground-Only Concurrency — Model Deep Dive &amp; Design Evolution">
-<meta name="cc-summary" content="In-depth explanation of the SonyLIV concurrency problem, three mechanical flaws found in the baseline design, and four evolutions that fix them.">
+<meta name="cc-summary" content="In-depth explanation of the SonyLIV concurrency problem, three mechanical flaws found in the baseline design, and four evolutions that fix them. AMENDED 2026-08-01: the 60s heartbeat cadence is measured false, heartbeats survive a pause, and the watermark is 2400s not ~10 min.">
 <meta name="cc-tags"    content="clickhouse,concurrency,sonyliv,clickathon,data-modelling,materialized-views,lambda-architecture">
 <style>
 :root{
@@ -161,8 +161,37 @@ li::marker{color:var(--faint)}
     <div><span class="k">Repo</span><span class="v">clickathon-project</span></div>
     <div><span class="k">Branch</span><span class="v">sc-trapped-helium-8e8a</span></div>
     <div><span class="k">Engine</span><span class="v">ClickHouse 26.7</span></div>
-    <div><span class="k">Status</span><span class="v" style="color:var(--warn)">pre-H0 · no data loaded</span></div>
+    <div><span class="k">Status</span><span class="v" style="color:var(--warn)">amended post-H1 · gates measured</span></div>
     <div><span class="k">Gate</span><span class="v" style="color:var(--green-bright)">/reconcile</span></div>
+  </div>
+
+  <div class="call risk">
+    <div class="ct">Amendment · 2026-08-01 · what this document got wrong</div>
+    <p>
+      This was written before the data was loaded, against the organiser's stated
+      <strong>"heartbeat … is currently passed every 1 minute"</strong>. Measured on the real
+      905,558-event file, <strong>there is no 60-second cadence</strong>: <code>VideoHeartbeat</code>
+      is discrete, bursty player telemetry at <b>4.72/min</b>, inter-arrival <b>p50 0s · p90 40s ·
+      p99 49s</b>, mean 12.4s. Three claims below are corrected in place and marked
+      <b>AMENDED</b>:
+    </p>
+    <ul>
+      <li><strong>The cadence itself</strong> — §01, §03.1, §03.2, Figure 6. The 150s gap threshold
+      survives (it is ~3× the measured p99) but its stated justification did not.</li>
+      <li><strong>Heartbeats survive a pause</strong> — 0.756/min, one event every ~79s, inside any
+      sane gap threshold. So the gap model <em>and</em> the lease model of §E2 both count paused time
+      as watching. The sealed tier now subtracts explicit <code>pause</code>/<code>resume</code>
+      windows; <strong>the hot tier of §E2 has no equivalent and is blocked</strong>.</li>
+      <li><strong>The watermark is not ~10 min</strong> — 2.2% of sessions emit events up to
+      <b>2,081 s</b> after their <code>VideoSessionEnd</code>, so <code>W = 2400s</code> (~40 min).
+      The old figure was 3.5× too narrow.</li>
+    </ul>
+    <p>
+      Measurements and the full gate write-up:
+      <code>docs/adr/0007-gate-answers-pause-needs-explicit-handling.md</code>. The organiser's
+      documentation contradicting the shipped data is logged as a Tier 1 question in
+      <code>docs/MENTOR_QUESTIONS.md</code>.
+    </p>
   </div>
 </section>
 
@@ -192,29 +221,32 @@ li::marker{color:var(--faint)}
   </div>
   <div class="cell">
     <div class="ck">Gating unknowns</div>
-    <div class="cv" style="color:var(--tan)">3</div>
-    <div class="cd">Measurements that can still invalidate the model. All resolvable at H1.</div>
+    <div class="cv" style="color:var(--tan)">3 → 0</div>
+    <div class="cd">All measured at H1. <span class="risk">Two of the three changed the model</span> — pause, and the watermark width. <span class="dim">AMENDED</span></div>
   </div>
 </div>
 
-<div class="call risk">
-  <div class="ct">The single highest-leverage open question</div>
+<div class="call ok">
+  <div class="ct">AMENDED — the single highest-leverage open question, now answered</div>
   <p>
-    The entire activity model rests on one unmeasured assumption: <strong>that the heartbeat stops while
-    the app is backgrounded.</strong> If the player keeps emitting heartbeats in the background, then
-    heartbeat gaps detect nothing, <code>ADR 0001</code> is built on sand, and the model needs
-    background/foreground events after all — the very signals the ADR rejected as unreliable.
+    The entire activity model rested on one unmeasured assumption: <strong>that the heartbeat stops
+    while the app is backgrounded.</strong> <b>MEASURED — it does.</b> 0.047 beats/min strictly inside
+    13,948 closed background→foreground pairs, against 4.72/min while active: a <b>100× drop</b>.
+    Gaps detect backgrounding, and <code>ADR 0001</code> stands.
   </p>
   <p>
-    Nothing in the repo records this having been tested. It is a ten-minute query once data is loaded,
-    and it gates every line of model SQL. See <a href="#gates">§08 — Gating measurements</a>.
+    <strong>The sibling question was the one that bit.</strong> Heartbeats do <em>not</em> stop during
+    a <code>pause</code> — 0.756/min, one event every ~79s, inside the 150s threshold. A gap-only model
+    counts paused time as watching, which the statement forbids. The model is now a hybrid: gaps for
+    backgrounding, explicit <code>pause</code>/<code>resume</code> for paused time. See
+    <a href="#gates">§08 — Gating measurements</a> for all three answers.
   </p>
 </div>
 
 <!-- ================= 01 THE PROBLEM ================= -->
 <h2><span class="num">01 — THE PROBLEM</span>Two words do all the damage</h2>
 <p class="lede">
-  Given session start/end events, 1-minute heartbeats and playback-state markers, answer
+  Given session start/end events, player heartbeats and playback-state markers, answer
   <em>"how many people were actually watching at minute M"</em> — for any minute, any dimension filter,
   at dashboard latency, while sessions are still arriving. Everything hard lives in
   <strong>actually watching</strong>.
@@ -399,10 +431,15 @@ li::marker{color:var(--faint)}
     <div class="track"><div class="fill" style="width:0.03%;background:var(--faint)"></div><div class="bv" style="left:12px">293 · 0.03%</div></div>
   </div>
   <div class="cap">
-    <b>Read:</b> the heartbeat is 93% of the stream and has a defined 60-second cadence — it is the only
-    high-volume, high-reliability signal. Background/foreground together are 3.2% and are documented as
-    <em>"not guaranteed"</em>. That asymmetry is the argument behind ADR 0001. <b>MEASURED</b> — from
-    docs/DATA_DICTIONARY.md; to be re-confirmed on our own load at H1.
+    <b>Read:</b> the heartbeat is 93% of the stream — it is the only high-volume, high-reliability
+    signal. Background/foreground together are 3.2% and are documented as <em>"not guaranteed"</em>.
+    That asymmetry is the argument behind ADR 0001. <b>MEASURED</b> — from docs/DATA_DICTIONARY.md.
+    <br><b>AMENDED:</b> this caption previously said the heartbeat "has a defined 60-second cadence",
+    following the organiser's <code>dataset_details.md</code>. It does not. Measured on our own load:
+    <b>4.72 beats/min</b>, inter-arrival <b>p50 0s · p90 40s · p99 49s</b>, mean 12.4s — bursty
+    telemetry (<code>network-activity</code>, <code>buffer-health</code>, <code>video-resize</code>,
+    <code>BufferStart</code>, <code>Seek</code>, <code>pause</code>, <code>resume</code>), not a beat.
+    Volume and reliability are unaffected; every argument that leaned on the <em>period</em> is.
   </div>
 </div>
 
@@ -671,7 +708,7 @@ avg_concurrency = sum(<span class="c-kw">least</span>(interval_end, B) - <span c
 <table>
   <thead><tr><th>Signal</th><th class="m">Share</th><th>Reliability</th><th>Role in the model</th></tr></thead>
   <tbody>
-    <tr><td>VideoHeartbeat</td><td class="m">93.16%</td><td class="ok">Defined 60s cadence</td><td><strong>Primary</strong> — presence means active, absence beyond a threshold means inactive.</td></tr>
+    <tr><td>VideoHeartbeat</td><td class="m">93.16%</td><td class="warn">Bursty, <em>not</em> periodic — 4.72/min, p99 gap 49s <span class="dim">AMENDED</span></td><td><strong>Primary</strong> — presence means active, absence beyond a threshold means inactive. <span class="risk">But presence also persists through a pause (0.756/min), so presence alone is not "watching".</span></td></tr>
     <tr><td>SessionStart / End</td><td class="m">2.40%</td><td class="ok">Reliable boundaries</td><td>Open/close the outer envelope; <code>End</code> absent ⇒ session still open.</td></tr>
     <tr><td>VideoPlay</td><td class="m">1.20%</td><td class="warn">Reliable but sparse</td><td>Corroborates resume; also seeds the stateless model.</td></tr>
     <tr><td>AppBackgrounded / Foregrounded</td><td class="m">3.20%</td><td class="risk">"Not guaranteed" · 379 unmatched</td><td><strong>Corroborating only</strong> — may close an interval earlier, never solely relied upon.</td></tr>
@@ -684,8 +721,8 @@ avg_concurrency = sum(<span class="c-kw">least</span>(interval_end, B) - <span c
 
 <figure>
   <div class="figlabel">Figure 6 — Heartbeat-gap interval derivation, with the tail-credit ambiguity</div>
-  <svg class="dia" viewBox="0 0 1000 300" role="img" aria-label="Heartbeat ticks at sixty second cadence, a bridged single missed beat, and a long gap that closes the interval, with three candidate tail credit lengths">
-    <text x="0" y="14" class="sm">HEARTBEATS (60s CADENCE) — TICK = ONE BEAT</text>
+  <svg class="dia" viewBox="0 0 1000 300" role="img" aria-label="Heartbeat ticks drawn evenly for legibility though the real stream is bursty, a bridged short gap, and a long gap that closes the interval, with three candidate tail credit lengths">
+    <text x="0" y="14" class="sm">HEARTBEATS — TICK = ONE EVENT · DRAWN EVENLY FOR LEGIBILITY; REAL SPACING IS BURSTY (p50 0s · p99 49s)</text>
     <!-- beats: t=0..300 normal (x 70..370 step 60px per 60s -> 1s = 1px scale/... use 60s = 60px) -->
     <g stroke="var(--sage)" stroke-width="2">
       <line x1="70" y1="30" x2="70" y2="52"/><line x1="130" y1="30" x2="130" y2="52"/><line x1="190" y1="30" x2="190" y2="52"/><line x1="250" y1="30" x2="250" y2="52"/>
@@ -722,7 +759,7 @@ avg_concurrency = sum(<span class="c-kw">least</span>(interval_end, B) - <span c
     <rect x="490" y="222" width="0" height="12" fill="var(--maroon)"/>
     <text x="498" y="232" class="sm">0s — credit nothing past the last beat (undercounts every interval)</text>
     <rect x="490" y="242" width="60" height="12" fill="var(--green-bright)"/>
-    <text x="558" y="252" class="sm" style="fill:var(--green-bright)">60s — one cadence · the repo's current default</text>
+    <text x="558" y="252" class="sm" style="fill:var(--green-bright)">60s — TAIL_GRACE_S, the repo's current default (NOT "one cadence" — there is none)</text>
     <rect x="490" y="262" width="150" height="12" fill="var(--tan)"/>
     <text x="648" y="272" class="sm" style="fill:var(--tan)">150s — full gap threshold (credits confirmed silence)</text>
   </svg>
@@ -731,6 +768,14 @@ avg_concurrency = sum(<span class="c-kw">least</span>(interval_end, B) - <span c
     <em>guesses about the judges' definition</em>, not facts we can derive. Too tight a threshold
     fragments genuine viewing; too loose credits backgrounded time. This is why §07 ships a
     <b>sensitivity sweep</b> rather than a single number.
+    <br><b>AMENDED:</b> the diagram originally showed a 60s cadence with "one missed beat" bridged at
+    120s. There is no cadence, so there is no such thing as a missed beat — but the threshold logic is
+    unaffected, because it only ever compared a <em>gap</em> to a constant. 150s is now justified as
+    <b>~3× the measured p99 inter-arrival of 49s</b> rather than "~2.5 missed beats", and
+    <code>sql/30_build_intervals.sql</code> carries that derivation.
+    <br><b>What did change:</b> the tail grace is now credited <em>only</em> where a segment ends
+    because the run ended. A segment ending at an explicit <code>pause</code> gets none — we know to
+    the second when the viewer stopped, and 60s past it books paused (often backgrounded) time.
   </figcaption>
 </figure>
 
@@ -752,18 +797,20 @@ avg_concurrency = sum(<span class="c-kw">least</span>(interval_end, B) - <span c
   </div>
 </div>
 
-<h3 id="premise">3.4 · The unverified premise the whole model rests on</h3>
-<div class="call risk">
-  <div class="ct">Does the heartbeat stop while backgrounded?</div>
+<h3 id="premise">3.4 · The premise the whole model rests on — <span style="color:var(--green-bright)">MEASURED</span></h3>
+<div class="call ok">
+  <div class="ct">AMENDED — does the heartbeat stop while backgrounded? Yes.</div>
   <p>
     The gap model detects backgrounding <strong>only if the player stops emitting heartbeats when the
-    app goes to background</strong>. If heartbeats continue at 60s cadence in the background, there is
-    no gap to detect, the gap model reports backgrounded users as watching, and it fails the one thing
+    app goes to background</strong>. If heartbeats continued in the background there would be no gap to
+    detect, the gap model would report backgrounded users as watching, and it would fail the one thing
     the problem exists to test.
   </p>
   <p>
-    Nothing in <code>docs/</code> records this having been measured. It is the first query to run after
-    load, and it decides whether ADR 0001 stands, needs a hybrid, or must be reversed:
+    <b>Run on the real 905,558-event file:</b> 13,948 closed background→foreground pairs covering
+    3,301,211 s of backgrounded time contain <b>2,605 heartbeats — 0.047/min</b>, against
+    <b>4.72/min</b> while active. A 100× drop; effectively zero. <strong>ADR 0001 stands.</strong>
+    The query that answered it:
   </p>
   <pre><code><span class="c-com">-- for each background→foreground pair, how many heartbeats land strictly inside?</span>
 <span class="c-com">-- ≈0  → gaps work, ADR 0001 stands</span>
@@ -787,11 +834,34 @@ avg_concurrency = sum(<span class="c-kw">least</span>(interval_end, B) - <span c
        <span class="c-kw">FROM</span> bg b <span class="c-kw">WHERE</span> t_fg <span class="c-kw">IS NOT NULL</span> )
 <span class="c-kw">SETTINGS</span> log_comment = <span class="c-str">'gate:hb-during-background'</span>;</code></pre>
   <p style="margin-top:12px">
-    A sibling unknown rides along: <strong>paused ≠ backgrounded</strong>. The statement excludes
-    <em>"backgrounded, paused, or silent"</em> periods and names playing/paused markers, but the sample
-    file shows no pause events in the <code>event_type</code> census. They may exist in the
-    under-explored <code>event</code> sub-column, or only on the unseen day. Same question applies:
-    if heartbeats continue during pause, the gap model counts paused time as watched.
+    A sibling unknown rode along: <strong>paused ≠ backgrounded</strong>. The statement excludes
+    <em>"backgrounded, paused, or silent"</em> periods, but the sample file shows no pause events in the
+    <code>event_type</code> census — they live in the under-explored <code>event</code> sub-column.
+    <strong>That is the one that bit.</strong>
+  </p>
+</div>
+
+<div class="call risk">
+  <div class="ct">AMENDED — and heartbeats survive a pause. This one failed.</div>
+  <p>
+    21,068 closed <code>pause → resume</code> pairs covering 3,002,604 s of paused time contain
+    <b>37,854 heartbeats — 0.756/min</b>, 16% of the active rate. That is <strong>one event every
+    ~79 seconds, comfortably inside the 150s gap threshold</strong>, so a gap-only model never closes
+    the interval and <strong>credits the entire pause as watching</strong>.
+  </p>
+  <p>
+    What those events are: <code>video-resize</code> (10,343), <code>network-activity</code> (8,338),
+    <code>buffer-health</code> (6,835), plus scrubbing. None of it is playback progress. The player
+    keeps reporting; the viewer is not watching.
+  </p>
+  <p>
+    <strong>The model is therefore a hybrid</strong>, and every "gap model" claim in this document is
+    scoped accordingly: gaps for backgrounding and disappearance, <em>explicit</em>
+    <code>pause</code>/<code>resume</code> windows subtracted for paused time. Shipped in
+    <code>sql/30_build_intervals.sql</code>. The unresolved residue is the <b>23% of pauses that never
+    resume</b> — conservative (stays paused to end of run) vs permissive (ends at next event) differ by
+    <b>99.3 h, 5.09%</b> of counted watch time. Conservative is shipped; only the organisers can settle
+    which the ground truth used.
   </p>
 </div>
 
@@ -887,13 +957,13 @@ avg_concurrency = sum(<span class="c-kw">least</span>(interval_end, B) - <span c
       <td>HLL carries ~1–2% error against an <em>exact</em> ground truth. Switch to <code>uniqExact</code>.</td>
     </tr>
     <tr>
-      <td>Paused ≠ backgrounded</td>
+      <td>Paused ≠ backgrounded <span class="risk">— CONFIRMED</span></td>
       <td class="m">no pause handling anywhere</td>
-      <td>The statement excludes paused time explicitly. Census the <code>event</code> sub-column; if heartbeats survive pause, gaps alone are insufficient.</td>
+      <td><b>AMENDED:</b> measured — heartbeats survive a pause at 0.756/min, so gaps alone are insufficient and this was a real correctness bug, not a hypothetical. Fixed in the sealed tier by subtracting explicit <code>pause</code>/<code>resume</code> windows (<code>sql/30_build_intervals.sql</code>). <span class="risk">The E2 hot tier below is NOT fixed and is blocked.</span></td>
     </tr>
     <tr>
       <td>Tail credit is a guess</td>
-      <td class="m"><code>TAIL_GRACE_S</code> = 60s, chosen by reasoning</td>
+      <td class="m"><code>TAIL_GRACE_S</code> = 60s, chosen by reasoning <span class="dim">(not "one cadence" — AMENDED)</span></td>
       <td>The judges' definition is private and unfittable. Keep it a one-line tunable and ship a sensitivity table proving robustness (or knowingly picking the defensible point).</td>
     </tr>
   </tbody>
@@ -1008,14 +1078,51 @@ avg_concurrency = sum(<span class="c-kw">least</span>(interval_end, B) - <span c
   that is fully streamable <em>and</em> idempotent. Each heartbeat at time <code>t</code> grants a
   <strong>lease</strong> <code>[t, t + LEASE)</code> where <code>LEASE = HEARTBEAT_GAP_S</code>. A
   session is active in minute M if and only if some lease covers M. An MV <code>arrayJoin</code>s each
-  heartbeat into the ~3 minute buckets its lease covers and accumulates
+  heartbeat into the 3–4 minute buckets its lease covers <span class="dim">(AMENDED — 3 or 4, not
+  exactly 3; the count depends on the beat's offset within its minute)</span> and accumulates
   <code>uniqExactState(video_session_id)</code>.
 </p>
+
+<div class="call risk">
+  <div class="ct">AMENDED — E2's hot tier is BLOCKED. Two corrections, one of them fatal as specified.</div>
+  <p>
+    <strong>(a) The volume arithmetic is wrong.</strong> The fan-out below was derived as "3 buckets,
+    because a 60s cadence with a 150s lease covers 3". There is no cadence. Per beat the fan-out is
+    3–4; per <em>active session-minute</em> it is <b>≈ 4.72 × 3.5 ≈ 16 rows</b>, where a
+    one-beat-per-minute model predicted 3 — a 5× under-estimate of hot-tier write amplification. And
+    because p50 inter-arrival is <b>0s</b>, most of those rows are redundant insertions of the same
+    session id into the same <code>uniqExact</code> state. <code>uniqExact</code> absorbs them
+    correctly — the cost is insert and merge work, not cardinality error — but the TTL window must be
+    sized from 16 rows/session-minute, not 3. <span class="dim">DERIVED from the ADR 0007
+    measurement.</span>
+  </p>
+  <p>
+    <strong>(b) The lease model inherits the pause bug.</strong> Leases renew through a pause, because
+    heartbeats keep arriving at 0.756/min — one every ~79s, inside <code>LEASE = 150s</code>. So
+    coverage never breaks and <strong>the hot tier as specified counts paused time as watching</strong>.
+    The equivalence argument in Figure 9 is what hides it: the lease model is provably equivalent to the
+    <em>gap-only</em> model — and the gap-only model is exactly the one §3.4 discarded. Equivalence to a
+    discarded model is not a correctness argument.
+  </p>
+  <p>
+    <code>sql/30_build_intervals.sql</code> fixed this <strong>for the sealed tier only</strong>. Upper
+    bound on the exposure: 3,002,604 s (834 h) of measured closed-pause time against 1,949.3 h of
+    counted watch time — the same order as the answer. A corrected lease model must either
+    <b>(1)</b> let a <code>pause</code> truncate a live lease and grant none until <code>resume</code>
+    (correct, but "is this session paused?" is cross-block state, which is the read-modify-write E2
+    exists to avoid); <b>(2)</b> emit suppressing rows, which <code>uniqExact</code> cannot subtract, so
+    the tier would have to move to sum-of-deltas and lose its idempotence; or <b>(3)</b> keep leases
+    exactly as written and <strong>relabel the hot tier the session-independent upper bound</strong> —
+    one of the two models the statement mandates comparing — with the sealed tier, not the hot tier,
+    answering the benchmark. Option 3 is the only one that is free. Tracked in
+    <code>docs/adr/0005-heartbeat-lease-semantics.md</code> §Amendment; <code>[H5]</code> is gated on it.
+  </p>
+</div>
 
 <figure>
   <div class="figlabel">Figure 9 — Lease semantics vs the gap model: identical except at the tail</div>
   <svg class="dia" viewBox="0 0 1000 300" role="img" aria-label="Overlapping heartbeat leases forming continuous coverage including across a missed beat, with the union extending 150 seconds past the last beat versus 60 seconds for the gap model">
-    <text x="0" y="14" class="sm">BEATS AT t = 0, 60, 120, 180 — THEN SILENCE. LEASE = 150s.</text>
+    <text x="0" y="14" class="sm">BEATS AT t = 0, 60, 120, 180 — THEN SILENCE. LEASE = 150s. (SPACING ILLUSTRATIVE; REAL BEATS ARE BURSTY AT 4.72/min)</text>
     <!-- time axis: 1s = 2px, origin x=70 -->
     <g stroke="var(--sage)" stroke-width="2">
       <line x1="70" y1="26" x2="70" y2="44"/><line x1="190" y1="26" x2="190" y2="44"/><line x1="310" y1="26" x2="310" y2="44"/><line x1="430" y1="26" x2="430" y2="44"/>
@@ -1036,22 +1143,26 @@ avg_concurrency = sum(<span class="c-kw">least</span>(interval_end, B) - <span c
     <rect x="70" y="164" width="660" height="13" fill="var(--sage)"/>
     <text x="738" y="174" class="sm" style="fill:var(--sage)">UNION = [0, 330) — hot tier</text>
     <rect x="70" y="186" width="480" height="13" fill="var(--green)"/>
-    <text x="558" y="196" class="sm" style="fill:var(--green)">GAP MODEL = [0, 240) — sealed tier (last beat + 60s tail)</text>
+    <text x="558" y="196" class="sm" style="fill:var(--green)">GAP MODEL = [0, 240) — sealed tier (last event + TAIL_GRACE_S = 60s)</text>
     <rect x="550" y="186" width="180" height="13" fill="var(--maroon)" opacity="0.55"/>
     <text x="640" y="219" class="sm" text-anchor="middle" style="fill:var(--maroon)">Δ = 90s tail overcount</text>
     <text x="640" y="233" class="sm" text-anchor="middle" style="fill:var(--maroon)">≈1.5 min, hot window only</text>
 
     <line x1="0" y1="250" x2="1000" y2="250" class="ax"/>
     <text x="0" y="270" class="sm" style="fill:var(--green-bright)">EQUIVALENCE:</text>
-    <text x="112" y="270">consecutive beats ≤150s apart produce overlapping leases → continuous coverage, including a bridged missed beat.</text>
-    <text x="112" y="286" class="sm">The two models differ ONLY at the tail, and only until the watermark seals that minute. That is the fundamental streaming limit:</text>
-    <text x="112" y="298" class="sm">you cannot know a beat was the last one until the gap has elapsed.</text>
+    <text x="112" y="270">consecutive events ≤150s apart produce overlapping leases → continuous coverage. The algebra is d ≤ LEASE ⇒ overlap; no cadence needed.</text>
+    <text x="112" y="286" class="sm" style="fill:var(--maroon)">AMENDED — equivalence holds against the GAP-ONLY model, which §3.4 discarded: leases also renew straight through a pause (0.756/min).</text>
+    <text x="112" y="298" class="sm">The two models differ at the tail, and only until the watermark seals that minute — you cannot know an event was the last one until the gap elapses.</text>
   </svg>
   <figcaption>
     <b>Read:</b> the lease model needs no prior state, no read-modify-write and no compensation.
     <code>uniqExact</code> is idempotent and monotone, so a replayed batch is a no-op and a late
-    heartbeat is a pure addition. The known cost is a bounded tail overcount — <b>disclosed and
-    quantified</b>, not hidden, and it disappears the moment the watermark passes.
+    heartbeat is a pure addition. The tail overcount is bounded — <b>disclosed and quantified</b>, not
+    hidden, and it disappears the moment the watermark passes.
+    <br><b>AMENDED:</b> the tail overcount is <em>not</em> the only error. Pause inflation is unbounded
+    by <code>LEASE</code> — a viewer paused for an hour renews leases for the whole hour — and it does
+    <em>not</em> vanish at the watermark, because the sealed tier computes a different, pause-subtracted
+    answer. That is a divergence between the tiers, not a freshness lag. See the blocked callout above.
   </figcaption>
 </figure>
 
@@ -1116,7 +1227,7 @@ avg_concurrency = sum(<span class="c-kw">least</span>(interval_end, B) - <span c
     <line x1="700" y1="360" x2="700" y2="392" stroke="var(--green-bright)" stroke-width="2"/>
     <text x="350" y="378" class="sm" text-anchor="middle" style="fill:var(--fg)">SEALED — exact</text>
     <text x="850" y="378" class="sm" text-anchor="middle" style="fill:var(--fg)">HOT — fresh</text>
-    <text x="706" y="398" class="sm" style="fill:var(--green-bright)">W ≈ now − 10 min</text>
+    <text x="706" y="398" class="sm" style="fill:var(--green-bright)">W = now − 2400s (~40 min) — MEASURED straggler tail 2,081s</text>
   </svg>
   <figcaption>
     <b>Read:</b> the racy read-modify-write is gone. Open sessions and in-flight heartbeats are handled
@@ -1132,8 +1243,8 @@ avg_concurrency = sum(<span class="c-kw">least</span>(interval_end, B) - <span c
 <table>
   <thead><tr><th>Property</th><th>Hot tier — lease + uniqExact</th><th>Sealed tier — gap intervals → deltas</th></tr></thead>
   <tbody>
-    <tr><td>Freshness</td><td class="ok">Immediate</td><td class="warn">Behind watermark W (~10 min)</td></tr>
-    <tr><td>Exactness</td><td class="warn">Tail overcount ≤ ~2 min per interval close</td><td class="ok">Exact</td></tr>
+    <tr><td>Freshness</td><td class="ok">Immediate</td><td class="warn">Behind watermark W — <b>2400s / ~40 min</b> <span class="dim">AMENDED from "~10 min"</span></td></tr>
+    <tr><td>Exactness</td><td class="risk">Tail overcount ≤ ~2 min per interval close, <b>plus unbounded pause inflation</b> <span class="dim">AMENDED</span></td><td class="ok">Exact</td></tr>
     <tr><td>Late / duplicate events</td><td class="ok">Absorbed for free — uniq is idempotent</td><td class="ok">Finalizer re-derives only touched sessions</td></tr>
     <tr><td>Update mechanism</td><td class="ok">None needed</td><td class="ok">Append-only seal batches</td></tr>
     <tr><td>Peak / average cost</td><td class="m">Window sum over a short hot window</td><td class="m">Pre-agg reads (E1)</td></tr>
@@ -1313,12 +1424,12 @@ avg_concurrency = sum(<span class="c-kw">least</span>(interval_end, B) - <span c
   <div class="ph mvp">
     <h3>H4 · Finalizer + watermark — <span style="color:var(--green-bright)">MVP LINE</span></h3>
     <div class="est">~2h · everything below is upside</div>
-    <p>Watermark advance, seal batches, truncation test proving open-session absorption. <strong>A complete, correct, defensible submission exists at this point</strong> — sealed tier plus the stateless baseline, with ~10-minute freshness.</p>
+    <p>Watermark advance, seal batches, truncation test proving open-session absorption. <strong>A complete, correct, defensible submission exists at this point</strong> — sealed tier plus the stateless baseline, with <b>~40-minute</b> freshness. <span class="dim">AMENDED — <code>W = 2400s</code>, set by the measured 2,081s straggler tail (2.2% of sessions emit after their <code>VideoSessionEnd</code>); the "~10 min" written here originally was a guess and 3.5× too narrow.</span></p>
   </div>
   <div class="ph">
     <h3>H5 · Hot tier</h3>
     <div class="est">~2h</div>
-    <p><code>mv_lease</code> + <code>cc_minute_hot</code> + the stitched serving view. Freshness drops from ~10 min to immediate, and the session-aware/independent comparison becomes live.</p>
+    <p><code>mv_lease</code> + <code>cc_minute_hot</code> + the stitched serving view. Freshness drops from ~40 min to immediate, and the session-aware/independent comparison becomes live. <span class="risk">AMENDED — <b>BLOCKED</b>: the lease model counts paused time as watching (see §E2). Do not build until ADR 0005 is unblocked.</span></p>
   </div>
   <div class="ph">
     <h3>H6 · Pre-aggregation and benchmarks</h3>
@@ -1338,25 +1449,35 @@ avg_concurrency = sum(<span class="c-kw">least</span>(interval_end, B) - <span c
 </div>
 
 <!-- ================= 08 GATES ================= -->
-<h2 id="gates"><span class="num">08 — GATING MEASUREMENTS</span>Three queries that can still change the model</h2>
+<h2 id="gates"><span class="num">08 — GATING MEASUREMENTS</span>Three queries that could still change the model — <span style="color:var(--green-bright)">all three answered</span></h2>
+<p class="lede">
+  <b>AMENDED 2026-08-01.</b> Run against the real 905,558-event file on Cloud. Two of the three
+  premises this document was written on did not survive. Full write-up:
+  <code>docs/adr/0007-gate-answers-pause-needs-explicit-handling.md</code>.
+</p>
 <div class="tw">
 <table>
-  <thead><tr><th>Question</th><th>Why it gates</th><th>If the answer is bad</th></tr></thead>
+  <thead><tr><th>Question</th><th>Why it gates</th><th class="m">Measured answer</th></tr></thead>
   <tbody>
     <tr>
       <td>Do heartbeats continue while backgrounded?</td>
       <td>The gap model detects backgrounding only if they stop. This is the load-bearing assumption of ADR 0001.</td>
-      <td class="risk">Gaps are blind. bg/fg becomes load-bearing despite being unreliable — the model becomes a hybrid with an explicit rule for the 379 unmatched.</td>
+      <td class="ok"><b>PASS.</b> 0.047/min inside 13,948 closed bg→fg pairs vs 4.72/min active — a 100× drop. Gaps detect backgrounding. <b>ADR 0001 stands.</b></td>
     </tr>
     <tr>
       <td>Do pause events exist, and do heartbeats survive them?</td>
       <td>The statement excludes paused time explicitly. The <code>event</code> sub-column is uncensused.</td>
-      <td class="warn">Add a state-machine layer over <code>event</code> alongside the gap logic. Cheap if found early, a rewrite if found at H8.</td>
+      <td class="risk"><b>FAIL.</b> They exist in the <code>event</code> sub-column and heartbeats survive: 0.756/min across 21,068 closed pause→resume pairs — one event every ~79s, inside the 150s threshold. A gap-only model credits the whole pause. Fixed for the sealed tier by explicit pause subtraction; <b>the E2 hot tier is blocked.</b></td>
     </tr>
     <tr>
       <td>How frequent are out-of-order arrivals?</td>
       <td>Sets the watermark width — the single number trading freshness against correction volume.</td>
-      <td class="warn">Widen W (worse freshness, fewer corrections) or invest in E3 (better freshness, more correction traffic).</td>
+      <td class="warn"><b>No arrival column exists</b>, so true lateness is unmeasurable from the file. Proxies: zero negative clock skew; <b>239 sessions (2.2%) emit up to 2,081 s after <code>VideoSessionEnd</code></b>. So <code>W = 2400s</code>, not the ~10 min assumed above.</td>
+    </tr>
+    <tr>
+      <td class="risk">Is the heartbeat periodic at all? <span class="dim">(not asked — assumed)</span></td>
+      <td>Every cadence-derived number in this document: the 150s threshold's justification, the 60s tail grace, the lease fan-out.</td>
+      <td class="risk"><b>NO — and we never thought to gate it.</b> The organiser's <code>dataset_details.md</code> says the heartbeat "is currently passed every 1 minute"; the shipped data says 4.72/min, p50 inter-arrival 0s. Logged as a Tier 1 mentor question, because if the private ground truth assumed a 1-minute beat, the discrepancy moves every number we report.</td>
     </tr>
   </tbody>
 </table>
@@ -1378,29 +1499,40 @@ avg_concurrency = sum(<span class="c-kw">least</span>(interval_end, B) - <span c
 <table>
   <thead><tr><th>ADR</th><th>Decision</th><th class="m">Status</th></tr></thead>
   <tbody>
-    <tr><td>0001</td><td>Heartbeat gaps over background events</td><td class="m warn">Accepted — <em>conditional on the §3.4 measurement</em></td></tr>
+    <tr><td>0001</td><td>Heartbeat gaps over background events</td><td class="m ok">Accepted — §3.4 measurement <b>passed</b> (0.047/min while backgrounded)</td></tr>
     <tr><td>0002</td><td>Lead the <code>ev_raw</code> sort key with a truncated hour, not the session id <span class="dim">(pre-existing on main)</span></td><td class="m ok">Accepted — measured 17.3×</td></tr>
     <tr><td>0003</td><td>Clip active intervals at hour boundaries when emitting deltas</td><td class="m ok">Proposed</td></tr>
     <tr><td>0004</td><td>Two-tier serving: idempotent hot tier stitched to append-only sealed tier</td><td class="m ok">Proposed</td></tr>
-    <tr><td>0005</td><td>Heartbeat lease semantics for the hot tier</td><td class="m ok">Proposed</td></tr>
+    <tr><td>0005</td><td>Heartbeat lease semantics for the hot tier</td><td class="m risk"><b>BLOCKED</b> — superseded in part by 0007; leases renew through a pause</td></tr>
     <tr><td>0006</td><td>Late arrivals corrected by deterministic diff, never by rebuild</td><td class="m ok">Proposed</td></tr>
+    <tr><td>0007</td><td>Heartbeat gaps detect backgrounding but NOT pause; pause needs explicit handling <span class="dim">(post-dates this document)</span></td><td class="m ok">Accepted — measured on 905,558 events</td></tr>
   </tbody>
 </table>
 </div>
 
 <div class="well">
-  <div class="wt">Hand back to Claude — next action</div>
-  <pre>Run the three gating measurements from docs/artifacts/2026-08-01-concurrency-model-deep-dive.html §08
-against our own load, then report which of ADR 0001's premises survive.
-Start with gate:hb-during-background — it decides whether the gap model stands.</pre>
+  <div class="wt">Hand back to Claude — next action <span class="dim">(AMENDED — the gates are done)</span></div>
+  <pre>The three §08 gates are measured (see docs/adr/0007-gate-answers-pause-needs-explicit-handling.md).
+Next: unblock ADR 0005. The hot tier's leases renew through a pause, so it would count paused time as
+watching; the sealed tier already subtracts explicit pause/resume windows in sql/30_build_intervals.sql.
+Pick between (1) pause-truncated leases with per-session state, (2) sum-of-deltas losing idempotence,
+or (3) relabelling the hot tier as the session-independent upper bound. Do not build [H5] before that.</pre>
 </div>
 
 <p class="foot">
   clickathon-project · branch <code>sc-trapped-helium-8e8a</code> · 2026-08-01<br>
   Sources read: docs/PROBLEM.md · ARCHITECTURE.md · DATA_DICTIONARY.md · CONVENTIONS.md · VERIFIED.md · TESTS.md · adr/0001 · sql/00_schema.sql · sql/10_intervals.sql · AGENT_WORKFLOW.md · TODOS.md<br>
-  Claims tagged MEASURED are from docs/DATA_DICTIONARY.md and docs/VERIFIED.md and have <b>not</b> been
-  re-run on our own load — <code>data/</code> is empty as of this writing. Claims tagged DERIVED follow
-  from the arithmetic. Claims tagged UNVERIFIED are open questions, listed in §08.
+  Claims tagged MEASURED were originally from docs/DATA_DICTIONARY.md and docs/VERIFIED.md, written
+  before <code>data/</code> was loaded. Claims tagged DERIVED follow from the arithmetic. Claims tagged
+  UNVERIFIED are open questions, listed in §08.<br>
+  <b>AMENDED 2026-08-01</b> — corrections marked AMENDED throughout are measured on the real
+  905,558-event file on ClickHouse Cloud and are sourced from
+  <code>docs/adr/0007-gate-answers-pause-needs-explicit-handling.md</code>. Three claims in the original
+  text are now known false: the 60-second heartbeat cadence (§01, §03.1, §03.2, Fig. 6, §E2), the
+  bounded-error characterisation of the hot tier (§E2, Fig. 9 — pause inflation is unbounded by
+  <code>LEASE</code>), and the ~10-minute watermark (§E2, Fig. 10, §07 — it is 2400s). The cadence
+  claim came from the organiser's own <code>docs/upstream/dataset_details.md</code>; that contradiction
+  is logged as a Tier 1 question in <code>docs/MENTOR_QUESTIONS.md</code>.
 </p>
 
 </main>

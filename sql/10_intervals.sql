@@ -42,10 +42,26 @@ CREATE TABLE IF NOT EXISTS session_intervals
     interval_start   DateTime64(3),
     interval_end     DateTime64(3),
     is_open          UInt8,          -- 1 = session had no VideoSessionEnd at build time
+    -- Monotonic per build. See the engine note below.
+    build_version    UInt64,
     INDEX idx_start interval_start TYPE minmax GRANULARITY 1
 )
-ENGINE = ReplacingMergeTree(interval_end)      -- late heartbeats EXTEND an interval;
-ORDER BY (video_session_id, interval_start)     -- replacing on interval_end keeps the latest
+-- Versioned on build_version, NOT interval_end.
+--
+-- interval_end was the original choice, justified as "late heartbeats EXTEND an
+-- interval, so keeping the largest end keeps the latest". That is false, and
+-- tools/truncation-test.sh proved it: re-derivation can SHRINK an interval. A
+-- provisional interval carries TAIL_S=60s of grace because its run appeared to
+-- end; the completed derivation places the true end EARLIER — at a pause, or at
+-- a real VideoSessionEnd inside the grace window. Versioning on interval_end
+-- then lets the stale, longer row outrank the correct one permanently.
+--
+-- Measured cost of the bug: 316 intervals up to 60s too long, 315 stuck at
+-- is_open=1 forever, and the peak minute overcounted by 37 (2924 vs 2887,
+-- +1.3%) after an incremental absorption. With build_version the incremental
+-- result is row-for-row identical to a clean rebuild on all 1,578 minutes.
+ENGINE = ReplacingMergeTree(build_version)
+ORDER BY (video_session_id, interval_start)
 SETTINGS min_bytes_for_wide_part = 0;
 
 -- ---------------------------------------------------------------------------
@@ -65,8 +81,13 @@ CREATE TABLE IF NOT EXISTS cc_minute_delta
     country     LowCardinality(String),
     content_id  Int64,
     delta       SimpleAggregateFunction(sum, Int64),
-    starts      SimpleAggregateFunction(sum, UInt64),
-    ends        SimpleAggregateFunction(sum, UInt64)
+    -- Int64, NOT UInt64. ADR 0006 corrects a straggler by emitting a NEGATED
+    -- copy of the previous contribution. ClickHouse does not reject a negative
+    -- into UInt64 — it WRAPS. sum() still lands right by modular arithmetic, so
+    -- the bug hides, but max() returns 1.8e19 and any pre-merge single-row read
+    -- is garbage. Zeroing them instead inflated starts by 22% (24,430 vs 20,035).
+    starts      SimpleAggregateFunction(sum, Int64),
+    ends        SimpleAggregateFunction(sum, Int64)
 )
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMMDD(minute)

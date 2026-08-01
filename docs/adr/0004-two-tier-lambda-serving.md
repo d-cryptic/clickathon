@@ -5,10 +5,14 @@
 > to read the target table mid-insert to learn an interval's previous end. Instead: a **hot tier** of
 > heartbeat leases aggregated with `uniqExact` (immediate, idempotent, no state), and a **sealed tier**
 > of gap-derived intervals emitted as append-only hour-clipped deltas behind a watermark. A serving view
-> stitches them at the watermark. Nothing is ever updated or rebuilt. Status: proposed, 2026-08-01.
-> Supersedes the update-handling section of `docs/ARCHITECTURE.md`.
+> stitches them at the watermark. Nothing is ever updated or rebuilt. **`W` is now measured, not
+> guessed: `W = 2400s` (~40 min), set by the 2,081s straggler tail in
+> [ADR 0007](0007-gate-answers-pause-needs-explicit-handling.md) — an earlier "~10 min" was a guess and
+> was 3.5× too narrow.** Status: proposed; the sealed tier is built, the **hot tier is blocked** on
+> [ADR 0005](0005-heartbeat-lease-semantics.md)'s pause defect. Supersedes the update-handling section
+> of `docs/ARCHITECTURE.md`.
 
-**Status** Proposed · 2026-08-01
+**Status** Proposed · 2026-08-01, amended 2026-08-01 (watermark measured; hot tier blocked)
 
 ## Context
 
@@ -35,6 +39,14 @@ Two tiers, stitched at a watermark `W`.
 `[t, t + HEARTBEAT_GAP_S)`, `arrayJoin`s it into the minute buckets that lease covers, and accumulates
 `uniqExactState(video_session_id)` per `(dims, minute)`. No prior state is read. See
 [ADR 0005](0005-heartbeat-lease-semantics.md) for why lease semantics match the gap model.
+
+> **BLOCKED — do not build this tier as written.** [ADR 0007](0007-gate-answers-pause-needs-explicit-handling.md)
+> measured that heartbeats *survive a pause* (0.756/min = one event every ~79s, inside
+> `HEARTBEAT_GAP_S = 150s`), so leases keep renewing through a paused window and the hot tier would
+> count paused time as watching. The sealed tier fixes this by subtracting explicit `pause`/`resume`
+> windows (`sql/30_build_intervals.sql`); the hot tier has no equivalent. The lease model matches the
+> **gap-only** model — which ADR 0007 discarded. See ADR 0005 §Amendment for the three candidate fixes
+> and why each costs something. `[H5]` in [TODOS.md](../../TODOS.md) is gated on that decision.
 
 **Sealed tier — `session_intervals` → `cc_minute_delta` → `cc_hour_agg`.** A finalizer (refreshable MV
 or scheduled job) advances `W`, re-derives intervals **only for sessions with events since the last
@@ -71,8 +83,24 @@ run**, writes `session_intervals` (`ReplacingMergeTree`, idempotent), and append
   leases (uniq has no subtraction), so a cleanly-ended session lingers for up to `HEARTBEAT_GAP_S`.
   This affects only minutes inside the hot window and vanishes once sealed. Quantify it in the
   comparison panel rather than hiding it — it is the honest cost of streaming freshness.
+- **A second hot-tier error that is NOT bounded by `HEARTBEAT_GAP_S`: paused time.** The tail
+  overcount above is at most one lease per interval close. Pause inflation is not — a viewer paused
+  for an hour keeps renewing leases for that whole hour (0.756 beats/min, ADR 0007). Measured upper
+  bound across closed pause→resume pairs: 3,002,604 s (834 h) of paused time against 1,949.3 h of
+  counted watch time. Same order as the answer. This is why the hot tier is blocked rather than merely
+  disclosed.
 - **`W` is now the tuning knob** that trades freshness against correction volume. Its width should be
-  set from the measured out-of-order arrival distribution, not guessed. See the gating measurements.
+  set from the measured out-of-order arrival distribution, not guessed — **and it now is**.
+  [ADR 0007](0007-gate-answers-pause-needs-explicit-handling.md) GATE ③, on the real 905,558-event
+  file: no negative clock skew at all (`event_timestamp < session_start_epoch` returns 0 rows), but
+  **239 sessions (2.2%) emit events up to 2,081 s after their `VideoSessionEnd`**. So `W` must be
+  **≥ ~2,100 s**; we set **`W = 2400s` (40 min)** for headroom. The truncation test confirms the
+  straggler tail binds, not the cut itself, which only damages the last 60s.
+  **A "~10 min" watermark — the figure the deep-dive artifact carried — is 3.5× too narrow**: it would
+  seal minutes while 2.2% of sessions were still emitting into them, and those stragglers would then
+  fall to ADR 0006's correction path on every run rather than being the rare case that path is for.
+  40 minutes of sealed-tier lag is the honest cost of a 2,081s straggler tail, and it is exactly why
+  the hot tier is worth having.
 - **`W` is the metric to instrument in ClickStack.** Watermark lag is the observable expression of the
   whole design — if it grows, the sealed tier is falling behind and the served numbers are drifting
   toward the hot tier's approximation. This is the natural ClickStack integration, not a bolt-on.
