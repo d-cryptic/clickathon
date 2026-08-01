@@ -131,6 +131,31 @@ contradicting themselves a few lines apart.
 - **Docs-only features still pass checks 5 and 6.** Most of today's real defects were wrong *claims*,
   not wrong code.
 
+## ⚠ The waves are SEQUENTIAL. Do not run them in parallel — measured, 2026-08-02.
+
+The orchestrator spawned W1, W2 and W3 concurrently to save wall-clock. W3's check-1 analysis proved
+that cannot work, with three concrete dependencies:
+
+```
+ W1  tooling   apply-sql.sh --database parser · env-capture · the write guards
+       │
+       ▼
+ W2  model     sql/15_normalise.sql (ADR 0011) · 0009 · 0014
+       │
+       ▼
+ W3  publication  needs BOTH: the parser to install into scratch, normalise to build at all
+```
+
+W3 could not run check 3 **at all** — not "ran and failed", could not run — because `main`'s
+`apply-sql.sh` has no option parser, so its convergence claim was unverifiable. A promotion that
+cannot execute a check has failed check 1, and parallelism is what produced that state.
+
+**W3 is parked**, its cherry-picks and dependency analysis pushed to
+`chore/promotion-w3-publication`. It re-runs after W1 and W2 are on `main` — not before.
+
+**The general rule:** promote one wave, land it on `main`, then start the next. The wall-clock saving
+from parallel waves is illusory when each later wave has to be thrown away and re-derived.
+
 ## Promotion order — dependencies decide it, not importance
 
 Infrastructure that everything else assumes goes first; anything that changes a serving table's
