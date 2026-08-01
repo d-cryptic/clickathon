@@ -302,6 +302,10 @@ not a ground-truth claim. The submission should show this sweep and expose the v
   source-aware grouping or `FINAL` is a read-time choice, while the delta ledger must be correct before
   merges. [ClickHouse's production guidance](https://clickhouse.com/blog/common-getting-started-issues-with-clickhouse)
   makes the same distinction.
+- An explicit historical rebuild must use a **fresh** insert-deduplication token after it truncates its
+  target tables. Non-replicated block-deduplication metadata can outlive the rows; repeating identical SQL
+  with the old block identity can omit a block from a supposedly clean baseline. The rebuild and bootstrap
+  commands mint a token per run, while live finalizer retries retain their per-run token intentionally.
 - Incremental MVs are excellent for stateless, per-insert rollups, but session state belongs in the
   finalizer. Each MV/projection adds write work and part pressure; recent ClickHouse field reporting
   describes how repeated full-session refreshes became a runaway workload at scale. [Replo's incident](https://clickhouse.com/blog/replo)

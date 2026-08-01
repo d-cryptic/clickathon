@@ -36,6 +36,7 @@ if ! [[ "$raw_events" =~ ^[0-9]+$ ]] || [ "$raw_events" = "0" ]; then
 fi
 echo "raw events on TARGET=$target: $raw_events"
 "$root_dir/tools/validate-source-contract.sh"
+rebuild_token=$(scalar "SELECT generateUUIDv4()")
 query "TRUNCATE TABLE session_intervals"
 query "TRUNCATE TABLE cc_minute_delta"
 # A historical rebuild changes the baseline that corrections are relative to.
@@ -46,6 +47,9 @@ query "TRUNCATE TABLE IF EXISTS finalizer_run_log"
 query "TRUNCATE TABLE IF EXISTS exact_tail_minute_stage"
 query "TRUNCATE TABLE IF EXISTS exact_tail_run_log"
 
-TARGET="$target" "$root_dir/tools/ch-run.sh" --multiquery --file queries/materialize_intervals.sql
+TARGET="$target" "$root_dir/tools/ch-run.sh" \
+  --multiquery \
+  --setting "insert_deduplication_token=materialize-$rebuild_token" \
+  --file queries/materialize_intervals.sql
 
 query "SELECT 'session_intervals' AS table, count() AS rows FROM session_intervals UNION ALL SELECT 'cc_minute_delta', count() FROM cc_minute_delta FORMAT PrettyCompact"

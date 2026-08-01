@@ -29,6 +29,10 @@ data and a real endpoint are available.
 `materialize.sh --replace` refuses an empty `ev_raw` target before truncating derived tables. This protects
 against a wrong Cloud database or failed load; the explicit `--replace` flag remains required.
 
+Every explicit historical rebuild and finalizer bootstrap sends a fresh `insert_deduplication_token`.
+ClickHouse may retain non-replicated block-deduplication state across `TRUNCATE`; reusing the same block
+identity after clearing a table can otherwise silently omit a block from the new baseline.
+
 ```bash
 TARGET=cloud tools/deploy-schema.sh
 TARGET=cloud tools/load.sh

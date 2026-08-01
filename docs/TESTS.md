@@ -12,6 +12,7 @@
 | `/verify-env` | the stack is actually configured — schema present, users real, constraints active | after any env change |
 | `tools/validate-source-contract.sh` | input can be interpreted by the current state machine: lifecycle identity is unambiguous, timestamps/dimensions are valid, and all content references resolve | before every materialization or unseen-file run |
 | materialization empty-source guard | a wrong or empty target cannot erase a prior derived model under `--replace` | before Cloud rebuilds and unseen-file runs |
+| historical rebuild repeatability | two explicit rebuild/bootstrap runs over unchanged raw yield identical interval, delta, and baseline-marker counts | after insert/deduplication changes |
 | `/reconcile` | the serving layer equals the truth recomputed from raw | after **every** model change |
 | `tools/verify-model.sh` | state stops cut intervals and sampled delta reconstruction matches direct interval overlap | after every batch materialization |
 | `tools/query-concurrency.sh` | minute-grid serving query produces exact peak/average, including zero minutes | before benchmark / API changes |

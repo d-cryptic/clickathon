@@ -56,7 +56,11 @@ query "TRUNCATE TABLE session_delta_base"
 query "TRUNCATE TABLE session_delta_correction_stage"
 query "TRUNCATE TABLE finalizer_run_log"
 
-TARGET="$target" "$root_dir/tools/ch-run.sh" --multiquery --file queries/bootstrap_finalizer_base.sql
+bootstrap_token=$(scalar "SELECT generateUUIDv4()")
+TARGET="$target" "$root_dir/tools/ch-run.sh" \
+  --multiquery \
+  --setting "insert_deduplication_token=bootstrap-$bootstrap_token" \
+  --file queries/bootstrap_finalizer_base.sql
 
 mismatches=$(scalar "SELECT count() FROM (SELECT platform, country, content_id, minute FROM (SELECT platform, country, content_id, minute, sum(delta) AS baseline_delta, toInt64(0) AS snapshot_delta FROM cc_minute_delta GROUP BY platform, country, content_id, minute UNION ALL SELECT platform, country, content_id, minute, toInt64(0), sum(delta) FROM session_delta_base GROUP BY platform, country, content_id, minute) GROUP BY platform, country, content_id, minute HAVING sum(baseline_delta) != sum(snapshot_delta))")
 
