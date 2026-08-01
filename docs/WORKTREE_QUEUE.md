@@ -113,6 +113,22 @@ Fix so a real id can never collide with a rollup marker: a separate `is_rollup` 
 the id domain, or a documented guarantee that negative ids are reserved. Whichever, the unseen-day
 loader should **assert** the invariant rather than trust it.
 
+## Q30 · Local `default.session_intervals` is on a pre-ADR-0012 schema — **operator call**
+
+Found 2026-08-01 while testing the new write guards: `default.session_intervals` has **no
+`build_version` column**, so it predates ADR 0012 and `tools/build-model.sh` cannot rebuild it
+locally (`Code: 16 · No such column build_version`). Any "verify it locally first" step is therefore
+running against a schema Cloud has not had for hours.
+
+The table's contents were stale for the same reason, and testing the guard truncated it — no loss,
+but it is now empty as well as mis-shaped. `ev_raw` is intact (905,558 rows) and every scratch
+database (`adv_q19`, `scale_x100`, `scale_real`, `tie0014`, `csv_audit`) is untouched.
+
+**Not fixed, deliberately**: repairing it means dropping and recreating a table, and the standing
+instruction is to ask before touching schema. The fix is a local `DROP TABLE default.session_intervals`
+followed by `tools/apply-sql.sh sql/00_schema.sql` and a local rebuild. Related to Q16 (ADR 0018),
+which unified *which* database each target resolves to but not *what shape* the local one is in.
+
 ## 🔴 The spawn defect that caused a production incident
 
 `sc worktree create` bases a new worktree on **`main`**, NOT on the target branch, even after

@@ -154,6 +154,40 @@ Nothing was applied. Create it, or point at one that exists:
 If you meant the local container's own data: it lives in 'default'. Put
 CH_DATABASE_LOCAL=default in .env, or pass --database default."
 
+# ── Destructive DDL against the graded database must be deliberate ──────────
+# Placed HERE, not at argument-parsing time, because FILES only defaults to
+# sql/*.sql further up — a guard before that point would have waved through the
+# single most dangerous invocation, a bare `TARGET=cloud tools/apply-sql.sh`.
+#
+# On 2026-08-01 a rebuild on a stale base overwrote the graded answers with
+# pre-ADR-0009 SQL and the service served two model generations for two hours.
+# The tooling never objected, because it never asked.
+#
+# Only DROP and TRUNCATE are gated. CREATE and CREATE OR REPLACE are how views
+# and UDFs are legitimately applied to `sonyliv`, and gating those would turn
+# this into ceremony people learn to route around.
+GRADED_DB="${GRADED_DB:-sonyliv}"
+if [ "$DB" = "$GRADED_DB" ] && [ "${APPLY_GRADED_DESTRUCTIVE:-}" != yes ]; then
+  for f in "${FILES[@]}"; do
+    [ -f "$f" ] || continue
+    # Strip `--` comments first: ADR 0010's own commentary QUOTES a DROP, and a
+    # guard that greps comments as code blocks a clean run. The unseen-day
+    # rehearsal hit exactly that (finding R2).
+    if sed 's/--.*//' "$f" | grep -qiE '(^|[[:space:];])(DROP|TRUNCATE)[[:space:]]'; then
+      die "$f contains DROP or TRUNCATE and '$DB' is the GRADED database.
+
+Applying it destroys answers we are scored on, and there is no undo. If that is
+genuinely what you want, confirm the tree is the one you mean to apply
+(git log --oneline -1 · git status --porcelain), then:
+
+  APPLY_GRADED_DESTRUCTIVE=yes TARGET=cloud tools/apply-sql.sh $f
+
+Otherwise target a scratch database:  --database sonyliv_scratch
+CREATE and CREATE OR REPLACE are NOT gated — this stops destructive DDL only."
+    fi
+  done
+fi
+
 for f in "${FILES[@]}"; do
   [ -f "$f" ] || { echo "no such file: $f" >&2; exit 1; }
   printf '  %-24s ... ' "$f"

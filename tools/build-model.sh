@@ -56,11 +56,53 @@ gate() {
   case "$out" in *FAIL*) GATE_FAILED=1 ;; esac
 }
 
+# ── The guard that was missing on 2026-08-01 ────────────────────────────────
+# This script TRUNCATEs four tables and rebuilds them. Run against the GRADED
+# database it destroys and recreates the answers we are scored on, and there is
+# no undo. That is not hypothetical: a worktree on a stale base ran exactly this
+# against `sonyliv`, with pre-ADR-0009 SQL, and left the service serving two
+# different model generations — minute peak 2,887 with 1,949.331 hours, hour
+# peak 2,917 — for about two hours until an external audit noticed. Nothing in
+# this script objected, because until now nothing in it asked.
+#
+# So: rebuilding the graded database is allowed, but it must be DELIBERATE.
+# Set REBUILD_GRADED=yes for that one invocation. Every other target — local,
+# any scratch database — is unaffected and needs no ceremony.
+GRADED_DB="${GRADED_DB:-sonyliv}"
+if [ "$TARGET" = cloud ]; then
+  TARGET_DB="${CH_DATABASE:-}"
+  if [ "$TARGET_DB" = "$GRADED_DB" ] && [ "${REBUILD_GRADED:-}" != yes ]; then
+    cat >&2 <<EOF
+tools/build-model.sh: REFUSING to rebuild the graded database '$GRADED_DB'.
+
+  This truncates session_intervals, cc_user_minute, cc_minute_delta and
+  cc_hour_agg on the service we are scored on, then rebuilds them from ev_raw.
+  If your working tree is on a stale base, the rebuild writes STALE SQL over
+  correct answers and the result looks plausible. That has happened once.
+
+  Before you override, confirm all three:
+    1. git log --oneline -1        is a commit you meant to build from
+    2. git status --porcelain      is clean
+    3. you actually intend to replace the graded answers
+
+  Then:  REBUILD_GRADED=yes TARGET=cloud tools/build-model.sh
+
+  For any other purpose use a scratch database — sql/70_truncation_test.sql
+  shows the pattern — or run without TARGET=cloud for local.
+EOF
+    exit 1
+  fi
+  if [ "$TARGET_DB" = "$GRADED_DB" ]; then
+    echo "== ⚠ REBUILDING THE GRADED DATABASE '$GRADED_DB' (REBUILD_GRADED=yes)"
+    echo "==   commit $(git rev-parse --short HEAD 2>/dev/null || echo '?')  tree $( [ -z "$(git status --porcelain 2>/dev/null)" ] && echo clean || echo DIRTY )"
+  fi
+fi
+
 echo "== target: $TARGET"
 
 echo "== 1/6  session_intervals (gap + pause, ADR 0001/0007)"
 q "TRUNCATE TABLE session_intervals" >/dev/null
-TARGET="$TARGET" tools/apply-sql.sh sql/30_build_intervals.sql >/dev/null
+TARGET="$TARGET" APPLY_GRADED_DESTRUCTIVE="${REBUILD_GRADED:-}" tools/apply-sql.sh sql/30_build_intervals.sql >/dev/null
 q "SELECT concat('   intervals: ', toString(count()), ' over ', toString(uniqExact(video_session_id)), ' sessions') FROM session_intervals FINAL FORMAT TSVRaw"
 
 echo "== 2/6  cc_user_minute (uniqExact per bucket, replaced not unioned — ADR 0016)"
@@ -80,21 +122,21 @@ esac
 # Truncate is storage hygiene here (drops retraction tombstones); the backfill
 # inside 45 replaces every bucket regardless. See the header.
 q "TRUNCATE TABLE IF EXISTS cc_user_minute" >/dev/null
-TARGET="$TARGET" tools/apply-sql.sh sql/45_user_concurrency.sql >/dev/null
+TARGET="$TARGET" APPLY_GRADED_DESTRUCTIVE="${REBUILD_GRADED:-}" tools/apply-sql.sh sql/45_user_concurrency.sql >/dev/null
 q "SELECT concat('   user-minute buckets: ', toString(count())) FROM cc_user_minute FINAL FORMAT TSVRaw"
 
 echo "== 3/6  cc_minute_delta (hour-clipped, ADR 0003)"
 q "TRUNCATE TABLE cc_minute_delta" >/dev/null
-TARGET="$TARGET" tools/apply-sql.sh sql/40_deltas.sql >/dev/null
+TARGET="$TARGET" APPLY_GRADED_DESTRUCTIVE="${REBUILD_GRADED:-}" tools/apply-sql.sh sql/40_deltas.sql >/dev/null
 q "SELECT concat('   delta rows: ', toString(count()), '  opens ', toString(sum(starts)), '  closes ', toString(sum(ends))) FROM cc_minute_delta FORMAT TSVRaw"
 
 echo "== 4/6  cc_hour_agg (the hour tier, ADR 0003)"
 q "TRUNCATE TABLE IF EXISTS cc_hour_agg" >/dev/null   # IF EXISTS: 50_hour_agg.sql creates it just below
-TARGET="$TARGET" tools/apply-sql.sh sql/50_hour_agg.sql >/dev/null
+TARGET="$TARGET" APPLY_GRADED_DESTRUCTIVE="${REBUILD_GRADED:-}" tools/apply-sql.sh sql/50_hour_agg.sql >/dev/null
 q "SELECT concat('   hour rows: ', toString(count()), '  peak ', toString(max(peak))) FROM cc_hour_agg FINAL WHERE platform='*' AND country='*' AND content_id=-1 FORMAT TSVRaw"
 
 echo "== 5/6  views"
-TARGET="$TARGET" tools/apply-sql.sh sql/20_views.sql >/dev/null
+TARGET="$TARGET" APPLY_GRADED_DESTRUCTIVE="${REBUILD_GRADED:-}" tools/apply-sql.sh sql/20_views.sql >/dev/null
 echo "   ok"
 
 # Normalisation is READ-SIDE only (ADR 0011): UDFs plus views over cc_minute_delta.
@@ -104,7 +146,7 @@ echo "   ok"
 # CREATE OR REPLACE, so re-running is free. It comes last because its views read
 # cc_minute_delta, which stage 2 builds.
 echo "== 6/6  normalisation UDFs + views (ADR 0011)"
-TARGET="$TARGET" tools/apply-sql.sh sql/15_normalise.sql >/dev/null
+TARGET="$TARGET" APPLY_GRADED_DESTRUCTIVE="${REBUILD_GRADED:-}" tools/apply-sql.sh sql/15_normalise.sql >/dev/null
 echo "   ok"
 
 echo "== reconcile: delta serving layer vs interval expansion, every minute"
