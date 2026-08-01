@@ -6,6 +6,9 @@
 > **milliseconds**. Backgrounding is **universal** (every session has one) and background/foreground
 > events are **not guaranteed to pair**. Read [#traps](#traps) before writing any interval logic.
 
+Both files are gitignored (223 MB). Get them with `tools/fetch_data.sh` — checksum-pinned against the
+[organiser repo](https://github.com/sidagarwal04/click-a-thon-2026/tree/main/SonyLiv/data).
+
 ## Raw events — `ev_raw`
 
 | Column | Type | Notes |
