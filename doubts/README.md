@@ -7,16 +7,35 @@
 > question changed shape. Every number is measured against the loaded data, never estimated.
 > **Record the answer inline the moment it arrives, and update the affected ADR in the same commit.**
 
-## The files
+## Ask in this order — ranked by measured cost to the answer we submit
+
+Eleven dossiers is more than any mentor will work through. **Ask 09, 04 and 02 first**: they are
+worth more than everything below them combined, and each has a decision table so the answer is
+immediately actionable.
 
 | # | Doubt | Worth | Blocks |
 |---|---|---|---|
-| [01](01-heartbeat-cadence.md) | The heartbeat ticks at **40s**, the spec says 60s | every interval boundary in the model | `TAIL_S`, `GAP_S` |
-| [02](02-resume-semantics.md) | `resume` fires for four different reasons | **189.2 h — 9.7%** of counted watch time | the pause-exclusion rule |
-| [03](03-content-catalog.md) | Empty `video_type`, colliding titles, a poison id | how content-level answers are labelled | `sql/80_content.sql` views |
-| [04](04-dimension-normalisation.md) | Hindi is **four** strings — one language or four? | **23.3%** on any per-language answer (peak 1,768 vs 2,180) | which figure a filtered benchmark query submits |
-| [05](05-minute-boundary-membership.md) | An interval ending exactly on a minute boundary — in that minute, or not? | **the graded peak: 2,917 vs 2,916**, 92 minutes, and our gate cannot tell | the minute-membership convention in `40_deltas.sql` + `90_reconcile.sql` |
-| [06](06-dedup-at-filter-grain.md) | Duplicates are inert for totals — and flip 6 dimension attributions | every dimension-filtered answer (`unk` audio peak 183 vs 184) | whether a dedup pass precedes attribution (ADR 0016) |
+| **[09](09-minute-membership-instant-reading.md)** | "Concurrent at minute M" — any overlap, or present at the instant M begins? | **−410 viewers · −14.1%** on the graded peak | the expansion rule in `40_deltas.sql` **and** `90_reconcile.sql` |
+| **[04](04-dimension-normalisation.md)** | Hindi is **four** strings — one language or four? | **23.3%** on any per-language answer (1,768 vs 2,180) | which figure a filtered benchmark query submits |
+| **[10](10-fail-closed-state-gates.md)** | Must foreground **and** playing both hold, or is a heartbeat enough? | **−10.7% peak · −13.0% hours.** Two independent implementations agree within 2.4%, so this is semantics, not a bug | the state machine in `30_build_intervals.sql` |
+| **[02](02-resume-semantics.md)** | `resume` fires for four different reasons | **189.2 h — 9.7%** of counted watch time | the pause-exclusion rule |
+| [03](03-content-catalog.md) | Empty `video_type`, colliding titles, a poison id | **8.8%** — how content-level answers are labelled | `sql/80_content.sql` views |
+| [07](07-tail-credit-at-explicit-stops.md) | Tail credit after an explicit stop | **−4.8% peak · −7.1% hours** (upper edge bounded by 10's terminal-end probe, −4.1%) | `TAIL_S` policy at run ends |
+| [08](08-second-truncation-inverts-pause-resume.md) | Second-truncation inverts same-second pause/resume order | **−1.8%** | millisecond precision in the derivation |
+| [11](11-liveness-allow-list-unknown-events.md) | Should an **unknown** event grant liveness? | **−1.3% on this file — unbounded on the unseen day**, and no gate would notice | a load-time vocabulary alert |
+| [05](05-minute-boundary-membership.md) | An interval ending exactly on a minute boundary | **one viewer** (2,917 vs 2,916) — the narrow half of 09 | minute-membership convention |
+| [01](01-heartbeat-cadence.md) | The heartbeat ticks at **40s**, the spec says 60s | every interval boundary, but no single number | `TAIL_S`, `GAP_S` |
+| [06](06-dedup-at-filter-grain.md) | Duplicates are inert for totals — and flip 6 dimension attributions | `unk` audio peak 183 vs 184 | whether dedup precedes attribution |
+
+**The costs do not add up.** They overlap (09 subsumes 05; 07's upper edge is bounded by 10) and
+several are measured on the same baseline independently. Treat each as *"what this one convention is
+worth if we have it backwards"*, not as a total error bar.
+
+**Where they came from.** 01–06 came from reading the data during the build. **07–11 came from
+adversarial work on 2026-08-01**: `evidence/adversarial/` probed 21 alternative readings of
+conventions the model and gate *share* (ten came back safe at ≤0.1%), and `evidence/liveness/`
+measured the exposure that Codex 003 and the design bake-off both raised. Both directories carry the
+harness, so any new convention can be measured in one run.
 
 ## How these differ from `docs/MENTOR_QUESTIONS.md`
 
