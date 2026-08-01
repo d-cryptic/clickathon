@@ -1,0 +1,329 @@
+UNSEEN-DAY RUN
+generated 2026-08-01T11:35:23Z   commit 5433183
+target database sonyliv_unseen   ·   raw /private/tmp/claude-501/-Users-barun-Developers-personal-clickathon-project/8284b3ea-8485-4163-a26e-99792dd28f59/scratchpad/unseen/unseen-day-2026-07-25.csv   ·   content data/ch-hackathon-content-data.csv
+--------------------------------------------------------------------------
+reset: DROP DATABASE sonyliv_unseen — re-loading without this DOUBLES ev_raw (measured; see the note in this script)
+preflight ok · server 26.2.1.525 · database sonyliv_unseen ready and empty
+raw CSV header matches the loader · 30097 data rows
+
+SQL fingerprint (sha256, first 12) — the exact model this run exercised:
+  4a8377de1e08  sql/00_schema.sql
+  de80eaf031af  sql/10_intervals.sql
+  4ffca75940bf  sql/20_views.sql
+  378a3beb54b0  sql/30_build_intervals.sql
+  4e0798d511b4  sql/40_deltas.sql
+  44ee93dbfeae  sql/45_user_concurrency.sql
+  4185899c8f28  sql/50_hour_agg.sql
+  e2e12d5c2311  sql/80_content.sql
+  0b79e4683688  sql/85_windows.sql
+  7f0c373675cf  sql/90_reconcile.sql
+  b153589460f2  tools/load.sh
+  git 5433183 (sql+tools DIRTY — uncommitted changes)
+
+--------------------------------------------------------------------------
+PHASE — 1 schema (00_schema, 10_intervals) — tables + the stateless MV
+--------------------------------------------------------------------------
+  objects: 6 created
+
+--------------------------------------------------------------------------
+PHASE — 2 load (tools/load.sh, unmodified)
+--------------------------------------------------------------------------
+loading content_dim from /Users/barun/Developers/personal/clickathon-project/data/ch-hackathon-content-data.csv ...
+loading ev_raw from /private/tmp/claude-501/-Users-barun-Developers-personal-clickathon-project/8284b3ea-8485-4163-a26e-99792dd28f59/scratchpad/unseen/unseen-day-2026-07-25.csv ...
+loaded into TARGET=cloud:
+   ┌─t───────────┬──rows─┐
+1. │ ev_raw      │ 30097 │
+2. │ content_dim │ 33464 │
+   └─────────────┴───────┘
+  ev_raw 30097 = CSV data rows 30097
+  204 sessions · 137 users · 164 content ids · 2026-07-25 00:00:20.661 -> 2026-07-25 22:43:55.977
+  content_dim 33464 rows
+  cc_minute_stateless 4215 rows (mv_stateless fired during the load)
+  data spans 2026-07-25 00:00:00 .. 2026-07-25 22:43:00  (1 calendar day(s))
+
+--------------------------------------------------------------------------
+PHASE — 3 intervals (30_build_intervals.sql)
+--------------------------------------------------------------------------
+  680 intervals over 204 sessions · 8 still open · 62.6 active hours
+
+--------------------------------------------------------------------------
+PHASE — 4 user tier (45_user_concurrency.sql)
+--------------------------------------------------------------------------
+  cc_user_minute 4236 rows
+
+--------------------------------------------------------------------------
+PHASE — 5 deltas (40_deltas.sql)
+--------------------------------------------------------------------------
+  837 delta rows · opens 455 · closes 384
+
+--------------------------------------------------------------------------
+PHASE — 6 views (20) + hour agg (50) + content (80) + windows (85)
+--------------------------------------------------------------------------
+  cc_hour_agg 1278 rows
+  hour tier says peak 13 @ 2026-07-25 16:35:00
+
+--------------------------------------------------------------------------
+PHASE — 7 the answer (this is what we would submit)
+--------------------------------------------------------------------------
+  session concurrency  peak 13 @ 2026-07-25 16:59:00
+  user concurrency     peak 13
+  stateless baseline   peak 13
+  minutes tied at the peak: 4
+
+--------------------------------------------------------------------------
+PHASE — 8 THE GATE — truth recomputed from ev_raw
+--------------------------------------------------------------------------
+
+G0 — sql/90_reconcile.sql VERBATIM (its five target minutes are 2026-07-26 literals):
+     ZERO ROWS. It compared nothing. tools/reconcile.sh greps the output for
+     the string MISMATCH, finds none, and reports PASS — a VACUOUS PASS.
+
+G1 — same gate, five minutes DERIVED from the loaded day:
+     peak 2026-07-25 16:59:00 · first 2026-07-25 00:00:00 · last 2026-07-25 22:43:00 · q25 2026-07-25 06:59:00 · q75 2026-07-25 16:38:00
+     2026-07-25 00:00:00	1	1	0	PASS
+     2026-07-25 06:59:00	5	5	0	PASS
+     2026-07-25 16:38:00	11	11	0	PASS
+     2026-07-25 16:59:00	13	13	0	PASS
+     2026-07-25 22:43:00	1	1	0	PASS
+
+G2 — same gate over EVERY minute 2026-07-25 00:00:00 .. 2026-07-25 22:43:00, driven off the minute
+     spine so IDLE minutes are compared too (the truth-driven form skips them):
+     1364	207	0	0	13	PASS
+
+--------------------------------------------------------------------------
+TIMINGS — wall clock, this run, 30097 events
+--------------------------------------------------------------------------
+  1 schema (00_schema, 10_intervals) — tables + the stateless MV     5s
+  2 load (tools/load.sh, unmodified)                             9s
+  3 intervals (30_build_intervals.sql)                           2s
+  4 user tier (45_user_concurrency.sql)                          3s
+  5 deltas (40_deltas.sql)                                       3s
+  6 views (20) + hour agg (50) + content (80) + windows (85)    14s
+  7 the answer (this is what we would submit)                    3s
+  8 THE GATE — truth recomputed from ev_raw                    4s
+  TOTAL                                                         47s
+
+--------------------------------------------------------------------------
+VERDICT — GATE PASSED on sonyliv_unseen. peak 13 @ 2026-07-25 16:59:00.
+         WARNING: the committed gate (G0) passed VACUOUSLY — it compared zero
+         minutes. Only G1 and G2 tested anything. sql/90_reconcile.sql must be
+         re-targeted before tools/reconcile.sh means anything on this day.
+--------------------------------------------------------------------------
+
+==========================================================================
+ADVERSARIAL PROBES — run against sonyliv_unseen after the clean run above
+generated 2026-08-01T11:36:10Z
+==========================================================================
+
+--------------------------------------------------------------------------
+P1  THE COMMITTED GATE PASSES VACUOUSLY ON ANY DAY THAT IS NOT 2026-07-26
+--------------------------------------------------------------------------
+reproduce:
+  docker exec -i ch clickhouse-client --host $H --port 9440 --secure \
+    --user $CH_USER --database sonyliv_unseen --multiquery < sql/90_reconcile.sql
+
+rows returned by sql/90_reconcile.sql, verbatim, on the 2026-07-25 database:
+  0
+
+tools/reconcile.sh decides PASS/FAIL with:   grep -q MISMATCH "$OUT"
+On zero rows there is no MISMATCH string, so it exits 0 and prints
+'reconcile PASSED'. Compared: 0 minutes. Claimed: PASS.
+
+It degrades SILENTLY too, not only to zero. On the 2026-07-26 day-file the
+same file returned FOUR rows, not five — the '2026-07-14 15:43:00' target
+(first minute of the 12-day file) does not exist in a one-day load, so it
+vanished from the output. Nothing anywhere asserts the row count.
+
+--------------------------------------------------------------------------
+P2  THE GATE CANNOT SEE A FABRICATED COUNT ON AN IDLE MINUTE
+--------------------------------------------------------------------------
+sql/90_reconcile.sql ends with:   FROM truth AS t LEFT JOIN served AS s
+'truth' is a GROUP BY over a CROSS JOIN, so a minute in which nobody was
+watching emits NO ROW and is never compared — whatever the serving layer
+says about it. 207 of the 1,364 minutes of 2026-07-25 are such minutes.
+
+reproduce (isolated database only):
+  INSERT INTO sonyliv_unseen.cc_minute_delta (minute,platform,country,content_id,delta,starts,ends)
+  SELECT toDateTime('2026-07-25 00:44:00'),'ANDROID_PHONE','india',12345,500,500,0;
+
+serving layer at 2026-07-25 00:44, BEFORE injection:
+  0
+serving layer at 2026-07-25 00:44, AFTER injection:
+  500
+what v_concurrency_minute_delta_total (the chart) now reports for that minute:
+  2026-07-25 00:44:00  500
+truth from ev_raw for that minute (nobody was watching):
+  0
+
+G1 (five derived minutes) WITH the fabricated 500 present:
+  2026-07-25 00:00:00	1	1	0	PASS
+  2026-07-25 06:59:00	5	5	0	PASS
+  2026-07-25 16:38:00	11	11	0	PASS
+  2026-07-25 16:59:00	13	13	0	PASS
+  2026-07-25 22:43:00	1	1	0	PASS
+all-minutes gate, TRUTH-driven (the shape sql/90 uses), WITH the fabricated 500:
+  1157	0	PASS
+all-minutes gate, SPINE-driven (what tools/unseen-run.sh G2 uses), same data:
+  1364	207	16	500	MISMATCH
+
+Two numbers, same minute, same database: served 500, truth 0.
+The committed gate shape says PASS. The spine-driven shape says MISMATCH.
+That is also the negative test proving the hardened gate CAN fail.
+
+restored (TRUNCATE + sql/40_deltas.sql). spine-driven gate on clean data:
+  1364	207	0	0	PASS
+
+--------------------------------------------------------------------------
+P3  A DAY-FILE ANSWERS DIFFERENTLY FROM A FULL-CONTEXT BUILD, AND THE
+    GATE CANNOT SEE IT (truth is recomputed from the SAME truncated ev_raw)
+--------------------------------------------------------------------------
+sessions on 2026-07-25 that also have events outside that day:
+  204 sessions touch the day · 1 also have events BEFORE midnight · 6 also have events AFTER midnight · 583 events a day-file drops
+
+day-file-only (sonyliv_unseen) vs full-context (sonyliv), every minute of 2026-07-25:
+     ┌──────────────minute─┬─day_file_only─┬─full_context─┬─diff─┐
+  1. │ 2026-07-25 00:00:00 │             1 │            0 │    1 │
+  2. │ 2026-07-25 00:40:00 │             0 │            1 │   -1 │
+     └─────────────────────┴───────────────┴──────────────┴──────┘
+
+Both runs' gates say PASS, because each recomputes truth from its own ev_raw.
+The gate proves the PIPELINE, never the INPUT. On 2026-07-26, 7 sessions
+straddle midnight and 1,140 events would be dropped by a same-shaped cut.
+
+--------------------------------------------------------------------------
+P4  'THE PEAK MINUTE' IS AMBIGUOUS UNDER TIES, AND THE TIERS DISAGREE
+--------------------------------------------------------------------------
+minutes tied at the peak on 2026-07-25:
+     ┌──────────────minute─┬─concurrent─┐
+  1. │ 2026-07-25 15:51:00 │         13 │
+  2. │ 2026-07-25 16:35:00 │         13 │
+  3. │ 2026-07-25 16:55:00 │         13 │
+  4. │ 2026-07-25 16:59:00 │         13 │
+     └─────────────────────┴────────────┘
+
+what each serving tier names as the peak minute:
+     ┌─tier───────────────────────────────────────────┬─peak_minute─────────┬─peak─┐
+  1. │ hour tier (cc_hour_agg, all-dims level)        │ 2026-07-25 16:35:00 │ 13   │
+  2. │ minute tier (v_concurrency_minute_delta_total) │ 2026-07-25 16:59:00 │ 13   │
+     └────────────────────────────────────────────────┴─────────────────────┴──────┘
+
+16:59 vs 16:35 — same peak value, different answer to 'when'. On 2026-07-26
+the peak (2,887) is unique so this never surfaced. A low-traffic or flat
+unseen day surfaces it immediately.
+
+--------------------------------------------------------------------------
+P5  AGGREGATINGMERGETREE ROW COUNTS ARE NOT A STABLE IDENTITY
+--------------------------------------------------------------------------
+  cc_minute_delta: 837 physical rows but 835 distinct keys · net 71 · opens 455 · closes 384
+Two identical builds of this day printed 835 and 837 rows. The aggregates
+(net/opens/closes) were identical both times. WALKTHROUGH.md and
+tools/build-model.sh both quote raw count() as if it identified a build.
+
+--------------------------------------------------------------------------
+P6  THE GATE SHARES THE MODEL'S VOCABULARY, SO A SPEC ERROR IS INVISIBLE
+--------------------------------------------------------------------------
+Pause exclusion is keyed to two exact lowercase strings, in BOTH the model
+and the gate that is supposed to be checking the model:
+  sql/30_build_intervals.sql:99:            arraySort(groupArrayIf(toUnixTimestamp(event_timestamp), event = 'pause'))  AS pauses,
+  sql/30_build_intervals.sql:100:            arraySort(groupArrayIf(toUnixTimestamp(event_timestamp), event = 'resume')) AS resumes,
+  sql/90_reconcile.sql:77:            arraySort(groupArrayIf(toUInt32(event_timestamp), event = 'pause'))  AS ps,
+  sql/90_reconcile.sql:78:            arraySort(groupArrayIf(toUInt32(event_timestamp), event = 'resume')) AS rs
+
+GAP_S and TAIL_S are likewise duplicated, not shared:
+  sql/90_reconcile.sql:18:    150 AS GAP_S,
+  sql/90_reconcile.sql:19:    60  AS TAIL_S,
+  sql/30_build_intervals.sql:70:    150 AS GAP_S,
+  sql/30_build_intervals.sql:73:    60  AS TAIL_S,
+
+The delivered file has 47 distinct `event` values, several pause-like but
+NOT matching: speed-pause (380), speed-resume (380), AdPause (45),
+AdResume (27). If the unseen day renames or re-cases pause/resume, pause
+exclusion silently becomes a no-op — and the gate keeps saying PASS,
+because it computes truth with the same two literals.
+
+Blast radius, measured by re-running sql/30_build_intervals.sql with
+  sed -e "s|event = 'pause'|event = '__no_such_event__'|"
+into a side table in the same database:
+     ┌─model───────────────────────────┬─intervals─┬─active_hours─┐
+  1. │ with pause exclusion (shipped)  │       680 │        62.56 │
+  2. │ pause vocabulary does not match │       316 │        71.68 │
+     └─────────────────────────────────┴───────────┴──────────────┘
+
+  62.56 h -> 71.68 h : a 14.6% over-count of counted watch time, green gate.
+  Mitigation is a check, not code. On the unseen day, before trusting any
+  number:  SELECT event, count() FROM ev_raw GROUP BY event ORDER BY 2 DESC
+
+==========================================================================
+SCALE RUN — the same script over a FULL-SIZE day (2026-07-26, 849,888 events)
+==========================================================================
+
+Purpose: a measured wall clock at the size the unseen day will be, instead
+of an extrapolation from a 30k-event holdout. Throwaway database
+sonyliv_unseen_scale, dropped immediately after.
+
+  UNSEEN_DB=sonyliv_unseen_scale tools/unseen-run.sh <2026-07-26.csv> data/ch-hackathon-content-data.csv
+
+ loading content_dim from /Users/barun/Developers/personal/clickathon-project/data/ch-hackathon-content-data.csv ...
+ 2. │ content_dim │  33464 │
+   ev_raw 849888 = CSV data rows 849888
+   10524 sessions · 9455 users · 3229 content ids · 2026-07-26 00:10:32.786 -> 2026-07-26 11:30:04.847
+   content_dim 33464 rows
+   cc_minute_stateless 83648 rows (mv_stateless fired during the load)
+   data spans 2026-07-26 00:10:00 .. 2026-07-26 11:30:00  (1 calendar day(s))
+   29560 intervals over 10523 sessions · 0 still open · 1836.6 active hours
+   cc_user_minute 83250 rows
+   26691 delta rows · opens 19235 · closes 16236
+   cc_hour_agg 23684 rows
+   hour tier says peak 2887 @ 2026-07-26 10:56:00
+   session concurrency  peak 2887 @ 2026-07-26 10:56:00
+   user concurrency     peak 2815
+   stateless baseline   peak 2894
+   minutes tied at the peak: 1
+
+  gate G0 (verbatim — and this IS 2026-07-26, so its literals do match):
+  G0 — sql/90_reconcile.sql VERBATIM (its five target minutes are 2026-07-26 literals):
+       2026-07-26 06:09:00	16	16	0	PASS
+       2026-07-26 10:56:00	2887	2887	0	PASS
+       2026-07-26 11:10:00	2450	2450	0	PASS
+       2026-07-26 11:31:00	5	5	0	PASS
+  
+  gates G1 and G2:
+  G1 — same gate, five minutes DERIVED from the loaded day:
+       peak 2026-07-26 10:56:00 · first 2026-07-26 00:10:00 · last 2026-07-26 11:30:00 · q25 2026-07-26 03:22:00 · q75 2026-07-26 08:48:00
+       2026-07-26 00:10:00	1	1	0	PASS
+       2026-07-26 03:22:00	2	2	0	PASS
+       2026-07-26 08:48:00	29	29	0	PASS
+       2026-07-26 10:56:00	2887	2887	0	PASS
+       2026-07-26 11:30:00	193	193	0	PASS
+  
+  G2 — same gate over EVERY minute 2026-07-26 00:10:00 .. 2026-07-26 11:30:00, driven off the minute
+       spine so IDLE minutes are compared too (the truth-driven form skips them):
+       681	42	0	0	2887	PASS
+  
+  --------------------------------------------------------------------------
+TIMINGS — wall clock, this run, 849888 events
+--------------------------------------------------------------------------
+  1 schema (00_schema, 10_intervals) — tables + the stateless MV     5s
+  2 load (tools/load.sh, unmodified)                            18s
+  3 intervals (30_build_intervals.sql)                           3s
+  4 user tier (45_user_concurrency.sql)                          4s
+  5 deltas (40_deltas.sql)                                       3s
+  6 views (20) + hour agg (50) + content (80) + windows (85)    14s
+  7 the answer (this is what we would submit)                    2s
+  8 THE GATE — truth recomputed from ev_raw                    5s
+  TOTAL                                                         58s
+
+  KEY RESULT 1: 849,888 events end to end in 58 s — 28x the events of the
+  holdout for 1.23x the wall clock. The path is fixed-cost dominated (DDL,
+  view creation, HTTP round trips), not volume dominated. Only the load
+  phase tracks size: ~0.082 s per MB of CSV.
+
+  KEY RESULT 2: built from a SINGLE DAY-FILE, with none of the preceding 11
+  days present, the model reproduces production's answer EXACTLY:
+  peak 2,887 @ 2026-07-26 10:56 (sonyliv is built from all 905,558 events).
+
+  KEY RESULT 3: G0 returned FOUR rows here, not five. Its
+  '2026-07-14 15:43:00' literal does not exist in a one-day load, so that
+  target silently vanished. Nothing in tools/reconcile.sh asserts a row
+  count, so a gate that quietly stops testing one of its five minutes still
+  reports PASS.
