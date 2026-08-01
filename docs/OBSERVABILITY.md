@@ -8,6 +8,14 @@
 > the OTLP/HTTP JSON mapping is small and stable and the SDK's log bridge is still experimental. Every
 > claim below was executed, not reasoned about — see "Verified end to end".
 
+**The hosted twin.** The ClickHouse Cloud service has **no OTLP path** (no `otel_*` tables), so the
+metrics below cannot land there. `tools/clickstack-cloud.sh` therefore builds **"SonyLIV pipeline
+health (cloud)"** on the hosted HyperDX from the same three signals cloud-natively: `v_cc_watermark`
+directly, build stages from `system.query_log` with the exact filters `internal/pipelinehealth`
+uses, and reconcile-gate *runs* by their read set (`ev_raw` AND `cc_minute_delta`). What the hosted
+twin cannot show is the gate's PASS/FAIL **verdict** — that lives in `evidence/reconcile.txt` and in
+`sonyliv.reconcile.gate_pass` here, which is precisely why this OTLP emitter still earns its keep.
+
 ## Why this file exists
 
 The rubric test is: *if I delete ClickStack, does the demo stop doing something a judge saw?* Before
@@ -29,6 +37,21 @@ elsewhere. Delete ClickStack and that indicator has nowhere to come from.
 | `sonyliv.reconcile.gate_pass` | `evidence/reconcile.txt`, parsed | Whether THE GATE (`sql/90_reconcile.sql`) passed last time it ran. A correctness gate flipping to FAIL belongs in an observability tool and exists nowhere else. |
 | `sonyliv.reconcile.max_abs_delta` | ″ | The size of the failure, not just pass/fail — `0` normally, `37` was the real historical incremental-absorption bug (TESTS.md). |
 | `sonyliv.reconcile.evidence_age_seconds` | ″ (file mtime) | The gate's own freshness — how stale the "PASS" you're looking at actually is. |
+
+### `hour_tier_complete=false` is the expected reading on this dataset
+
+Do not treat it as a fault. The flag is `raw_wm >= last_hour + 1h` — is the newest *stored* hour
+already sealed? On the supplied data the last event is `2026-07-26 11:30:04.847`, and the newest
+stored hour is `11:00`, which does not end until `12:00`. The hour is genuinely still partial, so
+`false` is the truthful answer and would stay `false` no matter how many times the model is
+rebuilt. It flips to `true` only once data arrives past the hour boundary — which on a static
+file never happens.
+
+This is the same class as the gate's `TAIL_S` note at `2026-07-26 11:31`: an artifact of a
+dataset that stops mid-interval, not a pipeline defect. Verified live 2026-08-01 with
+`healthy=true` and `pass=true` alongside it. Anyone demoing `sonyliv observe` should expect to be
+asked about this line and should have this answer ready, because "one of your health flags says
+false" is the obvious question.
 
 Each metric is also mirrored as a `severityText`-appropriate **log line** (lower-case
 `info`/`warn`/`error` — see Gotchas) sharing the run's `trace_id`, and the whole run is one **trace**:
@@ -115,6 +138,13 @@ info   build stage session_intervals: 1525ms, 121492 rows written, last ran 2m7s
 info   build stage cc_minute_delta: 1020ms, 28139 rows written, last ran 2m5s ago
 info   reconcile gate: PASS (5/5 minutes agree, evidence commit 3c081ff, 1m54s old)
 ```
+
+(That log line predates the hardened gate. Since 2026-08-01 the parser reads the gate's SUMMARY row
+rather than counting sample rows, and the line reads
+`reconcile gate: PASS (17028 minutes compared, 0 mismatched, peak 2887, evidence commit d6c85e2, …)`.
+A file with no parseable SUMMARY — empty, malformed, or pre-81c0161 — logs
+`FAIL — no SUMMARY row parsed` and `gate_pass=0`: unreadable evidence fails loudly instead of
+passing silently.)
 
 `SeverityText` came back **lower-case** exactly as written — confirms VERIFIED.md's `severity:error`
 filtering fact against this emitter specifically, not just the general claim.
