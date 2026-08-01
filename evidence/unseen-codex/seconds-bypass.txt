@@ -1,0 +1,99 @@
+UNSEEN-DAY RUN
+generated 2026-08-01T22:04:32Z   commit c85dcd2
+target database codex006_unseen_seconds_1aa9   ·   raw /tmp/codex006-fixtures.Ol8TVe/data/one-session-seconds.csv   ·   content /tmp/codex006-fixtures.Ol8TVe/data/unseen-synthetic-content.csv
+--------------------------------------------------------------------------
+reset: DROP DATABASE codex006_unseen_seconds_1aa9 — re-loading without this DOUBLES ev_raw (measured; see the note in this script)
+preflight ok · server 26.2.1.525 · database codex006_unseen_seconds_1aa9 ready and empty
+raw CSV header matches the loader · 49 data rows
+
+SQL fingerprint (sha256, first 12) — the exact model this run exercised:
+  125d80b9b5aa  sql/00_schema.sql
+  de80eaf031af  sql/10_intervals.sql
+  4ffca75940bf  sql/20_views.sql
+  6ba8c21fb5f8  sql/30_build_intervals.sql
+  d1dfeb14c894  sql/40_deltas.sql
+  764ee4c5d810  sql/45_user_concurrency.sql
+  20fefccc4705  sql/50_hour_agg.sql
+  15525d8870b4  sql/80_content.sql
+  0e278f3516e3  sql/85_windows.sql
+  be6a7a4f2e0f  sql/90_reconcile.sql
+  57ee555121dd  tools/load.sh
+  git c85dcd2 (sql+tools clean)
+
+--------------------------------------------------------------------------
+PHASE — 1 schema (00_schema, 10_intervals) — tables + the stateless MV
+--------------------------------------------------------------------------
+  objects: 6 created
+
+--------------------------------------------------------------------------
+PHASE — 2 load (tools/load.sh, unmodified)
+--------------------------------------------------------------------------
+target=cloud  database=codex006_unseen_seconds_1aa9  (from --database)  mode=refuse
+loading content_dim from /tmp/codex006-fixtures.Ol8TVe/data/unseen-synthetic-content.csv ...
+loading ev_raw from /tmp/codex006-fixtures.Ol8TVe/data/one-session-seconds.csv ...
+loaded into TARGET=cloud, database codex006_unseen_seconds_1aa9:
+   ┌─t───────────┬─before─┬─rows─┬─added─┐
+1. │ ev_raw      │      0 │   49 │    49 │
+2. │ content_dim │      0 │   29 │    29 │
+   └─────────────┴────────┴──────┴───────┘
+  ev_raw 49 = CSV data rows 49
+  1 sessions · 1 users · 1 content ids · 1970-01-21 16:20:24.000 -> 1970-01-21 16:20:25.800
+  content_dim 29 rows
+  cc_minute_stateless 1 rows (mv_stateless fired during the load)
+  data spans 1970-01-21 16:20:00 .. 1970-01-21 16:20:00  (1 calendar day(s))
+
+--------------------------------------------------------------------------
+PHASE — 3 intervals (30_build_intervals.sql)
+--------------------------------------------------------------------------
+  1 intervals over 1 sessions · 0 still open · 0 active hours
+
+--------------------------------------------------------------------------
+PHASE — 4 user tier (45_user_concurrency.sql)
+--------------------------------------------------------------------------
+  cc_user_minute 2 rows
+
+--------------------------------------------------------------------------
+PHASE — 5 deltas (40_deltas.sql)
+--------------------------------------------------------------------------
+  2 delta rows · opens 1 · closes 1
+
+--------------------------------------------------------------------------
+PHASE — 6 views (20) + hour agg (50) + content (80) + windows (85)
+--------------------------------------------------------------------------
+  cc_hour_agg 8 rows
+  hour tier says peak 1 @ 1970-01-21 16:20:00
+
+--------------------------------------------------------------------------
+PHASE — 7 the answer (this is what we would submit)
+--------------------------------------------------------------------------
+  session concurrency  peak 1 @ 1970-01-21 16:20:00  (earliest tied minute — ADR 0014)
+  user concurrency     peak 1
+  stateless baseline   peak 1
+  minutes tied at the peak: 1  (dense spine; the change-point count under-reports)
+
+--------------------------------------------------------------------------
+PHASE — 8 THE GATE — truth recomputed from ev_raw
+--------------------------------------------------------------------------
+
+sql/90_reconcile.sql, verbatim (SUMMARY + up to 20 mismatches + 5 samples):
+     0	SUMMARY	minutes_compared=1	mismatched=0	max_abs_diff=0	peak=1	PASS
+     2	sample	1970-01-21 16:20:00	1	1	0	PASS
+
+     asserted: minutes_compared=1 equals the day's spine (1970-01-21 16:20:00 .. 1970-01-21 16:20:00)
+
+--------------------------------------------------------------------------
+TIMINGS — wall clock, this run, 49 events
+--------------------------------------------------------------------------
+  1 schema (00_schema, 10_intervals) — tables + the stateless MV     7s
+  2 load (tools/load.sh, unmodified)                            11s
+  3 intervals (30_build_intervals.sql)                           2s
+  4 user tier (45_user_concurrency.sql)                          3s
+  5 deltas (40_deltas.sql)                                       3s
+  6 views (20) + hour agg (50) + content (80) + windows (85)    19s
+  7 the answer (this is what we would submit)                    3s
+  8 THE GATE — truth recomputed from ev_raw                    2s
+  TOTAL                                                         52s
+
+--------------------------------------------------------------------------
+VERDICT — GATE PASSED on codex006_unseen_seconds_1aa9. peak 1 @ 1970-01-21 16:20:00 (earliest tied minute).
+--------------------------------------------------------------------------
