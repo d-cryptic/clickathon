@@ -116,6 +116,13 @@ info   build stage cc_minute_delta: 1020ms, 28139 rows written, last ran 2m5s ag
 info   reconcile gate: PASS (5/5 minutes agree, evidence commit 3c081ff, 1m54s old)
 ```
 
+(That log line predates the hardened gate. Since 2026-08-01 the parser reads the gate's SUMMARY row
+rather than counting sample rows, and the line reads
+`reconcile gate: PASS (17028 minutes compared, 0 mismatched, peak 2887, evidence commit d6c85e2, …)`.
+A file with no parseable SUMMARY — empty, malformed, or pre-81c0161 — logs
+`FAIL — no SUMMARY row parsed` and `gate_pass=0`: unreadable evidence fails loudly instead of
+passing silently.)
+
 `SeverityText` came back **lower-case** exactly as written — confirms VERIFIED.md's `severity:error`
 filtering fact against this emitter specifically, not just the general claim.
 
