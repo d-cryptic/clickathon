@@ -38,6 +38,21 @@ elsewhere. Delete ClickStack and that indicator has nowhere to come from.
 | `sonyliv.reconcile.max_abs_delta` | ″ | The size of the failure, not just pass/fail — `0` normally, `37` was the real historical incremental-absorption bug (TESTS.md). |
 | `sonyliv.reconcile.evidence_age_seconds` | ″ (file mtime) | The gate's own freshness — how stale the "PASS" you're looking at actually is. |
 
+### `hour_tier_complete=false` is the expected reading on this dataset
+
+Do not treat it as a fault. The flag is `raw_wm >= last_hour + 1h` — is the newest *stored* hour
+already sealed? On the supplied data the last event is `2026-07-26 11:30:04.847`, and the newest
+stored hour is `11:00`, which does not end until `12:00`. The hour is genuinely still partial, so
+`false` is the truthful answer and would stay `false` no matter how many times the model is
+rebuilt. It flips to `true` only once data arrives past the hour boundary — which on a static
+file never happens.
+
+This is the same class as the gate's `TAIL_S` note at `2026-07-26 11:31`: an artifact of a
+dataset that stops mid-interval, not a pipeline defect. Verified live 2026-08-01 with
+`healthy=true` and `pass=true` alongside it. Anyone demoing `sonyliv observe` should expect to be
+asked about this line and should have this answer ready, because "one of your health flags says
+false" is the obvious question.
+
 Each metric is also mirrored as a `severityText`-appropriate **log line** (lower-case
 `info`/`warn`/`error` — see Gotchas) sharing the run's `trace_id`, and the whole run is one **trace**:
 root span `sonyliv.observe.run` with child spans `pipeline.watermark.query`,
