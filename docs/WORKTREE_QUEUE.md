@@ -12,6 +12,31 @@
 
 ---
 
+## Currently claimed — 2026-08-01, 10 slots
+
+Ownership is **exclusive**: an agent edits only the files in its row. Collisions between running
+agents cost more than the work is worth. ADR numbers are **assigned here, centrally** — three
+agents once all created ADR 0009 because their briefs said "next free number", and repairing it
+touched ten files.
+
+| # | Branch | Owns | ADR |
+|---|---|---|---|
+| Q2 | `fix/incremental-publisher-tiers` | `sql/12_publish.sql`, `tools/publish*.sh` | 0015 |
+| Q12 | `feat/benchmark-evidence-bundle` | `evidence/benchmark/`, `.claude/commands/bench.md` | — |
+| Q4 | `docs/scope-claims` | `TODOS.md`, `WALKTHROUGH.md`, `docs/ARCHITECTURE.md` | — |
+| Q3·Q5 | `docs/validation-dossiers-grain` | `doubts/05-*.md`, `evidence/dedup.txt` | 0016 |
+| Q13 | `feat/clickstack-dashboards-sources` | `tools/clickstack-*.sh`, `docs/CLICKSTACK*.md`, `evidence/clickstack/` | — |
+| Q14 | `feat/demo-rehearsal` | `demo/`, `evidence/demo/` | — |
+| Q15 | `fix/ci-and-coverage` | `Makefile`, `.golangci.yml`, Go **test** files | — |
+| Q16 | `fix/target-resolution` | `internal/config/`, `tools/ch`, `.env.example` | **0018** |
+| Q18 | `chore/unseen-day-rehearsal` | `docs/RUNBOOK_UNSEEN.md`, `tools/unseen-*.sh`, `evidence/unseen/` | — |
+| — | `feat/problem-space-research` | idle · 9 unmerged commits · **competing design, needs a human call** | — |
+
+**Held back deliberately.** Q8–Q11 (publisher crash window, concurrent publishers, `marked_at`
+identity, retention bound) all live in `tools/publish.sh` and `sql/12_publish.sql`, which Q2
+owns right now. They are queued behind it, not forgotten. Q7 and Q17 (doc hygiene) overlap the
+files `docs/scope-claims` holds.
+
 ## Tier 0 · Correctness, and it is invisible to our own gate
 
 | # | Work | Owns | Done when |
