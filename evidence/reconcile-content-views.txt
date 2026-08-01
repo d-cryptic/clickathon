@@ -1,0 +1,53 @@
+RECONCILE — isolated verification for sql/80_content.sql (ADR 0009)
+target: cloud, database sonyliv_verify   commit: 8af15cb   2026-08-01T13:12:50Z
+
+WHY AN ISOLATED DATABASE: at the time of this run another session was rebuilding
+session_intervals / cc_minute_delta in the graded `sonyliv` (five TRUNCATE+rebuild
+cycles between 12:55:05 and 13:02:42, all BEFORE this change's first DDL at 13:03:22),
+leaving it 28,074 delta rows and failing its own gate by up to 39 at the peak.
+sonyliv_verify is the FULL model rebuilt from committed sql/ over a copy of sonyliv.ev_raw,
+including sql/80_content.sql applied with --database sonyliv_verify.
+
+== model built from committed SQL
+   ev_raw 905,558 · content_dim 33,464 · session_intervals 30,769 · cc_minute_delta 28,139 (= ADR 0008)
+
+== THE GATE — truth recomputed from ev_raw
+   ┌─ord─┬─scope───┬─c1─────────────────────┬─c2───────────┬─c3─────────────┬─c4────────┬─verdict─┐
+1. │   0 │ SUMMARY │ minutes_compared=17028 │ mismatched=0 │ max_abs_diff=0 │ peak=2887 │ PASS    │
+2. │   2 │ sample  │ 2026-07-14 15:43:00    │ 1            │ 1              │ 0         │ PASS    │
+3. │   2 │ sample  │ 2026-07-16 12:35:00    │ 0            │ 0              │ 0         │ PASS    │
+4. │   2 │ sample  │ 2026-07-17 08:56:00    │ 0            │ 0              │ 0         │ PASS    │
+5. │   2 │ sample  │ 2026-07-26 10:56:00    │ 2887         │ 2887           │ 0         │ PASS    │
+6. │   2 │ sample  │ 2026-07-26 11:30:00    │ 193          │ 193            │ 0         │ PASS    │
+   └─────┴─────────┴────────────────────────┴──────────────┴────────────────┴───────────┴─────────┘
+
+== 80_content.sql is database-agnostic (ADR 0009 issue 1)
+Row 1:
+──────
+dict_source:            ClickHouse: sonyliv_verify.content_dim
+defs_naming_production: 0
+baked_dict_name:        dictGet('sonyliv_verify.dict_content'
+
+== content answers on THIS build
+   ┌─video_type─┬─peak─┐
+1. │ vod        │ 2375 │
+2. │ live       │  462 │
+3. │ (blank)    │   96 │
+   └────────────┴──────┘
+   ┌─title─────┬─catalog_content_ids─┬─peak─┐
+1. │ wekek ked │                   2 │  428 │
+2. │ dijoj jeh │                   1 │  102 │
+3. │ verar feg │                   1 │   77 │
+4. │ fabeb bec │                   1 │   64 │
+5. │ dakuk keg │                   1 │   60 │
+   └───────────┴─────────────────────┴──────┘
+   ┌─orphan_content_ids─┬─orphan_events─┐
+1. │                  0 │             0 │
+   └────────────────────┴───────────────┘
+
+== SAME-MODEL before/after, taken on `sonyliv` across one apply (nothing moved)
+   peak by video_type   before: vod 2404 · live 468 · '' 97
+                         after: vod 2404 · live 468 · (blank) 97
+   top-3 titles         before: wekek ked 433 · dijoj jeh 102 · verar feg 77
+                         after: identical, + catalog_content_ids 2 · 1 · 1
+   v_content_orphan_check  before 0/0   after 0/0

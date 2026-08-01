@@ -1,0 +1,158 @@
+LOAD-GUARD EVIDENCE — tools/load.sh + tools/apply-sql.sh
+generated 2026-08-01T13:20:46Z   host pnyj8ql3jw…clickhouse.cloud
+reproduce: tools/load-guard-test.sh
+==========================================================================
+load-guard test · commit 8af15cb
+cloud pnyj8ql3jw.asia-northeast1.gcp.clickhouse.cloud · scratch sonyliv_lgtest_a, sonyliv_lgtest_b · local scratch_lgtest · 200 synthetic rows
+graded sonyliv.ev_raw before: 905558 (must not move)
+
+-- 1  schema into the scratch databases, by --database ------------------------------------------------
+  PASS  sonyliv_lgtest_a tables = 2
+  PASS  sonyliv_lgtest_b tables = 2
+
+-- 2  first load into an empty database succeeds ------------------------------------------------
+  PASS  sonyliv_lgtest_a.ev_raw = 200
+
+-- 3  DEFECT 1 — the same load again, no flag, MUST be refused ------------------------------------------------
+  PASS  exit code = 1
+  PASS  said REFUSING TO LOAD
+  PASS  sonyliv_lgtest_a.ev_raw unchanged = 200
+
+-- 4  doubling is still reachable, but only via --append, and it announces itself ------------------------------------------------
+  PASS  said ADDING TO EXISTING DATA
+  PASS  sonyliv_lgtest_a.ev_raw doubled on purpose = 400
+
+-- 5  --replace truncates and reloads, so it is repeatable ------------------------------------------------
+  PASS  sonyliv_lgtest_a.ev_raw after two --replace runs = 200
+
+-- 6  DEFECT 2 — CH_DATABASE in the ENVIRONMENT beats the .env beside the loader ------------------------------------------------
+  PASS  sonyliv_lgtest_b.ev_raw (asked for) = 200
+  PASS  sonyliv_lgtest_a.ev_raw (not asked for) = 200
+
+-- 7  --database contradicting an exported CH_DATABASE is an error ------------------------------------------------
+  PASS  exit code = 1
+  PASS  named the contradiction
+
+-- 8  no database anywhere is an error, not a guess ------------------------------------------------
+  PASS  exit code = 1
+  PASS  said no database
+  PASS  apply-sql.sh contradiction exit code = 1
+  PASS  apply-sql.sh missing-database exit code = 1
+  PASS  apply-sql.sh said the database does not exist
+
+-- 9  a database that does not exist is an error before anything is written ------------------------------------------------
+  PASS  exit code = 1
+  PASS  said the database does not exist
+
+-- 10  DEFECT 2, local — the local path used to ignore the database entirely ------------------------------------------------
+  PASS  scratch_lgtest tables = 2
+  PASS  scratch_lgtest.ev_raw = 200
+  PASS  local default.ev_raw untouched = 905558
+
+-- 11  local honours CH_DATABASE_LOCAL with no flag at all ------------------------------------------------
+  PASS  exit code (refused: scratch_lgtest is not empty) = 1
+  PASS  resolved to scratch_lgtest, not default
+  PASS  local default.ev_raw still untouched = 905558
+
+-- 12  the graded database was never written ------------------------------------------------
+  PASS  sonyliv.ev_raw = 905558
+
+------------------------------------------------------------
+load-guard test PASSED · 27 assertions
+------------------------------------------------------------
+
+==========================================================================
+CONTROL — the SAME test against the PRE-FIX scripts (git 8af15cb), so the
+guards above are shown to be doing the work rather than being decoration.
+==========================================================================
+load-guard test · commit 8af15cb
+cloud pnyj8ql3jw.asia-northeast1.gcp.clickhouse.cloud · scratch sonyliv_lgtest_a, sonyliv_lgtest_b · local scratch_lgtest · 200 synthetic rows
+graded sonyliv.ev_raw before: 905558 (must not move)
+
+-- 1  schema into the scratch databases, by --database ------------------------------------------------
+no such file: --database
+no such file: --database
+  FAIL  sonyliv_lgtest_a tables: expected 2, got 0
+  FAIL  sonyliv_lgtest_b tables: expected 2, got 0
+
+-- 2  first load into an empty database succeeds ------------------------------------------------
+curl: (22) The requested URL returned error: 404
+  FAIL  sonyliv_lgtest_a.ev_raw: expected 200, got Code: 60. DB::Exception: Unknown table expression identifier 'sonyliv_lgtest_a.ev_raw' in scope SELECT count() FROM sonyliv_lgtest_a.ev_raw. (UNKNOWN_TABLE) (version 26.2.1.525 (official build))
+
+-- 3  DEFECT 1 — the same load again, no flag, MUST be refused ------------------------------------------------
+  PASS  exit code = 1
+  FAIL  no refusal banner in output
+curl: (22) The requested URL returned error: 404
+  FAIL  sonyliv_lgtest_a.ev_raw unchanged: expected 200, got Code: 60. DB::Exception: Unknown table expression identifier 'sonyliv_lgtest_a.ev_raw' in scope SELECT count() FROM sonyliv_lgtest_a.ev_raw. (UNKNOWN_TABLE) (version 26.2.1.525 (official build))
+
+-- 4  doubling is still reachable, but only via --append, and it announces itself ------------------------------------------------
+  FAIL  no append banner
+curl: (22) The requested URL returned error: 404
+  FAIL  sonyliv_lgtest_a.ev_raw doubled on purpose: expected 400, got Code: 60. DB::Exception: Unknown table expression identifier 'sonyliv_lgtest_a.ev_raw' in scope SELECT count() FROM sonyliv_lgtest_a.ev_raw. (UNKNOWN_TABLE) (version 26.2.1.525 (official build))
+
+-- 5  --replace truncates and reloads, so it is repeatable ------------------------------------------------
+curl: (22) The requested URL returned error: 404
+  FAIL  sonyliv_lgtest_a.ev_raw after two --replace runs: expected 200, got Code: 60. DB::Exception: Unknown table expression identifier 'sonyliv_lgtest_a.ev_raw' in scope SELECT count() FROM sonyliv_lgtest_a.ev_raw. (UNKNOWN_TABLE) (version 26.2.1.525 (official build))
+
+-- 6  DEFECT 2 — CH_DATABASE in the ENVIRONMENT beats the .env beside the loader ------------------------------------------------
+curl: (22) The requested URL returned error: 404
+curl: (22) The requested URL returned error: 404
+curl: (22) The requested URL returned error: 404
+  FAIL  sonyliv_lgtest_b.ev_raw (asked for): expected 200, got Code: 60. DB::Exception: Unknown table expression identifier 'sonyliv_lgtest_b.ev_raw' in scope SELECT count() FROM sonyliv_lgtest_b.ev_raw. (UNKNOWN_TABLE) (version 26.2.1.525 (official build))
+curl: (22) The requested URL returned error: 404
+  PASS  sonyliv_lgtest_a.ev_raw (not asked for) = Code: 60. DB::Exception: Unknown table expression identifier 'sonyliv_lgtest_a.ev_raw' in scope SELECT count() FROM sonyliv_lgtest_a.ev_raw. (UNKNOWN_TABLE) (version 26.2.1.525 (official build))
+
+-- 7  --database contradicting an exported CH_DATABASE is an error ------------------------------------------------
+  PASS  exit code = 1
+  FAIL  did not name the contradiction
+
+-- 8  no database anywhere is an error, not a guess ------------------------------------------------
+  PASS  exit code = 1
+  FAIL  did not say no database
+  PASS  apply-sql.sh contradiction exit code = 1
+  PASS  apply-sql.sh missing-database exit code = 1
+  FAIL  wrong message
+
+-- 9  a database that does not exist is an error before anything is written ------------------------------------------------
+  PASS  exit code = 1
+  FAIL  wrong message
+
+-- 10  DEFECT 2, local — the local path used to ignore the database entirely ------------------------------------------------
+no such file: --database
+  FAIL  scratch_lgtest tables: expected 2, got 0
+Received exception from server (version 26.7.1):
+Code: 60. DB::Exception: Received from localhost:9000. DB::Exception: Unknown table expression identifier 'scratch_lgtest.ev_raw' in scope SELECT count() FROM scratch_lgtest.ev_raw. Maybe you meant default.ev_raw?. (UNKNOWN_TABLE)
+(query: SELECT count() FROM scratch_lgtest.ev_raw FORMAT TSVRaw)
+  FAIL  scratch_lgtest.ev_raw: expected 200, got 
+  PASS  local default.ev_raw untouched = 905558
+
+-- 11  local honours CH_DATABASE_LOCAL with no flag at all ------------------------------------------------
+  FAIL  exit code (refused: scratch_lgtest is not empty): expected 1, got 0
+  FAIL  did not resolve to scratch_lgtest
+  FAIL  local default.ev_raw still untouched: expected 905558, got 905758
+
+-- 12  the graded database was never written ------------------------------------------------
+  PASS  sonyliv.ev_raw = 905558
+
+------------------------------------------------------------
+load-guard test FAILED · 18 of 27 assertions
+------------------------------------------------------------
+
+--------------------------------------------------------------------------
+WHAT THE CONTROL RUN DID TO THE MACHINE — the point of defect 2
+--------------------------------------------------------------------------
+Case 11 asks for CH_DATABASE_LOCAL=scratch_lgtest with no --database flag.
+
+  fixed scripts   the loader resolved scratch_lgtest, found it non-empty, refused,
+                  and local default.ev_raw stayed at 905,558.
+  pre-fix scripts the local branch passed no --database at all, so the load landed
+                  in local `default`: 905,558 -> 905,758 rows, exit 0, no warning.
+                  Its content row (content_id -777001) also landed in
+                  default.content_dim, which is a ReplacingMergeTree keyed on
+                  content_id — a colliding id would have silently replaced a real
+                  title at the next merge. Both were removed afterwards by
+                  predicate (ALTER ... DELETE), and the table verified back at
+                  905,558 / 33,464 with zero `lgtest-` rows.
+
+That is the whole failure mode in one line: the configuration said one database,
+the write went to another, and nothing anywhere said so.

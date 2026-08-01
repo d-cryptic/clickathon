@@ -96,8 +96,8 @@ CREATE TABLE IF NOT EXISTS sonyliv_trunc.cc_minute_delta
     audio_language    LowCardinality(String),
     app_version       LowCardinality(String),
     delta       SimpleAggregateFunction(sum, Int64),
-    starts      SimpleAggregateFunction(sum, UInt64),
-    ends        SimpleAggregateFunction(sum, UInt64)
+    starts      SimpleAggregateFunction(sum, Int64),
+    ends        SimpleAggregateFunction(sum, Int64)
 )
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMMDD(minute)
@@ -154,8 +154,8 @@ CREATE TABLE IF NOT EXISTS sonyliv_trunc.cc_minute_delta_control
     audio_language    LowCardinality(String),
     app_version       LowCardinality(String),
     delta       SimpleAggregateFunction(sum, Int64),
-    starts      SimpleAggregateFunction(sum, UInt64),
-    ends        SimpleAggregateFunction(sum, UInt64)
+    starts      SimpleAggregateFunction(sum, Int64),
+    ends        SimpleAggregateFunction(sum, Int64)
 )
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMMDD(minute)
@@ -202,8 +202,8 @@ CREATE TABLE IF NOT EXISTS sonyliv_trunc.cc_minute_delta_stump
     audio_language    LowCardinality(String),
     app_version       LowCardinality(String),
     delta       SimpleAggregateFunction(sum, Int64),
-    starts      SimpleAggregateFunction(sum, UInt64),
-    ends        SimpleAggregateFunction(sum, UInt64)
+    starts      SimpleAggregateFunction(sum, Int64),
+    ends        SimpleAggregateFunction(sum, Int64)
 )
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMMDD(minute)
@@ -300,13 +300,13 @@ GROUP BY minute;
 
 -- ---------------------------------------------------------------------------
 -- Two-row probe for the second finding: `starts` / `ends` are
--- SimpleAggregateFunction(sum, UInt64), so the negative corrective row ADR 0006
+-- SimpleAggregateFunction(sum, Int64), so the negative corrective row ADR 0006
 -- mandates cannot be represented. Inserting -100 stores 2^64-100 silently.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS sonyliv_trunc.probe_uint
 (
     k      UInt8,
-    starts SimpleAggregateFunction(sum, UInt64)
+    starts SimpleAggregateFunction(sum, Int64)
 )
 ENGINE = AggregatingMergeTree ORDER BY k;
 
