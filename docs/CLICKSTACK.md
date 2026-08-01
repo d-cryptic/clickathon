@@ -1,5 +1,8 @@
 # CLICKSTACK — the OSS integration, and where the concurrency chart comes from
 
+> **Panel reference:** what each of the 41 tiles on the six dashboards shows and how to read it is in
+> [CLICKSTACK_DASHBOARDS.md](CLICKSTACK_DASHBOARDS.md), captured live from the running service.
+
 > **Summary:** ClickStack does **two** jobs — it observes our pipeline over OTLP (ingestion lag,
 > query latency) and it *is* the concurrency visualization the statement asks for, so we ship no
 > custom frontend. **Two ways to run it. We use Option B:** HyperDX built into ClickHouse Cloud
