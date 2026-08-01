@@ -331,6 +331,48 @@ UNSEEN_ACK_SENTINEL=1."
 fi
 
 # ---------------------------------------------------------------------------
+phase "2b SOURCE CONTRACT — is this file what we think it is?"
+# Wired in 2026-08-02 after Codex audit 005 found the gap: ADR 0026's gate
+# existed and docs/RUNBOOK_UNSEEN.md invoked it as a MANUAL step, but this
+# script — the advertised one-command path, and the one anybody actually runs
+# under time pressure — never called it. So the protection existed on paper and
+# not on the path.
+#
+# It must sit HERE: after the load (the probes query ev_raw) and BEFORE the
+# model is derived. Running it later would mean discovering the file was wrong
+# after building an answer on it.
+#
+# The hazard this exists for: a seconds-valued event_timestamp is divided by
+# 1000 at load, lands in 1970, the model derives intervals there quite happily,
+# and THE GATE STAYS GREEN — truth and serving agree, both in the wrong year.
+# Probe 3 (toYear NOT BETWEEN 2020 AND 2035) is what catches it.
+if [ -x tools/validate-source-contract.sh ]; then
+  CONTRACT_ARGS=""
+  [ "$TARGET" = cloud ] && CONTRACT_ARGS="-c"
+  if tools/validate-source-contract.sh $CONTRACT_ARGS --database "$DB" 2>&1 | tee -a "$OUT"; then
+    say "  source contract: no FAIL — proceeding to derive the model."
+  else
+    if [ "${UNSEEN_ACK_CONTRACT:-}" != 1 ]; then
+      die "the source-contract gate reported a FAIL on '$DB'.
+
+Read the verdict above against the committed baseline
+(evidence/source-contract/baseline-sonyliv-2026-08-02.txt). A FAIL means the
+file is not the shape we believe it is, and every number derived from it
+inherits that. The reconcile gate CANNOT catch this class — it compares our
+model against our own re-derivation, so a file-level fault makes both wrong
+together and both agree.
+
+If you have read the verdict and decided to proceed anyway:
+  UNSEEN_ACK_CONTRACT=1 $0 $*"
+    fi
+    say "  UNSEEN_ACK_CONTRACT=1 — FAIL acknowledged, continuing deliberately."
+  fi
+else
+  say "  ⚠ tools/validate-source-contract.sh not present or not executable — SKIPPED."
+  say "    The unseen file is being trusted unchecked. This is a gap, not a pass."
+fi
+
+# ---------------------------------------------------------------------------
 phase "3 intervals (30_build_intervals.sql)"
 q "TRUNCATE TABLE session_intervals" >/dev/null
 run_file "$(render sql/30_build_intervals.sql)"

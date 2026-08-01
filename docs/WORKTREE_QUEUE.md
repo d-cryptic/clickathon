@@ -149,11 +149,19 @@ The invariant is unconditional: one user may hold several sessions, so users ≤
 minute and grain, always. It does not hold.
 
 ```
- violating cells on sonyliv     28
- worst excess                   +1   (2026-07-26 10:55)
- cells with sessions=0, users>0  0
- HEADLINE user peak 2,844  vs  session peak 2,917   ✓ correct
+ violating cells on sonyliv     82        ← CORRECTED, see below
+ worst excess                   +1
+ cells with sessions=0, users>0 63
+ HEADLINE user peak 2,844  vs  session peak 2,917   ✓ still correct
 ```
+
+⚠ **The orchestrator first published 28 and 0. Both were wrong.** The query joined `cc_user_minute`
+to `cc_minute_delta` on `minute` — but the delta table only carries rows at **change points**, so an
+inner join silently compares a dense table to a sparse one and only sees minutes where the level
+moved. Codex audit 005 caught it. The corrected figures are 82 cells with 63 at zero sessions.
+
+The severity verdict is unchanged — worst excess is still +1 and no total moves — but the sizing was
+wrong, and a wrong number offered as reassurance is worse than no number.
 
 Cause per T6: ADR 0012's first-wins dimension merge and ADR 0016's per-interval expansion disagree
 about attribution, so a user lands in a `(minute, dims)` bucket whose session deltas went elsewhere.
