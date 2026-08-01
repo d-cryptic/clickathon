@@ -1,0 +1,269 @@
+================================================================================
+DEDUPLICATE LATE OR REPEATED EVENTS — investigation and verdict
+Step 3 of the pipeline in docs/upstream/README_START_HERE.md:
+  "Apply foreground-only filtering and deduplicate late or repeated events."
+
+Target: ClickHouse Cloud, database `sonyliv`, 2026-08-01.
+All numbers below were produced by queries against the loaded data. Nothing here
+is hand-computed.
+
+--------------------------------------------------------------------------------
+VERDICT
+--------------------------------------------------------------------------------
+The 4,210 duplicate rows are PROVABLY INERT for concurrency. Deduplicating
+ev_raw changes NOTHING: not one interval, not one minute, not the peak, not the
+integral. We therefore DO NOT add a dedup step to the pipeline.
+
+That is a deliberate answer, not an omission. A dedup pass would cost a full
+extra pass over ev_raw on every rebuild and would buy exactly zero correctness.
+The reason it buys zero is structural, and the structure is what we rely on —
+so the argument is spelled out below rather than asserted, and the guard that
+protects it is named at the end.
+
+================================================================================
+1 · WHAT THE DUPLICATES ACTUALLY ARE
+================================================================================
+
+  ev_raw rows                                                905,558
+  distinct (video_session_id, event_timestamp, event_type, event)   901,348
+  duplicate rows (excess)                                      4,210   (0.46%)
+  sessions affected                                              863   (7.9% of 10,866)
+  copies per duplicated key                                    2 to 6
+
+Breakdown by event (sum of excess rows = 4,210):
+
+  event_type        event                 excess  sessions  max_copies
+  VideoHeartbeat    Seek                    1015       188           4
+  VideoHeartbeat    network-activity         881       440           6
+  VideoHeartbeat    buffer-health            644       362           5
+  VideoHeartbeat    video-resize             293       188           4
+  VideoHeartbeat    BufferStart              219        98           3
+  VideoHeartbeat    resume                   190       167           3
+  VideoHeartbeat    BufferEnd                182        78           3
+  VideoHeartbeat    network-bandwidth        144       120           4
+  VideoHeartbeat    pause                    138       111           3
+  VideoHeartbeat    upshift                   93        52           4
+  AppBackgrounded   AppBackgrounded           84        79           4
+  VideoHeartbeat    downshift                 77        39           3
+  VideoHeartbeat    video_forward             69        21           3
+  VideoHeartbeat    dropped-frames            61        42           3
+  AppForegrounded   AppForegrounded           30        26           3
+  VideoPlay         Play                      17        16           3
+  VideoSessionStart VideoSessionStart         14        13           3
+  VideoHeartbeat    network-change            13        11           2
+  VideoSessionEnd   VideoSessionEnd           11        10           3
+  ... (10 further events, 1-8 excess rows each)
+
+Note that `pause` (138) and `resume` (190) duplicates DO land on the two events
+the interval model treats specially, and VideoSessionEnd duplicates (11) land on
+the open/closed test. So this is not a case where the duplicates conveniently
+miss every load-bearing field. They hit all of them. They are still inert, for
+the reasons in section 2.
+
+--- Are they byte-identical replays? Almost. -------------------------------
+
+  distinct 4-column key tuples                               901,348
+  distinct FULL rows (all 13 columns)                        901,349      <-- +1
+
+Exactly ONE duplicate group is not an exact replay:
+
+  video_session_id : 4C5EE22AC6752E97AEA1E833935A97B63D0D93B72E888E54FB8F9EA6A727E29E
+  event_timestamp  : 2026-07-26 11:22:45.581
+  event_type/event : VideoHeartbeat / BufferStart
+  subtitle_language: 'UNK'  vs  'OFF'      <-- the only differing column
+  everything else  : identical (platform, content_id, user_id, app_version,
+                     player_version, country, audio_language, session_start_epoch)
+
+`subtitle_language` is not a dimension of the concurrency model (the dimensions
+are platform, country, content_id), so this conflict is inert too — but it is a
+GENUINE conflict, and it is flagged in section 5 because it stops being inert the
+moment anyone adds subtitle_language as a filter dimension.
+
+================================================================================
+2 · WHY THEY ARE INERT — the mechanism
+================================================================================
+sql/30_build_intervals.sql reduces each session to five things. A duplicated row
+is, by definition, a repeat of a (timestamp, event_type, event) that is already
+present. Take each consumer in turn:
+
+  ts = arraySort(groupArray(timestamp))
+      A duplicate adds a REPEATED value to a sorted array. The run split is
+      arraySplit((t,i) -> (i>1) AND (t - ts[i-1]) > 150, ...). For the repeated
+      element the difference is 0, and 0 > 150 is false, so a duplicate can
+      never open a new run. Run boundaries are read as run[1] and
+      run[length(run)] — the min and max of the run — which are unchanged by
+      repeats. The runs are therefore IDENTICAL, element multiplicity aside.
+
+      Demonstrated directly:
+        ts_clean = [100,160,220,400,460]
+        ts_dup   = [100,160,220,220,400,460,460]
+        runs_clean = [[100,160,220],[400,460]]
+        runs_dup   = [[100,160,220,220],[400,460,460]]
+        bounds     = [(100,220),(400,460)]  for BOTH        -> identical
+
+  pauses / resumes
+      A duplicated `pause` yields a duplicated pause WINDOW (p, first_resume>p),
+      because arrayFirst over `resumes` returns the first match and duplicate
+      resumes do not change which value is first. The complement fold is
+        (acc, win) -> (if(win.1 > acc.2, push (acc.2, win.1)), greatest(acc.2, win.2))
+      On the second identical window, acc.2 already equals that window's end,
+      which is > its start, so the push is skipped and the cursor does not move.
+      The fold is IDEMPOTENT under repeated identical windows.
+
+  is_open = countIf(event_type = 'VideoSessionEnd') = 0
+      A zero-test. Duplicates can only increase a count, never create the first
+      occurrence, so they cannot flip 0 -> non-zero or non-zero -> 0.
+
+  any(user_id) / any(content_id) / any(platform) / any(country)
+      A duplicate is a copy of a row that remains after dedup, so the SET of
+      candidate values per session is unchanged and any() draws from an
+      identical domain. (any() is non-deterministic across runs regardless of
+      duplicates; the A/B in section 3 pins it to min() on BOTH sides so the
+      experiment isolates dedup as the only variable.)
+
+Because session_intervals is unchanged, EVERY downstream tier is unchanged by
+construction: cc_minute_delta is a pure function of session_intervals, and
+cc_hour_agg is a pure function of cc_minute_delta. Proving interval equality
+proves the whole serving layer.
+
+================================================================================
+3 · THE PROOF — full A/B re-derivation
+================================================================================
+The complete sql/30_build_intervals.sql derivation was run TWICE inside one
+query: s=0 over ev_raw as-is, s=1 over ev_raw deduplicated with
+`LIMIT 1 BY (video_session_id, event_timestamp, event_type, event)`. Same
+GAP_S=150, same TAIL_S=60, any() replaced by min() on both sides so the only
+difference between the arms is the dedup.
+
+  rows_raw                 905,558
+  rows_dedup               901,348          (-4,210)
+
+  intervals_raw             30,769
+  intervals_dedup           30,769
+  interval_keys_differing        0          <-- grouped on
+                                                (session, start, end, is_open,
+                                                 platform, country, content_id,
+                                                 user_id); every group has the
+                                                 same count on both sides
+  interval_verdict       IDENTICAL
+
+  minutes_compared           3,725          every minute in the feed
+  minutes_differing              0
+  peak_raw                   2,887          @ 2026-07-26 10:56  <-- the peak
+  peak_dedup                 2,887
+  integral_raw           8,334,420 concurrency-seconds
+  integral_dedup         8,334,420
+
+  VERDICT: INERT — dedup changes NOTHING
+
+Cross-check: 30,769 intervals, peak 2,887 @ 10:56 and integral 8,334,420 are
+exactly the values the live tables and sql/50_hour_agg.sql already carry, so
+both arms of the A/B reproduce the shipped model rather than some variant of it.
+
+--- Pre-empting "the effect washed out in 10,866 sessions" -------------------
+
+The same A/B restricted to ONLY the 863 duplicate-bearing sessions, so the
+denominator IS the affected population:
+
+  minute                dup_sessions_raw  dup_sessions_dedup  diff
+  2026-07-26 10:50:00               287                 287     0
+  2026-07-26 10:51:00               300                 300     0
+  2026-07-26 10:52:00               314                 314     0
+  2026-07-26 10:53:00               318                 318     0
+  2026-07-26 10:54:00               317                 317     0
+  2026-07-26 10:55:00               311                 311     0
+  2026-07-26 10:56:00               313                 313     0   <-- peak minute
+  2026-07-26 10:57:00               312                 312     0
+  2026-07-26 10:58:00               315                 315     0
+  2026-07-26 10:59:00               319                 319     0
+  2026-07-26 11:00:00               320                 320     0
+  2026-07-26 11:01:00               329                 329     0
+  2026-07-26 11:02:00               332                 332     0
+
+  ALL MINUTES: sessions=863  minutes=834
+               peak_raw=332  peak_dedup=332
+               minutes_differing=0  max_abs_diff=0
+
+================================================================================
+4 · WHY THIS IS THE RIGHT ANSWER, NOT A SHORTCUT
+================================================================================
+The interval model is INSENSITIVE TO EVENT MULTIPLICITY BY DESIGN. It reads a
+session's event stream as a SET of instants and asks two questions of it —
+"where are the gaps longer than 150s" and "which windows are paused" — and both
+are functions of the set, not of the multiset. Idempotence under replay is
+therefore a property of the model, not a lucky property of this file.
+
+That matters far more than the 4,210 rows do, because it is the same property
+that makes the pipeline safe against the arrival classes docs/ARCHITECTURE.md
+has to absorb on the unseen day:
+
+  - a replayed ingest batch          -> no-op
+  - an at-least-once delivery retry  -> no-op
+  - a late heartbeat already seen    -> no-op
+
+A dedup step would add a full pass over ev_raw per rebuild to defend a property
+the model already has. The honest engineering answer is to state the invariant,
+prove it, and guard it — which is what this file does.
+
+Note also that ev_raw is already declared with
+`non_replicated_deduplication_window = 1000` (sql/00_schema.sql), which makes a
+re-INSERT of an identical BLOCK idempotent. That is block-level insert dedup and
+is a different mechanism from row-level dedup; it does not remove these 4,210
+rows (they arrived inside the original load), and it is not what makes them
+inert. Do not conflate the two.
+
+================================================================================
+5 · WHEN THIS VERDICT STOPS HOLDING — the guard
+================================================================================
+The inertness argument depends on three things. If any changes, re-run the A/B
+in section 3 before trusting concurrency again.
+
+  (a) THE MODEL STAYS MULTIPLICITY-INSENSITIVE.
+      Any aggregate over ev_raw that COUNTS events rather than reading their
+      timestamps as a set breaks immediately. Concretely: count(), a
+      heartbeat-rate or inter-arrival statistic, an events-per-minute quality
+      metric, or a "session is active if it emitted >= N beats" rule would all
+      be inflated by up to 6x on the affected sessions. ADR 0007's measured
+      inter-arrival p99 of 49s — the number GAP_S=150 is derived from — is
+      exactly such a statistic. It was computed on data containing these
+      duplicates, and duplicates only ever SHRINK an inter-arrival gap, so the
+      true p99 is >= 49s and GAP_S=150 remains conservative. Recompute it on
+      deduplicated input if that threshold is ever retuned.
+
+  (b) subtitle_language DOES NOT BECOME A DIMENSION.
+      The single non-identical duplicate group (section 1) differs only in that
+      column. Today it is inert because the model does not read it. Add it as a
+      filter dimension and that one session becomes order-dependent: any()
+      would pick 'UNK' or 'OFF' non-deterministically and the session would land
+      in a different bucket across rebuilds. If subtitle_language is ever
+      promoted, dedup must become deterministic — pick a winner explicitly, e.g.
+      `LIMIT 1 BY key ORDER BY subtitle_language`, and record the tie-break.
+
+  (c) THE UNSEEN DAY LOOKS LIKE THIS ONE.
+      0.46% duplicates, max 6 copies, all within-session. A qualitatively
+      different corruption — the SAME (session, timestamp) carrying a DIFFERENT
+      content_id or platform, which does not occur here — would make any()
+      order-dependent and would need a deterministic tie-break rather than a
+      no-op. The one-line detector for that case:
+
+        SELECT count() FROM (
+          SELECT video_session_id
+          FROM ev_raw
+          GROUP BY video_session_id, event_timestamp, event_type, event
+          HAVING uniqExact((content_id, platform, country, user_id)) > 1);
+
+      This returns 0 on the provided file. If it returns non-zero on the unseen
+      day, the verdict in this file does not transfer — add the deterministic
+      dedup and re-run the section 3 A/B.
+
+================================================================================
+REPRODUCING
+================================================================================
+The two A/B queries are self-contained SELECTs over ev_raw; they create nothing
+and write nothing. They are reproduced in full in the session transcript and
+follow sql/30_build_intervals.sql line for line, with the two documented
+substitutions (min() for any(), and the s=0/s=1 source union).
+
+Gate status at time of writing: sql/90_reconcile.sql PASSES unchanged against
+Cloud (5/5 sample minutes, delta 0, including 2026-07-26 10:56 = 2887). This
+investigation altered no table, no view and no existing file.
