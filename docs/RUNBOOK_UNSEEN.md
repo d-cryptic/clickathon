@@ -194,12 +194,21 @@ the local gate reads `default` regardless. For those, editing `.env` is still th
 `tools/unseen-run.sh` now passes `--database "$DB"` *and* `CH_DATABASE="$DB"` to the loader (its
 sandbox `.env` is kept as a third, redundant guard).
 
-### A6 — `sql/80_content.sql` hard-codes the `sonyliv` database
+### A6 — ~~`sql/80_content.sql` hard-codes the `sonyliv` database~~ FIXED (ADR 0009)
 
-`SOURCE(CLICKHOUSE(TABLE 'content_dim' DB 'sonyliv'))` at line 70 and six `dictGet('sonyliv.dict_content', …)`
-calls at lines 137, 159, 178, 199, 200, 201. Applied to any other database those views read
-**production's** dictionary. `tools/unseen-run.sh` templates them and refuses to run a file that still
-names another database.
+**Was:** `SOURCE(CLICKHOUSE(TABLE 'content_dim' DB 'sonyliv'))` plus six `dictGet('sonyliv.dict_content', …)`
+calls, so applied to any other database those views read **production's** dictionary — reproduced in a
+scratch database, where the old form returned production titles for scratch data.
+
+**Now:** the file names no database at all, like every other file in `sql/`. ClickHouse resolves the
+dictionary name at `CREATE VIEW` time and bakes it in, so each view is permanently pinned to its own
+database's dictionary — verified by applying the committed file with `--database sonyliv_scratch80`
+and reading it from a session attached to `sonyliv`. See
+[ADR 0009](adr/0009-content-views-are-database-agnostic-and-label-their-ambiguity.md).
+
+`tools/unseen-run.sh` still templates the database name out of every file and still refuses to run one
+that names another database. **Keep that guard** — it now has nothing to rewrite in `80_content.sql`,
+but it is the standing check that the defect does not come back, here or anywhere else.
 
 Related, and worse if you take a shortcut: **`tools/apply-sql.sh` with no arguments applies every
 `sql/*.sql`**, which includes `sql/60_projection.sql` (`ALTER TABLE sonyliv.ev_raw`, twice) and
