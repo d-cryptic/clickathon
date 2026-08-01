@@ -1,0 +1,14 @@
+Row 1:
+──────
+name:               mv_session_dirty
+create_table_query: CREATE MATERIALIZED VIEW sonyliv.mv_session_dirty TO sonyliv.session_dirty (`marked_at` DateTime64(3), `video_session_id` String, `min_event_ts` DateTime64(3), `max_event_ts` DateTime64(3), `events` UInt32) AS SELECT now64(3) AS marked_at, video_session_id, min(event_timestamp) AS min_event_ts, max(event_timestamp) AS max_event_ts, toUInt32(count()) AS events FROM sonyliv.ev_raw GROUP BY video_session_id
+
+Row 2:
+──────
+name:               mv_stateless
+create_table_query: CREATE MATERIALIZED VIEW sonyliv.mv_stateless TO sonyliv.cc_minute_stateless (`minute` DateTime, `platform` LowCardinality(String), `country` LowCardinality(String), `content_id` Int64, `active_state` AggregateFunction(uniqExact, String)) AS SELECT toStartOfMinute(event_timestamp) AS minute, platform, country, content_id, uniqExactState(video_session_id) AS active_state FROM sonyliv.ev_raw WHERE event_type IN ('VideoHeartbeat', 'VideoPlay') GROUP BY minute, platform, country, content_id
+
+Row 3:
+──────
+name:               mv_user_minute
+create_table_query: CREATE MATERIALIZED VIEW sonyliv.mv_user_minute TO sonyliv.cc_user_minute (`minute` DateTime, `platform` LowCardinality(String), `country` LowCardinality(String), `content_id` Int64, `active_state` AggregateFunction(uniqExact, String)) AS SELECT toDateTime(m) AS minute, platform, country, content_id, uniqExactState(user_id) AS active_state FROM (SELECT user_id, platform, country, content_id, arrayJoin(range(toUInt32(toStartOfMinute(interval_start)), toUInt32(toStartOfMinute(interval_end)) + 1, 60)) AS m FROM sonyliv.session_intervals) GROUP BY minute, platform, country, content_id

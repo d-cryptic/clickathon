@@ -1,0 +1,5 @@
+   ┌─raw_spelling─┬─concurrent─┐
+1. │ hin          │       1759 │
+2. │ HIN          │        328 │
+3. │ hin-hindi    │         99 │
+   └──────────────┴────────────┘

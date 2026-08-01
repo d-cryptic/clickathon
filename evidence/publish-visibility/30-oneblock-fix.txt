@@ -1,0 +1,39 @@
+Q29 EXPERIMENT 3 — one-block correction (staged diff, single serving insert)
+probe minute 2026-07-26 10:54:00 · db sonyliv_q29vis · run q29fix1785609585 · 2026-08-01T18:39:45Z
+claimed 300 sessions covering the probe minute (same shape as experiment 1)
+window 2026-07-26 10:04:53.000 .. 2026-07-26 11:30:27.000 · build_version 1785609588
+baseline (3 reads):
+2026-08-01 18:39:50.221	2825	2917	2737
+2026-08-01 18:39:50.692	2825	2917	2737
+2026-08-01 18:39:51.772	2825	2917	2737
+
+run complete: 5079 ms wall for stage-neg + derive + prune + stage-emit + swap
+
+post-run (3 reads):
+2026-08-01 18:39:59.394	2825	2917	2737
+2026-08-01 18:39:59.856	2825	2917	2737
+2026-08-01 18:40:00.306	2825	2917	2737
+
+poller samples: 9  ·  samples deviating from 2825: 0
+
+phase timings (system.query_log):
+   ┌─query_id──────────────────┬────────────────────started─┬───────────────────finished─┬─dur_ms─┬─written_rows─┐
+1. │ q29fix1785609585-stageneg │ 2026-08-01 18:39:52.537880 │ 2026-08-01 18:39:52.752880 │    215 │         1220 │
+2. │ q29fix1785609585-derive   │ 2026-08-01 18:39:53.533640 │ 2026-08-01 18:39:53.873640 │    340 │         1005 │
+3. │ q29fix1785609585-prune    │ 2026-08-01 18:39:55.712945 │ 2026-08-01 18:39:56.743945 │   1031 │            0 │
+4. │ q29fix1785609585-stagepos │ 2026-08-01 18:39:56.471384 │ 2026-08-01 18:39:56.707384 │    236 │         1220 │
+5. │ q29fix1785609585-swap     │ 2026-08-01 18:39:56.966127 │ 2026-08-01 18:39:57.045127 │     79 │         2440 │
+   └───────────────────────────┴────────────────────────────┴────────────────────────────┴────────┴──────────────┘
+
+parts the swap insert created (system.part_log — the honest atomicity bound):
+   ┌─partition_id─┬─part_name──────┬─rows─┐
+1. │ 20260726     │ 20260726_5_5_1 │ 1220 │
+   └──────────────┴────────────────┴──────┘
+
+convergence check — the staged path must land on the same serving numbers:
+Code: 386. DB::Exception: There is no supertype for types String, DateTime because some of them are String/FixedString/Enum and some of them are not: while executing function greaterOrEquals on arguments toString(__table1.minute) String String(size = 0), _CAST(1785060000_DateTime, 'DateTime'_String) DateTime Const(size = 0, UInt32(size = 1)). (NO_COMMON_TYPE) (version 26.2.1.525 (official build))
+   ┌───────────────────m─┬─concurrent─┐
+1. │ 2026-07-26 10:54:00 │       2825 │
+2. │ 2026-07-26 10:53:00 │       2771 │
+3. │ 2026-07-26 10:52:00 │       2758 │
+   └─────────────────────┴────────────┘

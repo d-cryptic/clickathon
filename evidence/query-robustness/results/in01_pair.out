@@ -1,0 +1,2 @@
+platforms	peak	peak_minute	integral	avg_concurrent	change_points_scanned
+['ANDROID_PHONE','IOS_PHONE']	5	2026-06-01 10:15:00	12420	0.14	15
