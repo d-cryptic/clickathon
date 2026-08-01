@@ -31,6 +31,10 @@ touched ten files.
 | ~~Q15~~ | ~~`fix/ci-and-coverage`~~ | **MERGED** — `make ci` green, coverage 58.7–95.7% | — |
 | ~~Q16~~ | ~~`fix/target-resolution`~~ | **MERGED** + follow-up: `tools/ch` now reads `TARGET` from the env | 0018 |
 | Q18 | `chore/unseen-day-rehearsal` | `docs/RUNBOOK_UNSEEN.md`, `tools/unseen-*.sh`, `evidence/unseen/` | — |
+| Q20 | `docs/judge-entry-point` | `README.md`, `SUBMISSION.md`, `docs/VERIFIED.md` | — |
+| Q21 | `chore/adr-0016-scale-remeasure` | `evidence/scale.txt`, `tools/scale-test.sh` — ADR 0016 re-engined a serving tier under the published figures | **0020** |
+| Q22 | `chore/test-audit` | Go `*_test.go`, `docs/TESTS.md` — sabotage each test, keep the ones that fail | — |
+| Q23 | `chore/post-merge-review` | `docs/codex-validation/003-*.md` — a different model reviews nine same-hour merges | — |
 | Q8–Q11 | `docs/publisher-state-machine-safety` | `tools/publish*.sh`, `sql/12_publish.sql` — crash window, publisher lease, insert identity, retention bound | **0019** |
 | Q19 | `docs/headline-assumption-audit` | `evidence/adversarial/`, **`doubts/07+`** ⚠ moved from 06 — the grain agent used 05 AND 06 | — |
 | — | `feat/problem-space-research` | idle · 9 unmerged commits · **competing design, needs a human call** | — |
