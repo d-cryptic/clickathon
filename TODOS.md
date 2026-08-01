@@ -61,9 +61,13 @@
       names this remedy explicitly. **Measure it; do NOT revert ADR 0002.**
 - [ ] **[H5]** Hot tier: `mv_lease` → `cc_minute_hot` (`uniqExact`) + the stitched serving view (ADR 0004/0005)
 - [ ] **[H6]** `cc_hour_agg` (max + integral); peak/average at minute/hour/day grain with dimension filters
-- [~] **[H7]** ClickStack up — **done**: `make stack-up && make clickstack`, HyperDX charts our
-      concurrency views off Cloud (see docs/CLICKSTACK.md). **Remaining: instrument watermark lag**,
-      not just ingestion lag — nothing of ours emits OTLP yet.
+- [x] **[H7]** ClickStack up **and** observing us — `make stack-up && make clickstack` charts our
+      concurrency views off Cloud (docs/CLICKSTACK.md); `sonyliv observe -target cloud` emits
+      watermark lag, build-stage timing and the reconcile gate outcome over OTLP, verified by reading
+      the rows back out of `otel_metrics_gauge`/`otel_logs`/`otel_traces` (docs/OBSERVABILITY.md).
+      `tools/clickstack-observability.sh` adds the dashboard tiles. Benchmark query latency/bytes is
+      deliberately NOT duplicated here — a separate `system.query_log` HyperDX source already covers
+      it more accurately than a client span could.
 - [ ] **[H8]** Straggler correction-by-diff path (ADR 0006) + the live late-arrival demo
 - [ ] **[H8]** Tail-sensitivity sweep (gap × tail grid) — the ground truth is private and unfittable
 
@@ -71,7 +75,8 @@
 
 - [ ] `/bench` on the full benchmark shapes; capture bytes read
 - [x] Minimal concurrency chart — ClickStack/HyperDX over `v_concurrency_minute_total`, no custom
-      frontend. Freshness panel still to add.
+      frontend. Freshness panel added: `tools/clickstack-observability.sh` — watermark lag tile, see
+      docs/OBSERVABILITY.md.
 - [ ] ADRs for: the `video_session_id` projection, `video_type` materialisation
       (0001–0006 are written; 0001 is **conditional on GATE ①**; 0002 is main's, accepted + measured)
 - [ ] Deck: 15 slides mapped to the five scoring criteria

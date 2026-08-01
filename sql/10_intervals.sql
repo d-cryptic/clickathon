@@ -31,6 +31,20 @@
 --                   expected beat. Do NOT give a full gap of credit.
 -- ---------------------------------------------------------------------------
 
+-- ---------------------------------------------------------------------------
+-- THE FILTER DIMENSIONS. dataset_details.md names ten and then says outright:
+-- "the solution should work even if the number of dimensions increases."
+--
+--   from ev_raw      content_id, platform, app_version, country,
+--                    audio_language, subtitle_language, player_version   (7)
+--   from dict_content title, video_type, category                        (3, free
+--                    via dictGet on content_id — see 80_content.sql)
+--
+-- All seven raw ones are carried from here on. They used to stop at three
+-- (content_id, platform, country) and the other four were DROPPED at derivation,
+-- which made them unfilterable anywhere downstream. See ADR 0008.
+-- ---------------------------------------------------------------------------
+
 -- Session-aware active intervals, one row per contiguous active range.
 CREATE TABLE IF NOT EXISTS session_intervals
 (
@@ -39,6 +53,16 @@ CREATE TABLE IF NOT EXISTS session_intervals
     content_id       Int64,
     platform         LowCardinality(String),
     country          LowCardinality(String),
+    -- The four that used to be dropped. LowCardinality because they are: 65
+    -- app_versions, 41 audio_languages, 11 subtitle_languages, 14
+    -- player_versions on the provided file. Attributed PER INTERVAL by dominant
+    -- value, not per session by any() — ADR 0008 measures why any() is unusable
+    -- here (it mislabels 44.5% of audio and 47.6% of subtitle session-minutes,
+    -- and it is not even deterministic across rebuilds).
+    app_version       LowCardinality(String),
+    audio_language    LowCardinality(String),
+    subtitle_language LowCardinality(String),
+    player_version    LowCardinality(String),
     interval_start   DateTime64(3),
     interval_end     DateTime64(3),
     is_open          UInt8,          -- 1 = session had no VideoSessionEnd at build time
@@ -64,6 +88,20 @@ ENGINE = ReplacingMergeTree(build_version)
 ORDER BY (video_session_id, interval_start)
 SETTINGS min_bytes_for_wide_part = 0;
 
+-- MIGRATION, not a second definition. `CREATE TABLE IF NOT EXISTS` is a no-op on
+-- a database that already has the table, so a new dimension added above would
+-- never reach an existing service — the file would look right and the schema
+-- would be stale. This ALTER is the migration path, and it is a no-op on a fresh
+-- database because the CREATE above already declared the columns.
+--
+-- Cheap by construction: the dims are payload here, NOT part of
+-- (video_session_id, interval_start), so this is metadata-only — no rewrite.
+ALTER TABLE session_intervals
+    ADD COLUMN IF NOT EXISTS app_version       LowCardinality(String) AFTER country,
+    ADD COLUMN IF NOT EXISTS audio_language    LowCardinality(String) AFTER app_version,
+    ADD COLUMN IF NOT EXISTS subtitle_language LowCardinality(String) AFTER audio_language,
+    ADD COLUMN IF NOT EXISTS player_version    LowCardinality(String) AFTER subtitle_language;
+
 -- ---------------------------------------------------------------------------
 -- The serving layer: minute deltas per dimension combination.
 --
@@ -73,6 +111,31 @@ SETTINGS min_bytes_for_wide_part = 0;
 --
 -- The sort key is dimension-first, time last-but-one: dashboards filter by
 -- platform/content then scan a time range, which is exactly this prefix order.
+--
+-- SEVEN dimensions now, not three. Two things had to be got right (ADR 0008):
+--
+-- 1. ROW COUNT. Adding dimensions makes the aggregation grain finer, so the row
+--    count rises — MEASURED 24,951 -> 28,024, **1.12x**, not the multiplicative
+--    blow-up the naive worry predicts. It cannot blow up, and that is a property
+--    of the DELTA representation rather than luck: the table holds at most one
+--    open and one close row per (merged run, hour), so its size is bounded by
+--    2 x hour-clipped-runs = 36,930 rows on this file **no matter how many
+--    dimensions are added**. Dimensions can only move rows apart within that
+--    ceiling; the worst case is 36,930 (1.48x), reached when every session has a
+--    unique dimension tuple. A per-minute-explosion serving table has no such
+--    ceiling — it is O(minutes x distinct tuples) and is exactly the design the
+--    problem statement warns collapses at scale.
+--
+-- 2. KEY ORDER. The new dims go AFTER `minute`, not before it, for two reasons:
+--    - Every existing query and view keeps the prefix it was written against,
+--      (platform, country, content_id, minute), so nothing downstream regresses.
+--    - `ALTER ... ADD COLUMN + MODIFY ORDER BY` can only EXTEND a sort key at
+--      the tail. Keeping the tail free is what makes "one more dimension" a
+--      metadata-only ALTER with no data rewrite (verified — see the migration
+--      below, and note ClickHouse keeps PRIMARY KEY at the old 4-column prefix,
+--      so the sparse index does not grow either).
+--    Tail order is by ascending cardinality (11, 14, 41, 65) so equal values run
+--    together and compress, per `schema-pk-cardinality-order`.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS cc_minute_delta
 (
@@ -80,6 +143,10 @@ CREATE TABLE IF NOT EXISTS cc_minute_delta
     platform    LowCardinality(String),
     country     LowCardinality(String),
     content_id  Int64,
+    subtitle_language LowCardinality(String),
+    player_version    LowCardinality(String),
+    audio_language    LowCardinality(String),
+    app_version       LowCardinality(String),
     delta       SimpleAggregateFunction(sum, Int64),
     -- Int64, NOT UInt64. ADR 0006 corrects a straggler by emitting a NEGATED
     -- copy of the previous contribution. ClickHouse does not reject a negative
@@ -91,14 +158,45 @@ CREATE TABLE IF NOT EXISTS cc_minute_delta
 )
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMMDD(minute)
-ORDER BY (platform, country, content_id, minute)
+ORDER BY (platform, country, content_id, minute,
+          subtitle_language, player_version, audio_language, app_version)
 SETTINGS min_bytes_for_wide_part = 0;
+
+-- MIGRATION — and, deliberately, the PROOF of the extensibility claim above.
+-- This is the entire cost of adding a dimension to the serving layer: one
+-- ALTER, metadata-only, no rewrite, no downtime, primary index unchanged.
+-- Verified on Cloud 26.2.1.525: the ADD COLUMNs and the MODIFY ORDER BY must be
+-- in ONE statement (ClickHouse refuses to put a pre-existing column into the
+-- sort key), and re-running it is a no-op.
+ALTER TABLE cc_minute_delta
+    ADD COLUMN IF NOT EXISTS subtitle_language LowCardinality(String) AFTER content_id,
+    ADD COLUMN IF NOT EXISTS player_version    LowCardinality(String) AFTER subtitle_language,
+    ADD COLUMN IF NOT EXISTS audio_language    LowCardinality(String) AFTER player_version,
+    ADD COLUMN IF NOT EXISTS app_version       LowCardinality(String) AFTER audio_language,
+    MODIFY ORDER BY (platform, country, content_id, minute,
+                     subtitle_language, player_version, audio_language, app_version);
 
 -- ---------------------------------------------------------------------------
 -- Session-INDEPENDENT view: concurrency straight from event state, no session
 -- reconstruction. The statement asks for both and for a comparison — this is the
 -- cheap, always-fresh model; session_intervals is the accurate one. Comparing
 -- them IS the trade-off evidence the judges asked for.
+--
+-- DELIBERATELY STILL THREE DIMENSIONS. This table is not fed by the derivation —
+-- mv_stateless reads ev_raw directly — so it is not affected by the "dimensions
+-- dropped at derivation" defect that ADR 0008 fixes, and extending it is a
+-- separate change with a different blast radius: the MV only fires on NEW ev_raw
+-- inserts, so widening it needs a one-off TRUNCATE + backfill of an existing
+-- table rather than a rebuild of one this build path already truncates. Left out
+-- of ADR 0008 on purpose, not by oversight. The change, when someone wants it:
+--
+--   ALTER TABLE cc_minute_stateless ADD COLUMN ... , MODIFY ORDER BY (...);
+--   DROP VIEW mv_stateless;  -- recreate with the wider GROUP BY
+--   TRUNCATE TABLE cc_minute_stateless;
+--   INSERT INTO cc_minute_stateless SELECT ... FROM ev_raw ...;   -- backfill
+--
+-- v_concurrency_minute_total is safe under that change: uniqExactMerge over a
+-- finer grain is the same set union, so the headline curve cannot move.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS cc_minute_stateless
 (
