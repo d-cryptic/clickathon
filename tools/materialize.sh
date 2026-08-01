@@ -14,6 +14,13 @@ if [ -f .env ]; then
 fi
 
 target=${TARGET:-local}
+source "$root_dir/tools/finalizer-lock.sh"
+case "$target" in
+  local) lock_identity="${CH_CONTAINER:-ch}.${CH_DATABASE:-default}" ;;
+  cloud) lock_identity="${CH_HOST:?CH_HOST must be set for TARGET=cloud}.${CH_DATABASE:-default}" ;;
+  *) echo "TARGET must be local or cloud" >&2; exit 2 ;;
+esac
+finalizer_lock_acquire "$target" "$lock_identity"
 
 query() {
   TARGET="$target" "$root_dir/tools/ch-run.sh" --query "$1"

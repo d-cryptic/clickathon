@@ -22,13 +22,17 @@ or a durable lease service that supplies an owner token and strictly increasing 
 not publish until the prior lease is expired/fenced; the run log records the assigned sequence and owner in
 the production adapter.
 
-The local scripts remain intentionally simple for the hackathon's one-operator environment. They are not a
-claim of safe multi-scheduler operation. A migration to Kafka/PubSub ingestion should allocate checkpoints
-per source partition and couple the lease to the consumer generation/offset checkpoint.
+The local scripts use a target-scoped atomic-directory fence to reject two operators on the same host. It
+covers rebuild, bootstrap, finalization, and tail publication, but is not a distributed lease and stale
+directories require operator inspection. It is not a claim of safe multi-scheduler operation. A migration
+to Kafka/PubSub ingestion should allocate checkpoints per source partition and couple the lease to the
+consumer generation/offset checkpoint.
 
 ## Consequences
 
 - Concurrent finalizers are a deployment violation, not a race to resolve with `argMax`.
+- A local concurrent invocation fails before it allocates a run sequence; the external scheduler fence
+  remains mandatory across hosts or pods.
 - The durable source contract must add partition/offset/event identity before high-rate production use.
-- A correction stage is snapshot-bounded at its recorded source high-watermark, so resuming a prepared
-  run cannot silently incorporate source rows that arrived after that checkpoint.
+- A prepared run is aborted rather than restaged; only a staged run whose marker count still matches may
+  publish, so a retry cannot silently incorporate source rows that arrived after its checkpoint.

@@ -33,6 +33,12 @@ Every explicit historical rebuild and finalizer bootstrap sends a fresh `insert_
 ClickHouse may retain non-replicated block-deduplication state across `TRUNCATE`; reusing the same block
 identity after clearing a table can otherwise silently omit a block from the new baseline.
 
+`materialize.sh`, `bootstrap-finalizer.sh`, `finalize.sh`, and `refresh-tail.sh` take one target-scoped
+local operator fence. It prevents same-host sequence races, but it is not a distributed scheduler lease;
+use the externally fenced single writer required by [ADR 0014](../docs/adr/0014-finalizer-requires-an-external-single-writer-lease.md)
+for pods or multiple hosts. A prepared finalizer run is aborted rather than restaged on `--resume`; only a
+recorded staged run with the exact staged-marker count may be published.
+
 ```bash
 TARGET=cloud tools/deploy-schema.sh
 TARGET=cloud tools/load.sh

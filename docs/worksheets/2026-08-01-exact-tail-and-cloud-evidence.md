@@ -20,6 +20,13 @@ with a defensible evidence path for the unseen day.
   sessions, maximum 59 seconds past the cut, both assertions zero.
 - `reconcile.sh`, `verify-model.sh`, `synthetic-edge-test.sh`, shell syntax checks, and diff whitespace
   checks pass on `sc-cooled-fluxon-1fd5-ch-test`.
+- Closure hardening: the local rebuild/bootstrap/finalizer/tail workflow has one target-scoped operator
+  fence. A prepared finalizer run now aborts rather than restaging under the same sequence; a staged run
+  publishes only when its recorded marker count still matches. New finalizer runs recheck the source
+  contract before allocating a sequence.
+- Final local rerun after that hardening: 30,931 intervals, 33,507 deltas, 45,147 baseline markers;
+  source contract zero hard failures; five raw-to-serving reconciliation points pass; tail status is
+  current at finalizer sequence 1.
 
 ## External-state facts
 
@@ -40,6 +47,9 @@ with a defensible evidence path for the unseen day.
    as non-official.
 3. Run the tail sensitivity grid only after real source arrival telemetry exists; the CSV bulk-load time
    is not a lateness distribution.
+4. Set a retention policy before scheduling frequent tail refreshes. Each snapshot is bounded, but the
+   append-only tail run log/stage is not yet compacted; retention must preserve whichever audit horizon
+   the team commits to.
 
 ## Verification commands
 

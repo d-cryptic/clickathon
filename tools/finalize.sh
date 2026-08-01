@@ -36,6 +36,15 @@ if ! [[ "$watermark_lag_s" =~ ^[0-9]+$ ]] || ! [[ "$overlap_s" =~ ^[0-9]+$ ]]; t
 fi
 
 target=${TARGET:-local}
+# This is a portable same-host guard only. ADR 0014 requires a distributed,
+# externally fenced lease before more than one scheduler can reach this target.
+source "$root_dir/tools/finalizer-lock.sh"
+case "$target" in
+  local) lock_identity="${CH_CONTAINER:-ch}.${CH_DATABASE:-default}" ;;
+  cloud) lock_identity="${CH_HOST:?CH_HOST must be set for TARGET=cloud}.${CH_DATABASE:-default}" ;;
+  *) echo "TARGET must be local or cloud" >&2; exit 2 ;;
+esac
+finalizer_lock_acquire "$target" "$lock_identity"
 
 query() {
   TARGET="$target" "$root_dir/tools/ch-run.sh" --query "$1"
@@ -75,12 +84,41 @@ if [ -n "$resume_run_id" ]; then
     echo "run $resume_run_id uses model $model_version, but MODEL_VERSION is $requested_model_version; resume with its original model or rebuild the baseline" >&2
     exit 1
   fi
-  run_id=$resume_run_id
+  case "$state" in
+    prepared)
+      # A crash can leave a partial, invisible stage. Never rerun it under the
+      # same sequence: future rows for a touched session would make argMax tie.
+      query "INSERT INTO finalizer_run_log VALUES (toUUID('$resume_run_id'), $run_sequence, 'aborted', toDateTime64('$source_from', 3), toDateTime64('$source_high_watermark', 3), toDateTime64('$event_watermark', 3), $affected_sessions, 0, '$model_version', now64(3))"
+      echo "aborted prepared run $resume_run_id without restaging; rerun tools/finalize.sh to create a fresh sequence" >&2
+      exit 1
+      ;;
+    staged)
+      recorded_staged_rows=$(scalar "SELECT staged_rows FROM finalizer_run_log WHERE run_id = toUUID('$resume_run_id') AND phase = 'staged' ORDER BY recorded_at DESC LIMIT 1")
+      actual_staged_rows=$(scalar "SELECT count() FROM session_delta_correction_stage WHERE run_id = toUUID('$resume_run_id')")
+      if [ "$recorded_staged_rows" != "$actual_staged_rows" ]; then
+        query "INSERT INTO finalizer_run_log VALUES (toUUID('$resume_run_id'), $run_sequence, 'aborted', toDateTime64('$source_from', 3), toDateTime64('$source_high_watermark', 3), toDateTime64('$event_watermark', 3), $affected_sessions, $actual_staged_rows, '$model_version', now64(3))"
+        echo "aborted staged run $resume_run_id: recorded $recorded_staged_rows markers but found $actual_staged_rows" >&2
+        exit 1
+      fi
+      query "INSERT INTO finalizer_run_log VALUES (toUUID('$resume_run_id'), $run_sequence, 'published', toDateTime64('$source_from', 3), toDateTime64('$source_high_watermark', 3), toDateTime64('$event_watermark', 3), $affected_sessions, $actual_staged_rows, '$model_version', now64(3))"
+      echo "published resumed finalizer run $resume_run_id: $affected_sessions sessions, $actual_staged_rows correction markers, event watermark $event_watermark, model $model_version"
+      exit 0
+      ;;
+    *)
+      echo "run $resume_run_id has unsupported resumable state $state" >&2
+      exit 1
+      ;;
+  esac
 else
   if [ "$pending_runs" != "0" ]; then
     echo "a finalizer run is prepared/staged; resume it explicitly before starting another" >&2
     exit 1
   fi
+
+  # The finalizer uses video_session_id as its state key. Recheck the source
+  # contract before allocating a visible run so a live admission violation
+  # cannot be silently merged into an existing lifecycle.
+  TARGET="$target" "$root_dir/tools/validate-source-contract.sh"
 
   source_high_watermark=$(scalar "SELECT max(ingested_at) FROM ev_raw")
   checkpoint_row=$(scalar "SELECT argMax(source_high_watermark, run_sequence), max(run_sequence) + 1, argMax(model_version, run_sequence) FROM finalizer_run_log WHERE phase = 'published'")

@@ -23,7 +23,7 @@
 | `tools/truncation-test.sh [cutoff]` | the model absorbs sessions with no `VideoSessionEnd`; a temporary staged exact tail equals raw-derived active concurrency at the cut and no interval extends beyond its 60-second grace | before the unseen run |
 | late-arrival probe | a marker arriving after its minute was aggregated changes the served value to an independent raw re-derivation | before the unseen run |
 | finalizer publication probe | staged correction rows do not affect a query before `published`; the same rows do after publication | after finalizer changes |
-| finalizer resume probe | re-running a prepared run produces the same target state, never a second additive correction | after finalizer changes |
+| finalizer resume probe | prepared runs abort rather than restage; only a staged run with its recorded marker count may publish | after finalizer changes |
 | session-incarnation probe | one reused `video_session_id` with two lifecycle ids cannot carry foreground/pause state across the boundary | before accepting a live source change |
 | tied-transition regression | same-timestamp pause/resume/heartbeat receives stop → start → activity precedence, independent of input row order | after state-order changes |
 | `tools/synthetic-edge-test.sh` | adversarial state transitions, dimension handoff, duplicate payload, error continuation, and exact-minute stop behavior | after state-machine changes |
