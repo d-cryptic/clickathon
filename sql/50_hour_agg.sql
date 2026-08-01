@@ -38,9 +38,19 @@
 --    running sum SEPARATELY at each of the 8 subsets of
 --    (platform, country, content_id) and store a peak per subset. Every stored
 --    peak is a genuine max of a genuine curve; none is derived from another.
---    Coarser levels use sentinels: platform/country = '*', content_id = -1
---    (the smallest real content_id in the file is 20,971,538, so -1 is
---    unambiguous). Query with the sentinels pinned — see the views below.
+--    Coarser levels collapse a dimension to a DISPLAY sentinel (platform and
+--    country '*', content_id -1) — but the sentinel is not the marker. The
+--    marker is `cube_level`, a 3-bit mask in the key saying which dimensions
+--    are REAL (bit 0 platform, bit 1 country, bit 2 content_id; 7 = full
+--    grain, 0 = grand total). ADR 0022: a marker and a value must not share
+--    a domain. The first cut of this file argued "-1 is unambiguous because
+--    the smallest real content_id in the file is 20,971,538" — and the
+--    unseen-day rehearsal (finding R9) promptly planted a session whose real
+--    content_id IS -1, which merged into the all-content rollup silently:
+--    hour 17 served peak 2 / integral 4080 on ('*','*',-1) where truth was
+--    2 / 3060 for the rollup and 1 / 1020 for the content — the two curves
+--    literally added. Query with cube_level pinned alongside the dim
+--    equalities — see the views below.
 --
 --    LIMITATION, stated so nobody discovers it during judging: the cube answers
 --    exactly the 8 subsets. A partial filter — `platform IN ('Android','iOS')`,
@@ -79,7 +89,7 @@
 
 
 -- ---------------------------------------------------------------------------
--- ORDER BY (platform, country, content_id, hour)
+-- ORDER BY (platform, country, content_id, cube_level, hour)
 --
 -- Deliberately the SAME SHAPE as cc_minute_delta, one grain coarser: dashboards
 -- pin the dimensions with equality and then scan a time RANGE, so every filter
@@ -89,9 +99,15 @@
 -- platform (10 + sentinel) then country (1 + sentinel) then content_id (3,357 +
 -- sentinel) then hour — per the official `schema-pk-cardinality-order` rule.
 --
--- The cube sentinels are what make this key work for the coarse levels too:
--- "all platforms" is the equality `platform = '*'`, still a prefix match, not a
--- scan-and-aggregate.
+-- The cube sentinels make the coarse levels a prefix match too: "all platforms"
+-- is the equality `platform = '*'`, not a scan-and-aggregate.
+--
+-- cube_level sits BETWEEN the dims and hour (ADR 0022): it must be in the key —
+-- it is what keeps a real content_id=-1 row and the all-content rollup from
+-- REPLACING each other under the engine — and putting it after the dims keeps
+-- every existing (dims, hour-range) read using the identical prefix. Given the
+-- dim tuple it is redundant on collision-free data (the bijection is why
+-- sentinel-only pinning worked at all), so it costs the index nothing.
 --
 -- PARTITION BY month, not day. This tier is 60x smaller than the minute tier
 -- (~26K rows for the whole 12-day file); daily partitions would produce many
@@ -104,9 +120,13 @@
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS cc_hour_agg
 (
-    platform    LowCardinality(String),     -- '*' = all platforms (cube level)
-    country     LowCardinality(String),     -- '*' = all countries (cube level)
-    content_id  Int64,                      -- -1  = all content   (cube level)
+    platform    LowCardinality(String),     -- '*' when bit 0 of cube_level clear
+    country     LowCardinality(String),     -- '*' when bit 1 of cube_level clear
+    content_id  Int64,                      -- -1  when bit 2 of cube_level clear
+    -- WHICH dims are real: bit 0 platform, bit 1 country, bit 2 content_id.
+    -- 7 = full grain, 0 = grand total. THIS marks a rollup row, not the
+    -- sentinel values above — a real content_id may itself be -1 (ADR 0022).
+    cube_level  UInt8,
     hour        DateTime,
 
     peak        Int64,                      -- max of the intra-hour running sum
@@ -120,7 +140,7 @@ CREATE TABLE IF NOT EXISTS cc_hour_agg
 )
 ENGINE = ReplacingMergeTree(computed_at)
 PARTITION BY toYYYYMM(hour)
-ORDER BY (platform, country, content_id, hour)
+ORDER BY (platform, country, content_id, cube_level, hour)
 SETTINGS index_granularity = 8192,
          -- per-column compression reads 0 for COMPACT parts; see docs/VERIFIED.md
          min_bytes_for_wide_part = 0;
@@ -145,20 +165,22 @@ SETTINGS index_granularity = 8192,
 -- the single statement between these two markers to run it over HTTP. Keep the
 -- markers immediately around ONE statement.
 -- ---------------------------------------------------------------------------
-INSERT INTO cc_hour_agg (platform, country, content_id, hour, peak, peak_minute, integral)
+INSERT INTO cc_hour_agg (platform, country, content_id, cube_level, hour, peak, peak_minute, integral)
 
 WITH
 -- STEP 1 — fan each delta row out to the 8 cube levels it belongs to.
 -- Bit 0 = keep platform, bit 1 = keep country, bit 2 = keep content_id; a
--- cleared bit collapses that dimension to its sentinel. 8x the input rows
--- (~200K here) and the fan-out happens BEFORE the running sum, which is the
--- whole point: each level gets its own curve rather than an aggregate of peaks.
+-- cleared bit collapses that dimension to its DISPLAY sentinel and the mask g
+-- itself is carried as cube_level. 8x the input rows (~200K here) and the
+-- fan-out happens BEFORE the running sum, which is the whole point: each level
+-- gets its own curve rather than an aggregate of peaks.
 levels AS
 (
     SELECT
         if(bitAnd(g, 1) = 1, platform,   '*') AS lv_platform,
         if(bitAnd(g, 2) = 2, country,    '*') AS lv_country,
         if(bitAnd(g, 4) = 4, content_id, -1)  AS lv_content_id,
+        toUInt8(g) AS cube_level,
         toStartOfHour(minute) AS hour,
         minute,
         delta
@@ -168,14 +190,17 @@ levels AS
 
 -- STEP 2 — collapse to one net delta per (level, minute). Collapsing coarser
 -- levels here, rather than after the window, is what keeps the running sum a
--- real curve for that level.
+-- real curve for that level. cube_level MUST be in this GROUP BY and in every
+-- partition below: it is the only thing separating a real content_id=-1 curve
+-- from the all-content rollup curve, whose display tuples are identical
+-- (ADR 0022 / rehearsal R9 — without it the two curves sum).
 change_points AS
 (
     SELECT
-        lv_platform, lv_country, lv_content_id, hour, minute,
+        lv_platform, lv_country, lv_content_id, cube_level, hour, minute,
         sum(delta) AS d
     FROM levels
-    GROUP BY lv_platform, lv_country, lv_content_id, hour, minute
+    GROUP BY lv_platform, lv_country, lv_content_id, cube_level, hour, minute
 ),
 
 -- STEP 3 — reconstruct the curve inside each hour, and measure how long each
@@ -190,7 +215,7 @@ change_points AS
 curve AS
 (
     SELECT
-        lv_platform, lv_country, lv_content_id, hour, minute,
+        lv_platform, lv_country, lv_content_id, cube_level, hour, minute,
         sum(d) OVER w_run AS concurrent,
         leadInFrame(
             toUInt32(minute), 1, toUInt32(toUInt32(hour) + 3600)
@@ -198,12 +223,12 @@ curve AS
     FROM change_points
     WINDOW
         w_run AS (
-            PARTITION BY lv_platform, lv_country, lv_content_id, hour
+            PARTITION BY lv_platform, lv_country, lv_content_id, cube_level, hour
             ORDER BY minute
             ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
         ),
         w_fwd AS (
-            PARTITION BY lv_platform, lv_country, lv_content_id, hour
+            PARTITION BY lv_platform, lv_country, lv_content_id, cube_level, hour
             ORDER BY minute
             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
         )
@@ -213,6 +238,7 @@ SELECT
     lv_platform,
     lv_country,
     lv_content_id,
+    cube_level,
     hour,
     max(concurrent) AS peak,
     -- THE TIE-BREAK, note 3 above / ADR 0014: earliest minute wins. This is the
@@ -226,7 +252,7 @@ SELECT
     argMax(minute, (concurrent, -toInt64(toUInt32(minute)))) AS peak_minute,
     sum(concurrent * hold_s) AS integral
 FROM curve
-GROUP BY lv_platform, lv_country, lv_content_id, hour;
+GROUP BY lv_platform, lv_country, lv_content_id, cube_level, hour;
 -- PUBLISH_EXTRACT_END:hour
 
 
@@ -254,18 +280,24 @@ GROUP BY lv_platform, lv_country, lv_content_id, hour;
 -- ===========================================================================
 
 -- ---------------------------------------------------------------------------
--- Hour grain, every cube level. The caller pins the level with the sentinels:
---   all dimensions   ->  platform = '*' AND country = '*' AND content_id = -1
---   one platform     ->  platform = 'Android' AND country = '*' AND content_id = -1
---   platform+content ->  platform = 'Android' AND country = '*' AND content_id = 42
--- Aggregating ACROSS rows of this view without pinning a level double counts,
--- because the cube levels overlap by construction. Pin, then read.
+-- Hour grain, every cube level. The caller pins the level with cube_level AND
+-- the dim equalities (the dims for the sort-key prefix, cube_level for
+-- correctness — ADR 0022):
+--   all dimensions   ->  cube_level = 0 AND platform = '*' AND country = '*' AND content_id = -1
+--   one platform     ->  cube_level = 1 AND platform = 'Android' AND country = '*' AND content_id = -1
+--   platform+content ->  cube_level = 5 AND platform = 'Android' AND country = '*' AND content_id = 42
+-- Pinning by the sentinels ALONE is ambiguous the day a real content_id equals
+-- -1 (rehearsal R9): both the rollup row and that content's own row match the
+-- value tuple, and an aggregate over the two double counts.
+-- Aggregating ACROSS rows of this view without pinning a level double counts
+-- too, because the cube levels overlap by construction. Pin, then read.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE VIEW v_concurrency_hour AS
 SELECT
     platform,
     country,
     content_id,
+    cube_level,
     hour,
     peak,
     peak_minute,
@@ -287,7 +319,11 @@ SELECT
     integral,
     integral / 3600 AS avg_concurrent
 FROM cc_hour_agg FINAL
+-- The dim equalities keep the sort-key prefix; cube_level = 0 is what actually
+-- selects the grand total — without it a real content_id=-1 row would be
+-- summed into the headline curve (ADR 0022).
 WHERE (platform = '*') AND (country = '*') AND (content_id = -1)
+  AND (cube_level = 0)
   AND (peak != 0 OR integral != 0);
 
 -- ---------------------------------------------------------------------------
@@ -313,6 +349,7 @@ SELECT
     platform,
     country,
     content_id,
+    cube_level,
     toDate(hour) AS day,
     -- Columns are TABLE-QUALIFIED throughout these two views. An output alias
     -- reuses the source column's name (`peak`, `integral`), and unqualified
@@ -338,7 +375,10 @@ SELECT
     count() AS active_hours
 FROM cc_hour_agg FINAL
 WHERE cc_hour_agg.peak != 0 OR cc_hour_agg.integral != 0
-GROUP BY platform, country, content_id, day;
+-- cube_level in the GROUP BY for the same reason it is in the table key: rows
+-- ('*','*',-1,cube 0) and ('*','*',-1,cube 4 — a real -1 content) must not
+-- re-merge here after the table kept them apart (ADR 0022).
+GROUP BY platform, country, content_id, cube_level, day;
 
 -- Day grain, all dimensions collapsed.
 CREATE OR REPLACE VIEW v_concurrency_day_total AS
@@ -353,6 +393,7 @@ SELECT
     count() AS active_hours
 FROM cc_hour_agg FINAL
 WHERE (platform = '*') AND (country = '*') AND (content_id = -1)
+  AND (cube_level = 0)
   AND (cc_hour_agg.peak != 0 OR cc_hour_agg.integral != 0)
 GROUP BY day;
 
@@ -394,7 +435,8 @@ GROUP BY day;
 -- truth AS
 -- (
 --     SELECT
---         lv_platform AS platform, lv_country AS country, lv_content_id AS content_id, g,
+--         lv_platform AS platform, lv_country AS country, lv_content_id AS content_id,
+--         toUInt8(g) AS cube_level,
 --         toStartOfHour(minute) AS hour,
 --         max(c)     AS peak_truth,
 --         sum(c) * 60 AS integral_truth
@@ -405,17 +447,19 @@ GROUP BY day;
 --         FROM expanded
 --         GROUP BY lv_platform, lv_country, lv_content_id, g, minute
 --     )
---     GROUP BY platform, country, content_id, g, hour
+--     GROUP BY platform, country, content_id, cube_level, hour
 -- )
 -- SELECT
---     g AS cube_level,
+--     cube_level,
 --     count() AS rows_compared,
 --     countIf(peak != peak_truth)         AS peak_mismatch,
 --     countIf(integral != integral_truth) AS integral_mismatch,
 --     if(peak_mismatch + integral_mismatch = 0, 'PASS', 'MISMATCH') AS verdict
 -- FROM truth
--- FULL OUTER JOIN v_concurrency_hour USING (platform, country, content_id, hour)
--- GROUP BY g ORDER BY g;
+-- -- cube_level is IN the join key (ADR 0022): joining on the display tuple
+-- -- alone would re-merge a real content_id=-1 with the all-content rollup.
+-- FULL OUTER JOIN v_concurrency_hour USING (platform, country, content_id, cube_level, hour)
+-- GROUP BY cube_level ORDER BY cube_level;
 --
 -- ---------------------------------------------------------------------------
 -- The specific case ADR 0003 names as the one that fails on bad clipping: an
