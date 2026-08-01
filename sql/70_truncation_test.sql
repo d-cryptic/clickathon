@@ -182,6 +182,85 @@ FROM sonyliv_trunc.cc_minute_delta_stump
 GROUP BY minute;
 
 -- ---------------------------------------------------------------------------
+-- Isolation probe: deltas rebuilt from scratch off the INCREMENTAL interval
+-- table. Comparing this against the incrementally-corrected cc_minute_delta
+-- separates two failure modes that would otherwise be indistinguishable —
+-- a bug in the correction-by-diff arithmetic vs a bug in session_intervals.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS sonyliv_trunc.cc_minute_delta_probe
+    AS sonyliv_trunc.cc_minute_delta;
+
+-- ---------------------------------------------------------------------------
+-- THE FIX under test. Identical to session_intervals except the version column
+-- is a monotonic BUILD counter rather than `interval_end`.
+--
+-- `ReplacingMergeTree(interval_end)` resolves duplicates by keeping the row
+-- with the LARGEST interval_end, on the assumption that a re-derivation can
+-- only ever extend an interval. Truncation falsifies that: a provisional
+-- interval carries TAIL_S seconds of grace because its run appeared to end,
+-- and the completed derivation may place the true end EARLIER (at a pause, or
+-- at a real VideoSessionEnd inside the grace window). The stale, longer,
+-- provisional row then outranks the correct one forever — and drags a stale
+-- `is_open = 1` along with it. Measured: 316 intervals, up to 60 s too long.
+--
+-- `build_version` is monotonic by construction, so the newest derivation wins
+-- whether the interval grew or shrank.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS sonyliv_trunc.session_intervals_fix
+(
+    video_session_id String,
+    user_id          String,
+    content_id       Int64,
+    platform         LowCardinality(String),
+    country          LowCardinality(String),
+    interval_start   DateTime64(3),
+    interval_end     DateTime64(3),
+    is_open          UInt8,
+    build_version    UInt64
+)
+ENGINE = ReplacingMergeTree(build_version)
+ORDER BY (video_session_id, interval_start)
+SETTINGS min_bytes_for_wide_part = 0;
+
+CREATE TABLE IF NOT EXISTS sonyliv_trunc.session_intervals_fix_prev
+(
+    video_session_id String,
+    user_id          String,
+    content_id       Int64,
+    platform         LowCardinality(String),
+    country          LowCardinality(String),
+    interval_start   DateTime64(3),
+    interval_end     DateTime64(3),
+    is_open          UInt8,
+    build_version    UInt64
+)
+ENGINE = MergeTree
+ORDER BY (video_session_id, interval_start)
+SETTINGS min_bytes_for_wide_part = 0;
+
+CREATE TABLE IF NOT EXISTS sonyliv_trunc.cc_minute_delta_fix
+    AS sonyliv_trunc.cc_minute_delta;
+
+CREATE OR REPLACE VIEW sonyliv_trunc.v_concurrency_minute_delta_total_fix AS
+SELECT
+    minute,
+    toInt64(sum(sum(delta)) OVER (PARTITION BY toStartOfHour(minute) ORDER BY minute)) AS concurrent
+FROM sonyliv_trunc.cc_minute_delta_fix
+GROUP BY minute;
+
+-- ---------------------------------------------------------------------------
+-- Two-row probe for the second finding: `starts` / `ends` are
+-- SimpleAggregateFunction(sum, UInt64), so the negative corrective row ADR 0006
+-- mandates cannot be represented. Inserting -100 stores 2^64-100 silently.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS sonyliv_trunc.probe_uint
+(
+    k      UInt8,
+    starts SimpleAggregateFunction(sum, UInt64)
+)
+ENGINE = AggregatingMergeTree ORDER BY k;
+
+-- ---------------------------------------------------------------------------
 -- Serving views over the test tables. Identical arithmetic to sql/20_views.sql
 -- (hour-partitioned running sum, ADR 0003) — if these diverged from production
 -- the test would be measuring the wrong thing.

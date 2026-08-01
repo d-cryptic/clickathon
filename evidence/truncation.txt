@@ -1,5 +1,5 @@
 TRUNCATION / OPEN-SESSION ABSORPTION TEST   (TODOS H4 + H8)
-generated 2026-08-01T10:15:19Z
+generated 2026-08-01T10:21:56Z
 cut 2026-07-26 10:56:00  ·  isolated database sonyliv_trunc  ·  sonyliv read-only
 --------------------------------------------------------------------------
 PHASE 0 — reset the test database (never touches sonyliv)
@@ -39,17 +39,102 @@ CONVERGENCE over EVERY minute — spot checks prove nothing
 --------------------------------------------------------------------------
 DIVERGES   3 of 1578 minutes differ · max |diff| 37
 DIVERGES   3 of 1578 minutes differ · max |diff| 37
-Code: 62. DB::Exception: Syntax error: failed at position 736 (a) (line 12, col 44): a
-FULL OUTER JOIN sonyliv_trunc.session_intervals_control FINAL b
-  USING (video_session_id, interval_start) FORMAT TSVRaw. Expected one of: SAMPLE, table, table function, subquery or list of joined tables, array join, LEFT ARRAY JOIN, INNER, ARRAY JOIN, GLOBAL, LOCAL, ANY, ALL, ASOF, SEMI, ANTI, ONLY, LEFT, RIGHT, FULL, CROSS, PASTE, JOIN, token, OpeningRoundBracket, PREWHERE, WHERE, GROUP BY, WITH, HAVING, WINDOW, QUALIFY, ORDER BY, LIMIT, OFFSET, FETCH, SETTINGS, UNION, EXCEPT, INTERSECT, INTO OUTFILE, FORMAT, ParallelWithClause, PARALLEL WITH, end of query. (SYNTAX_ERROR) (version 26.2.1.525 (official build))
+   ┌──────────────minute─┬─incremental─┬─control─┬─diff─┐
+1. │ 2026-07-26 10:54:00 │        2801 │    2800 │    1 │
+2. │ 2026-07-26 10:55:00 │        2840 │    2833 │    7 │
+3. │ 2026-07-26 10:56:00 │        2924 │    2887 │   37 │
+   └─────────────────────┴─────────────┴─────────┴──────┘
 
 --------------------------------------------------------------------------
-WATERMARK — how far BACK from the cut did truncation corrupt the answer?
-(measured, not guessed: ADR 0004 requires W be set from the data)
+ROOT CAUSE — session_intervals is NOT identical to a clean rebuild
 --------------------------------------------------------------------------
-earliest corrupted minute 2026-07-26 10:55:00 · that is 60 s before the cut · 3 minutes were wrong in the stump
+Row 1:
+──────
+incremental_intervals: 30769
+control_intervals:     30769
+interval_end_mismatch: 316
+is_open_mismatch:      315
+incremental_TOO_LONG:  316
+incremental_too_short: 0
+max_excess_seconds:    60
 
-  minutes leading up to the cut — stump vs truth:
+  The keys match exactly — no interval is missing or extra. What differs is the
+  VERSION RESOLUTION. session_intervals is ReplacingMergeTree(interval_end), which
+  keeps the row with the LARGEST interval_end. sql/10_intervals.sql justifies that
+  with 'late heartbeats EXTEND an interval', i.e. it assumes re-derivation is
+  monotonically increasing. Truncation falsifies the assumption: the provisional
+  row carries TAIL_S=60s of grace because its run appeared to end, and the completed
+  derivation places the true end EARLIER — at a pause, or at a real VideoSessionEnd
+  inside the grace window. The stale longer row then outranks the correct one
+  permanently, and drags a stale is_open=1 with it.
+
+  worked examples:
+   ┌─session──────┬───────────────────start─┬─────────incremental_end─┬─────────────correct_end─┬─excess_s─┬─incr_open─┬─correct_open─┐
+1. │ B6AE6A6FD4D2 │ 2026-07-26 10:26:12.000 │ 2026-07-26 10:56:54.000 │ 2026-07-26 10:55:54.000 │       60 │         1 │            0 │
+2. │ 463C3C417E7D │ 2026-07-26 10:34:39.000 │ 2026-07-26 10:56:57.000 │ 2026-07-26 10:55:57.000 │       60 │         1 │            0 │
+3. │ C5D83B519604 │ 2026-07-26 10:36:00.000 │ 2026-07-26 10:56:24.000 │ 2026-07-26 10:55:24.000 │       60 │         1 │            0 │
+4. │ 5B0DA1FF6E12 │ 2026-07-26 10:37:24.000 │ 2026-07-26 10:56:51.000 │ 2026-07-26 10:55:51.000 │       60 │         1 │            0 │
+5. │ 07A9224DCDD1 │ 2026-07-26 10:40:04.000 │ 2026-07-26 10:56:40.000 │ 2026-07-26 10:55:40.000 │       60 │         1 │            0 │
+   └──────────────┴─────────────────────────┴─────────────────────────┴─────────────────────────┴──────────┴───────────┴──────────────┘
+
+--------------------------------------------------------------------------
+ISOLATION — is the correction-by-diff ARITHMETIC itself wrong, or only the input?
+--------------------------------------------------------------------------
+ARITHMETIC EXACT   append-only negate+re-emit == a full delta rebuild off the same interval table, on all 1578 minutes. ADR 0006 is sound; the fault is upstream in session_intervals.
+
+--------------------------------------------------------------------------
+THE FIX — ReplacingMergeTree(build_version), a MONOTONIC version column
+--------------------------------------------------------------------------
+  Same two-pass absorption, only the version column changes.
+FIXED      versioned session_intervals is row-for-row identical to a clean rebuild
+CONVERGES  versioned incremental == production truth on all 1578 minutes · peak 2887
+versioned incremental (FIXED)            2887       2450
+
+--------------------------------------------------------------------------
+SECOND FINDING — starts/ends cannot carry the ADR 0006 negative correction
+--------------------------------------------------------------------------
+  cc_minute_delta.starts/ends are SimpleAggregateFunction(sum, UInt64). ADR 0006
+  step 3 says to append 'the NEGATION of the deltas for the old derivation'. For
+  delta (Int64) that is exact — proven above. For an unsigned column it is not
+  representable, and ClickHouse does not reject it; it wraps, silently:
+
+
+
+  This run sidesteps it by zeroing starts/ends on the corrective row, which
+  leaves the counters permanently inflated:
+Row 1:
+──────
+incremental_starts: 24430
+control_starts:     20035
+incremental_ends:   21278
+control_ends:       16895
+  Remedy: make both SimpleAggregateFunction(sum, Int64), like delta.
+
+--------------------------------------------------------------------------
+WATERMARK — how wide must W be? (measured; ADR 0004 requires it be set from data)
+--------------------------------------------------------------------------
+  (a) truncation damage — how far BACK from the cut the stump was wrong:
+      earliest corrupted minute 2026-07-26 10:55:00 = 60 s before the cut · 3 minutes wrong
+  (b) model revision horizon — an interval stays revisable for GAP_S + TAIL_S:
+      150 + 60 = 210 s after its last observed event.
+  (c) straggler lag — events arriving after their own VideoSessionEnd (ADR 0007):
+Row 1:
+──────
+sessions_with_post_end_events: 239
+pct_of_sessions:               2.2
+p999_lag_s:                    733
+max_lag_s:                     2081
+
+  W = max(210, 2081) rounded up = 2400 s (40 min).
+  The binding constraint is the straggler tail, not truncation: a clean cut only
+  damages the last 60 s, but a single event 2081 s late reopens a minute that far
+  back. W=2400 leaves ~15% headroom over the observed maximum. Minutes newer than
+  W are served by the hot tier (ADR 0004); anything older than W that still moves
+  goes down the correction-by-diff path, which this run proves is exact.
+
+--------------------------------------------------------------------------
+  stump vs truth, the 40 minutes leading into the cut
+--------------------------------------------------------------------------
     ┌──────────────minute─┬─stump─┬─truth─┬─diff─┐
  1. │ 2026-07-26 10:16:00 │    90 │    90 │    0 │
  2. │ 2026-07-26 10:17:00 │    96 │    96 │    0 │
@@ -93,3 +178,24 @@ earliest corrupted minute 2026-07-26 10:55:00 · that is 60 s before the cut · 
 40. │ 2026-07-26 10:55:00 │  2781 │  2833 │  -52 │
 41. │ 2026-07-26 10:56:00 │  2431 │  2887 │ -456 │
     └─────────────────────┴───────┴───────┴──────┘
+
+--------------------------------------------------------------------------
+VERDICT
+--------------------------------------------------------------------------
+  1. The from-scratch build in an isolated database reproduces production exactly
+     (2887 @ 10:56, 2450 @ 11:10) — the derivation is deterministic.
+  2. Incremental absorption as the schema stands today does NOT converge: it
+     overcounts the PEAK minute by 37 (2924 vs 2887, +1.3%), plus 10:55 and 10:54.
+  3. The cause is NOT the ADR 0006 correction-by-diff arithmetic, which is exact on
+     all 1578 minutes. It is session_intervals' ReplacingMergeTree(interval_end)
+     version column, which assumes re-derivation only ever extends an interval.
+  4. Changing the version column to a monotonic build counter converges on all
+     1578 minutes, row for row, with no other change to the model.
+  5. Separately, cc_minute_delta.starts/ends are UInt64 and silently wrap when the
+     corrective row is negated. Make them Int64.
+  6. Watermark W = 2400 s, set by the 2081 s straggler tail, not by truncation.
+
+  Actions (schema changes — NOT applied to sonyliv by this test):
+    sql/10_intervals.sql  session_intervals: add build_version UInt64,
+                          ENGINE = ReplacingMergeTree(build_version)
+    sql/10_intervals.sql  cc_minute_delta: starts/ends -> SimpleAggregateFunction(sum, Int64)

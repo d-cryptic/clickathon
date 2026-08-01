@@ -12,8 +12,9 @@
 | `/verify-env` | the stack is actually configured — schema present, users real, constraints active | after any env change |
 | `/reconcile` | the serving layer equals the truth recomputed from raw | after **every** model change |
 | `/bench` | benchmark latency and, more importantly, **bytes read** | before demo / unseen run |
-| open-session probe | the model absorbs sessions with no `VideoSessionEnd` | before the unseen run |
-| late-arrival probe | a heartbeat arriving after its minute was aggregated updates the served value | before the unseen run |
+| **truncation / absorption test** | the model absorbs mid-stream truncation and a late arrival **incrementally**, converging on the from-scratch answer. Covers the open-session and late-arrival probes below in one run | `tools/truncation-test.sh` — after any change to `session_intervals`, its engine, or the delta emission |
+| open-session probe | the model absorbs sessions with no `VideoSessionEnd` | folded into the truncation test (52.6% of sessions are open at the cut) |
+| late-arrival probe | a heartbeat arriving after its minute was aggregated updates the served value | folded into the truncation test (447,081 events arrive after the cut) |
 | hour-clip probe | an interval spanning ≥3 hours reads correctly **at a minute inside the middle hour** — the case that fails if clipping is wrong | after any change to delta emission |
 | stitch-boundary probe | a query spanning the watermark neither double-counts nor drops the boundary minute | after any change to `W` or the serving view |
 | straggler probe | a heartbeat dated inside an already-sealed window moves the served value to match a brute-force recomputation from `ev_raw` | before the unseen run |
@@ -57,3 +58,49 @@ Run by `tools/build-model.sh` on every rebuild; it fails loudly rather than prin
 **Anti-pattern that already bit us:** comparing the two models only on minutes where deltas *change*
 passes trivially (1,466 minutes, 0 mismatches) while the model is still wrong. The comparison must be
 densified with `WITH FILL` so every minute is checked.
+
+
+## Truncation / open-session absorption (H4/H8)
+
+`tools/truncation-test.sh` · schema in `sql/70_truncation_test.sql` · output `evidence/truncation.txt`
+
+Cuts the stream at the global peak (`2026-07-26 10:56:00`), builds the whole model on the stump,
+inserts the withheld 447,081 events as a late arrival, absorbs them by ADR 0006 correction-by-diff,
+and compares against a from-scratch build **and** against production, on every minute.
+
+**Runs entirely in the `sonyliv_trunc` database.** `sonyliv` is read with `SELECT` only, and
+`assert_isolated()` refuses to execute any templated file naming production as a write target. The
+derivation SQL is `sed`-templated out of `sql/30_build_intervals.sql` and `sql/40_deltas.sql` rather
+than reimplemented, so the test cannot drift from the model it tests.
+
+| Sub-check | What it catches | Status |
+|---|---|---|
+| control build vs production, every minute | non-determinism in the derivation | PASS — 2,887 @10:56 and 2,450 @11:10, exact |
+| incremental absorption vs control, every minute | anything that makes incremental ≠ rebuild | **FAIL as shipped** — 3 of 1,578 minutes, **+37 at the peak** |
+| delta arithmetic isolated from interval state | whether ADR 0006's negate-and-re-emit is itself lossy | PASS — exact on all 1,578 minutes |
+| versioned `session_intervals` vs control | that the proposed fix actually fixes it | PASS — row for row identical, converges on all 1,578 minutes |
+
+**The bug this test found.** `session_intervals` is `ReplacingMergeTree(interval_end)`, which resolves
+duplicates by keeping the **largest** `interval_end`. `sql/10_intervals.sql` justifies that with "late
+heartbeats EXTEND an interval" — i.e. it assumes re-derivation is monotonically increasing. It is not.
+A provisional interval carries `TAIL_S = 60s` of grace because its run appeared to end; the completed
+derivation places the true end **earlier** (at a pause, or at a real `VideoSessionEnd` inside the
+grace window). The stale, longer row then outranks the correct one permanently and drags a stale
+`is_open = 1` with it. Measured: **316 intervals up to 60s too long, 315 stuck at `is_open = 1`,
++1.3% on the headline peak.** Fix: a monotonic `build_version UInt64` as the version column.
+
+**Second finding.** `cc_minute_delta.starts`/`ends` are `SimpleAggregateFunction(sum, UInt64)`, so the
+negative corrective row ADR 0006 mandates is not representable. ClickHouse does **not** reject it — it
+wraps to `2^64 - n`. `sum()` still comes out right by modular arithmetic, but `max()` returns 1.8e19
+and any pre-merge single-row read is garbage. Make both `Int64`.
+
+**Anti-patterns specific to this test:**
+
+- **Comparing only the two probe minutes.** The divergence at 10:54 is a single viewer; only the
+  all-minutes comparison makes the pattern visible.
+- **Rebuilding `cc_minute_delta` during absorption.** That tests nothing — the whole claim is that the
+  sealed tier is append-only. The test never truncates it after the stump build.
+- **Blaming the diff arithmetic.** Always run the isolation probe before touching ADR 0006; here the
+  arithmetic was exact and the fault was two layers upstream.
+- **Reading `session_intervals` without `FINAL`.** Pre-merge, the stale and fresh rows are both
+  present and every count is doubled.

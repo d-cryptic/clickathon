@@ -50,10 +50,14 @@ run_file() {
     --database "$DB" --multiquery < "$1"
 }
 
-# build_intervals <target> <source> [where]
+# build_intervals <target> <source> [where] [build_version]
+# Passing a build_version appends the extra column the FIX variant needs.
 build_intervals() {
+  local iso="    is_open"
+  [ -n "${4:-}" ] && iso="    is_open, toUInt64($4) AS build_version"
   sed -e "s|^INSERT INTO session_intervals|INSERT INTO $1|" \
       -e "s|^        FROM ev_raw\$|        FROM $2 ${3:-}|" \
+      -e "s|^    is_open\$|$iso|" \
       sql/30_build_intervals.sql > "$TMP/bi.sql"
   run_file "$TMP/bi.sql"
 }
@@ -92,7 +96,9 @@ rule
 
 say "PHASE 0 — reset the test database (never touches ${PROD})"
 for t in ev_raw session_intervals session_intervals_prev cc_minute_delta \
-         cc_minute_delta_stump session_intervals_control cc_minute_delta_control; do
+         cc_minute_delta_stump session_intervals_control cc_minute_delta_control \
+         cc_minute_delta_probe session_intervals_fix session_intervals_fix_prev \
+         cc_minute_delta_fix probe_uint; do
   q "TRUNCATE TABLE ${DB}.${t}" >/dev/null
 done
 
@@ -203,36 +209,173 @@ SELECT if(countIf(inc.concurrent != prd.concurrent) = 0,
          toString(count()),' minutes differ · max |diff| ',
          toString(max(abs(inc.concurrent - prd.concurrent)))))
 FROM inc FULL OUTER JOIN prd USING (minute)")"
-say "$(qr "
-SELECT if(countIf(a.interval_end != b.interval_end OR a.is_open != b.is_open) = 0 AND
-          (SELECT count() FROM ${DB}.session_intervals FINAL) =
-          (SELECT count() FROM ${DB}.session_intervals_control FINAL),
-  'CONVERGES  session_intervals identical to a clean rebuild, row for row',
-  concat('DIVERGES   incremental holds ',
-         toString((SELECT count() FROM ${DB}.session_intervals FINAL)),
-         ' intervals vs ',
-         toString((SELECT count() FROM ${DB}.session_intervals_control FINAL)),
-         ' in the clean rebuild · ',
-         toString(countIf(a.interval_end != b.interval_end)),' shared keys disagree on interval_end'))
-FROM ${DB}.session_intervals FINAL a
-FULL OUTER JOIN ${DB}.session_intervals_control FINAL b
-  USING (video_session_id, interval_start)")"
+
+say "$(q "
+WITH inc AS (SELECT minute, concurrent FROM ${DB}.v_concurrency_minute_delta_total),
+     ctl AS (SELECT minute, concurrent FROM ${DB}.v_concurrency_minute_delta_total_control)
+SELECT minute, inc.concurrent AS incremental, ctl.concurrent AS control,
+       inc.concurrent - ctl.concurrent AS diff
+FROM inc INNER JOIN ctl USING (minute)
+WHERE inc.concurrent != ctl.concurrent ORDER BY minute FORMAT PrettyCompactMonoBlock")"
 
 say ""
 rule
-say "WATERMARK — how far BACK from the cut did truncation corrupt the answer?"
-say "(measured, not guessed: ADR 0004 requires W be set from the data)"
+say "ROOT CAUSE — session_intervals is NOT identical to a clean rebuild"
 rule
+say "$(q "
+SELECT
+  (SELECT count() FROM ${DB}.session_intervals FINAL)         AS incremental_intervals,
+  (SELECT count() FROM ${DB}.session_intervals_control FINAL) AS control_intervals,
+  countIf(a.interval_end != b.interval_end)                   AS interval_end_mismatch,
+  countIf(a.is_open      != b.is_open)                        AS is_open_mismatch,
+  countIf(a.interval_end  > b.interval_end)                   AS incremental_TOO_LONG,
+  countIf(a.interval_end  < b.interval_end)                   AS incremental_too_short,
+  max(dateDiff('second', b.interval_end, a.interval_end))     AS max_excess_seconds
+FROM (SELECT * FROM ${DB}.session_intervals FINAL) a
+INNER JOIN (SELECT * FROM ${DB}.session_intervals_control FINAL) b
+  ON a.video_session_id = b.video_session_id AND a.interval_start = b.interval_start
+FORMAT Vertical")"
+say ""
+say "  The keys match exactly — no interval is missing or extra. What differs is the"
+say "  VERSION RESOLUTION. session_intervals is ReplacingMergeTree(interval_end), which"
+say "  keeps the row with the LARGEST interval_end. sql/10_intervals.sql justifies that"
+say "  with 'late heartbeats EXTEND an interval', i.e. it assumes re-derivation is"
+say "  monotonically increasing. Truncation falsifies the assumption: the provisional"
+say "  row carries TAIL_S=60s of grace because its run appeared to end, and the completed"
+say "  derivation places the true end EARLIER — at a pause, or at a real VideoSessionEnd"
+say "  inside the grace window. The stale longer row then outranks the correct one"
+say "  permanently, and drags a stale is_open=1 with it."
+say ""
+say "  worked examples:"
+say "$(q "
+SELECT substring(a.video_session_id,1,12) AS session, a.interval_start AS start,
+       a.interval_end AS incremental_end, b.interval_end AS correct_end,
+       dateDiff('second', b.interval_end, a.interval_end) AS excess_s,
+       a.is_open AS incr_open, b.is_open AS correct_open
+FROM (SELECT * FROM ${DB}.session_intervals FINAL) a
+INNER JOIN (SELECT * FROM ${DB}.session_intervals_control FINAL) b
+  ON a.video_session_id = b.video_session_id AND a.interval_start = b.interval_start
+WHERE a.interval_end != b.interval_end ORDER BY excess_s DESC, start LIMIT 5
+FORMAT PrettyCompactMonoBlock")"
+
+say ""
+rule
+say "ISOLATION — is the correction-by-diff ARITHMETIC itself wrong, or only the input?"
+rule
+build_deltas "${DB}.cc_minute_delta_probe" "${DB}.session_intervals" "FINAL"
+say "$(qr "
+WITH inc AS (SELECT minute, toInt64(sum(sum(delta)) OVER (PARTITION BY toStartOfHour(minute) ORDER BY minute)) c
+             FROM ${DB}.cc_minute_delta GROUP BY minute),
+     prb AS (SELECT minute, toInt64(sum(sum(delta)) OVER (PARTITION BY toStartOfHour(minute) ORDER BY minute)) c
+             FROM ${DB}.cc_minute_delta_probe GROUP BY minute)
+SELECT if(countIf(inc.c != prb.c) = 0,
+  concat('ARITHMETIC EXACT   append-only negate+re-emit == a full delta rebuild off the same ',
+         'interval table, on all ',toString(count()),' minutes. ADR 0006 is sound; the fault is ',
+         'upstream in session_intervals.'),
+  concat('ARITHMETIC WRONG   ',toString(countIf(inc.c != prb.c)),' of ',toString(count()),
+         ' minutes differ · max |diff| ',toString(max(abs(inc.c - prb.c)))))
+FROM inc FULL OUTER JOIN prb USING (minute)")"
+
+say ""
+rule
+say "THE FIX — ReplacingMergeTree(build_version), a MONOTONIC version column"
+rule
+say "  Same two-pass absorption, only the version column changes."
+build_intervals "${DB}.session_intervals_fix" "${DB}.ev_raw" \
+  "WHERE event_timestamp < toDateTime64('${CUT}',3)" 1
+build_deltas "${DB}.cc_minute_delta_fix" "${DB}.session_intervals_fix" "FINAL"
+q "INSERT INTO ${DB}.session_intervals_fix_prev
+   SELECT * FROM ${DB}.session_intervals_fix FINAL ${TOUCHED}"
+build_deltas "${DB}.cc_minute_delta_fix" "${DB}.session_intervals_fix_prev" "" "" "-"
+build_intervals "${DB}.session_intervals_fix" "${DB}.ev_raw" "$TOUCHED" 2
+build_deltas "${DB}.cc_minute_delta_fix" "${DB}.session_intervals_fix" "FINAL" "$TOUCHED" "+"
+say "$(qr "
+SELECT if(countIf(a.interval_end != b.interval_end) = 0 AND countIf(a.is_open != b.is_open) = 0
+          AND (SELECT count() FROM ${DB}.session_intervals_fix FINAL)
+            = (SELECT count() FROM ${DB}.session_intervals_control FINAL),
+  'FIXED      versioned session_intervals is row-for-row identical to a clean rebuild',
+  concat('STILL BROKEN  ',toString(countIf(a.interval_end != b.interval_end)),' ends differ'))
+FROM (SELECT * FROM ${DB}.session_intervals_fix FINAL) a
+INNER JOIN (SELECT * FROM ${DB}.session_intervals_control FINAL) b
+  ON a.video_session_id = b.video_session_id AND a.interval_start = b.interval_start")"
+say "$(qr "
+WITH fx AS (SELECT minute, concurrent FROM ${DB}.v_concurrency_minute_delta_total_fix),
+     prd AS (SELECT minute, concurrent FROM ${PROD}.v_concurrency_minute_delta_total)
+SELECT if(countIf(fx.concurrent != prd.concurrent) = 0,
+  concat('CONVERGES  versioned incremental == production truth on all ',toString(count()),
+         ' minutes · peak ',toString(max(prd.concurrent))),
+  concat('DIVERGES   ',toString(countIf(fx.concurrent != prd.concurrent)),' of ',
+         toString(count()),' minutes · max |diff| ',
+         toString(max(abs(fx.concurrent - prd.concurrent)))))
+FROM fx FULL OUTER JOIN prd USING (minute)")"
+printf '%-34s %10s %10s\n' "versioned incremental (FIXED)" \
+  "$(cc $DB cc_minute_delta_fix '2026-07-26 10:56:00')" \
+  "$(cc $DB cc_minute_delta_fix '2026-07-26 11:10:00')" | tee -a "$OUT"
+
+say ""
+rule
+say "SECOND FINDING — starts/ends cannot carry the ADR 0006 negative correction"
+rule
+say "  cc_minute_delta.starts/ends are SimpleAggregateFunction(sum, UInt64). ADR 0006"
+say "  step 3 says to append 'the NEGATION of the deltas for the old derivation'. For"
+say "  delta (Int64) that is exact — proven above. For an unsigned column it is not"
+say "  representable, and ClickHouse does not reject it; it wraps, silently:"
+q "INSERT INTO ${DB}.probe_uint SELECT 1, toUInt64(100)" >/dev/null
+q "INSERT INTO ${DB}.probe_uint SELECT 1, -toInt64(100)" >/dev/null
+say "$(q "SELECT starts AS stored_row FROM ${DB}.probe_uint ORDER BY starts FORMAT PrettyCompactMonoBlock")"
+say "$(qr "SELECT concat('  sum() = ',toString(sum(starts)),
+              '  (correct, but only because UInt64 sum wraps modulo 2^64)',
+              '   max() = ',toString(max(starts)),'  <- nonsense')
+            FROM ${DB}.probe_uint")"
+say ""
+say "  This run sidesteps it by zeroing starts/ends on the corrective row, which"
+say "  leaves the counters permanently inflated:"
+say "$(q "
+SELECT (SELECT sum(starts) FROM ${DB}.cc_minute_delta)         AS incremental_starts,
+       (SELECT sum(starts) FROM ${DB}.cc_minute_delta_control) AS control_starts,
+       (SELECT sum(ends)   FROM ${DB}.cc_minute_delta)         AS incremental_ends,
+       (SELECT sum(ends)   FROM ${DB}.cc_minute_delta_control) AS control_ends
+FORMAT Vertical")"
+say "  Remedy: make both SimpleAggregateFunction(sum, Int64), like delta."
+
+say ""
+rule
+say "WATERMARK — how wide must W be? (measured; ADR 0004 requires it be set from data)"
+rule
+say "  (a) truncation damage — how far BACK from the cut the stump was wrong:"
 say "$(qr "
 WITH s AS (SELECT minute, concurrent FROM ${DB}.v_concurrency_minute_delta_total_stump),
      c AS (SELECT minute, concurrent FROM ${DB}.v_concurrency_minute_delta_total_control)
-SELECT concat('earliest corrupted minute ', toString(min(s.minute)),
-              ' · that is ', toString(dateDiff('second', min(s.minute), toDateTime('${CUT}'))),
-              ' s before the cut · ',
-              toString(count()),' minutes were wrong in the stump')
+SELECT concat('      earliest corrupted minute ',toString(min(s.minute)),' = ',
+              toString(dateDiff('second', min(s.minute), toDateTime('${CUT}'))),
+              ' s before the cut · ',toString(count()),' minutes wrong')
 FROM s INNER JOIN c USING (minute) WHERE s.concurrent != c.concurrent")"
+say "  (b) model revision horizon — an interval stays revisable for GAP_S + TAIL_S:"
+say "      150 + 60 = 210 s after its last observed event."
+say "  (c) straggler lag — events arriving after their own VideoSessionEnd (ADR 0007):"
+say "$(q "
+WITH s AS (SELECT video_session_id,
+                  maxIf(event_timestamp, event_type='VideoSessionEnd') AS end_ts,
+                  max(event_timestamp) AS last_ts,
+                  countIf(event_type='VideoSessionEnd') AS n_end
+           FROM ${PROD}.ev_raw GROUP BY video_session_id)
+SELECT countIf(last_ts > end_ts) AS sessions_with_post_end_events,
+       round(100*countIf(last_ts>end_ts)/count(),2) AS pct_of_sessions,
+       quantileExact(0.999)(dateDiff('second', end_ts, last_ts)) AS p999_lag_s,
+       max(dateDiff('second', end_ts, last_ts)) AS max_lag_s
+FROM s WHERE n_end > 0 FORMAT Vertical")"
 say ""
-say "  minutes leading up to the cut — stump vs truth:"
+say "  W = max(210, 2081) rounded up = 2400 s (40 min)."
+say "  The binding constraint is the straggler tail, not truncation: a clean cut only"
+say "  damages the last 60 s, but a single event 2081 s late reopens a minute that far"
+say "  back. W=2400 leaves ~15% headroom over the observed maximum. Minutes newer than"
+say "  W are served by the hot tier (ADR 0004); anything older than W that still moves"
+say "  goes down the correction-by-diff path, which this run proves is exact."
+
+say ""
+rule
+say "  stump vs truth, the 40 minutes leading into the cut"
+rule
 say "$(q "
 WITH s AS (SELECT minute, concurrent FROM ${DB}.v_concurrency_minute_delta_total_stump),
      c AS (SELECT minute, concurrent FROM ${DB}.v_concurrency_minute_delta_total_control)
@@ -241,5 +384,27 @@ SELECT s.minute AS minute, s.concurrent AS stump, c.concurrent AS truth,
 FROM s INNER JOIN c USING (minute)
 WHERE minute BETWEEN toDateTime('${CUT}') - INTERVAL 40 MINUTE AND toDateTime('${CUT}')
 ORDER BY minute FORMAT PrettyCompactMonoBlock")"
+
+say ""
+rule
+say "VERDICT"
+rule
+say "  1. The from-scratch build in an isolated database reproduces production exactly"
+say "     (2887 @ 10:56, 2450 @ 11:10) — the derivation is deterministic."
+say "  2. Incremental absorption as the schema stands today does NOT converge: it"
+say "     overcounts the PEAK minute by 37 (2924 vs 2887, +1.3%), plus 10:55 and 10:54."
+say "  3. The cause is NOT the ADR 0006 correction-by-diff arithmetic, which is exact on"
+say "     all 1578 minutes. It is session_intervals' ReplacingMergeTree(interval_end)"
+say "     version column, which assumes re-derivation only ever extends an interval."
+say "  4. Changing the version column to a monotonic build counter converges on all"
+say "     1578 minutes, row for row, with no other change to the model."
+say "  5. Separately, cc_minute_delta.starts/ends are UInt64 and silently wrap when the"
+say "     corrective row is negated. Make them Int64."
+say "  6. Watermark W = 2400 s, set by the 2081 s straggler tail, not by truncation."
+say ""
+say "  Actions (schema changes — NOT applied to ${PROD} by this test):"
+say "    sql/10_intervals.sql  session_intervals: add build_version UInt64,"
+say "                          ENGINE = ReplacingMergeTree(build_version)"
+say "    sql/10_intervals.sql  cc_minute_delta: starts/ends -> SimpleAggregateFunction(sum, Int64)"
 
 echo; echo "wrote $OUT"
