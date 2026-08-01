@@ -381,6 +381,59 @@ written_rows() {
 }
 
 # ---------------------------------------------------------------------------
+# stmt_landed <query_id> — did this statement already complete server-side?
+#
+# THE DEDUP TOKEN DOES NOT PROTECT THE NEGATE AND EMIT REPLAYS. ADR 0013
+# attached insert_deduplication_token to every heavy statement as "belt and
+# braces" against a resumed run re-issuing a statement that had already landed.
+# The crash matrix (PHASE 12 of tools/publish-test.sh) measured that belt
+# broken: on Cloud 26.2.1.525, a replayed INSERT SELECT into the
+# SharedAggregatingMergeTree delta table executed BOTH times — system.query_log
+# shows two QueryFinish entries for the same query_id, each with written_rows>0
+# — and the served number double-counted the correction. (The original
+# verification evidently used a different insert shape.) Every OTHER phase is
+# replay-safe by construction: derive re-inserts the same rows at the same
+# pinned build_version (Replacing absorbs them), prune and the hours/users
+# re-derivations are idempotent. Negate and emit are APPEND-ONLY and are not.
+#
+# So a resumed run decides replays from the server's own record instead: wait
+# until the query_id is no longer executing (a crashed CLIENT does not stop a
+# statement already running server-side), flush the log, and treat a recorded
+# successful finish as "landed — do not re-issue". The token stays attached as
+# a second layer, but nothing load-bearing rests on it any more. ADR 0019.
+# ---------------------------------------------------------------------------
+# Both reads are checked for a NUMERIC answer before being believed. This
+# function is called from an `if` condition, where `set -e` is suspended: a
+# failed curl would otherwise yield "" and `[ "" != "0" ]` would read as
+# "landed", silently DROPPING a correction that never ran. An unreadable
+# answer is a hard stop, not a guess — in this one place, guessing wrong in
+# either direction corrupts the served number.
+stmt_landed() {
+  local qid="$1" tries=0 running finished
+  while :; do
+    running="$(qr "SELECT toString(count()) FROM system.processes WHERE query_id = '$qid'")"
+    case "$running" in
+      0) break ;;
+      ''|*[!0-9]*) die "cannot read system.processes for $qid (got '$running').
+Refusing to guess whether that statement is still running." ;;
+    esac
+    tries=$((tries+1))
+    [ "$tries" -le 120 ] || die "statement $qid is still executing server-side after 120 s.
+Refusing to race it: wait for it to finish (or kill it) and re-run."
+    sleep 1
+  done
+  q "SYSTEM FLUSH LOGS" >/dev/null 2>&1 || true
+  finished="$(qr "SELECT toString(countIf(type = 'QueryFinish')) FROM system.query_log
+                  WHERE query_id = '$qid'")"
+  case "$finished" in
+    ''|*[!0-9]*) die "cannot read system.query_log for $qid (got '$finished').
+Refusing to guess whether that statement landed: re-issuing a landed append
+doubles a correction, skipping an unlanded one drops it." ;;
+  esac
+  [ "$finished" != "0" ]
+}
+
+# ---------------------------------------------------------------------------
 # STATUS
 # ---------------------------------------------------------------------------
 if [ "$STATUS_ONLY" = 1 ]; then
@@ -410,7 +463,8 @@ publish_once() {
   recover_claims
 
   # -- resume an in-flight run, or claim a new one ---------------------------
-  local inflight run_id phase cursor_from cursor_to sessions BV
+  local inflight run_id phase cursor_from cursor_to sessions BV RESUMED_AT
+  RESUMED_AT=""
   inflight="$(qr "SELECT toString(ifNull(min(run_id), 0)) FROM (
                     SELECT run_id FROM cc_publish_runs
                     GROUP BY run_id
@@ -422,6 +476,7 @@ publish_once() {
     cursor_from="$(qr "SELECT toString(any(cursor_from)) FROM cc_publish_runs WHERE run_id = $run_id")"
     cursor_to="$(qr "SELECT toString(any(cursor_to))   FROM cc_publish_runs WHERE run_id = $run_id")"
     sessions="$(qr "SELECT toString(count()) FROM cc_publish_batch WHERE run_id = $run_id")"
+    RESUMED_AT="$phase"
     # The crashed run's OWN build_version, from its claimed/derived notes.
     # 0 only for a legacy (pre-ADR-0019) run; resolved after SCOPE is known.
     BV="$(qr "SELECT toString(max(toUInt64OrZero(extract(note, 'bv=(\\d+)'))))
@@ -556,6 +611,7 @@ publish_once() {
     fi
 
     BV="$(alloc_bv)"
+    RESUMED_AT=""
     mark "$run_id" claimed "$cursor_from" "$cursor_to" "$sessions" 0 0 "bv=$BV"
     phase=claimed
     crash_if claimed
@@ -589,20 +645,28 @@ BV here deletes the run's own derivation. Inspect cc_publish_runs run $run_id." 
   # is promoted, because it reads session_intervals FINAL.
   if [ "$phase" = claimed ]; then
     lease_beat
-    template_or_die sql/40_deltas.sql "$TMP/negate.sql" 'PUBLISH_NEGATE' \
-      -e "s|^    FROM session_intervals FINAL\$|    FROM session_intervals FINAL WHERE $SCOPE /*PUBLISH_SCOPE*/|" \
-      -e "s|^    sum(d)  AS delta,\$|    -sum(d)  AS delta, /*PUBLISH_NEGATE*/|" \
-      -e "s|^    sum(op) AS starts,\$|    -sum(op) AS starts,|" \
-      -e "s|^    sum(cl) AS ends\$|    -sum(cl) AS ends|"
-    grep -q 'PUBLISH_SCOPE' "$TMP/negate.sql" || die "negate template lost its scope"
-    t0=$(now_ms)
-    qf "$TMP/negate.sql" "publish-${run_id}-negate" "&insert_deduplication_token=${run_id}:negate" >/dev/null
-    crash_if negate_stmt
-    t1=$(now_ms); rows="$(written_rows "publish-${run_id}-negate")"
-    mark "$run_id" negated "$cursor_from" "$cursor_to" "$sessions" "$rows" "$((t1-t0))" ""
-    crash_if negated
-    sleep_if negated
-    say "   negated   ${rows} corrective delta rows   $((t1-t0)) ms"
+    if [ "$RESUMED_AT" = claimed ] && stmt_landed "publish-${run_id}-negate"; then
+      # The crashed run already appended these corrective rows; re-issuing
+      # would double them — the dedup token does NOT stop that (measured).
+      rows="$(written_rows "publish-${run_id}-negate")"
+      mark "$run_id" negated "$cursor_from" "$cursor_to" "$sessions" "$rows" 0 "landed-before-crash"
+      say "   negated   ${rows} corrective delta rows   (landed before the crash; not re-issued)"
+    else
+      template_or_die sql/40_deltas.sql "$TMP/negate.sql" 'PUBLISH_NEGATE' \
+        -e "s|^    FROM session_intervals FINAL\$|    FROM session_intervals FINAL WHERE $SCOPE /*PUBLISH_SCOPE*/|" \
+        -e "s|^    sum(d)  AS delta,\$|    -sum(d)  AS delta, /*PUBLISH_NEGATE*/|" \
+        -e "s|^    sum(op) AS starts,\$|    -sum(op) AS starts,|" \
+        -e "s|^    sum(cl) AS ends\$|    -sum(cl) AS ends|"
+      grep -q 'PUBLISH_SCOPE' "$TMP/negate.sql" || die "negate template lost its scope"
+      t0=$(now_ms)
+      qf "$TMP/negate.sql" "publish-${run_id}-negate" "&insert_deduplication_token=${run_id}:negate" >/dev/null
+      crash_if negate_stmt
+      t1=$(now_ms); rows="$(written_rows "publish-${run_id}-negate")"
+      mark "$run_id" negated "$cursor_from" "$cursor_to" "$sessions" "$rows" "$((t1-t0))" ""
+      crash_if negated
+      sleep_if negated
+      say "   negated   ${rows} corrective delta rows   $((t1-t0)) ms"
+    fi
     phase=negated
   fi
 
@@ -649,15 +713,21 @@ BV here deletes the run's own derivation. Inspect cc_publish_runs run $run_id." 
   # with the sign left alone — that symmetry is the correctness argument.
   if [ "$phase" = pruned ]; then
     lease_beat
-    template_or_die sql/40_deltas.sql "$TMP/emit.sql" 'PUBLISH_SCOPE' \
-      -e "s|^    FROM session_intervals FINAL\$|    FROM session_intervals FINAL WHERE $SCOPE /*PUBLISH_SCOPE*/|"
-    t0=$(now_ms)
-    qf "$TMP/emit.sql" "publish-${run_id}-emit" "&insert_deduplication_token=${run_id}:emit" >/dev/null
-    crash_if emit_stmt
-    t1=$(now_ms); rows="$(written_rows "publish-${run_id}-emit")"
-    mark "$run_id" emitted "$cursor_from" "$cursor_to" "$sessions" "$rows" "$((t1-t0))" ""
-    crash_if emitted
-    say "   emitted   ${rows} delta rows   $((t1-t0)) ms"
+    if [ "$RESUMED_AT" = pruned ] && stmt_landed "publish-${run_id}-emit"; then
+      rows="$(written_rows "publish-${run_id}-emit")"
+      mark "$run_id" emitted "$cursor_from" "$cursor_to" "$sessions" "$rows" 0 "landed-before-crash"
+      say "   emitted   ${rows} delta rows   (landed before the crash; not re-issued)"
+    else
+      template_or_die sql/40_deltas.sql "$TMP/emit.sql" 'PUBLISH_SCOPE' \
+        -e "s|^    FROM session_intervals FINAL\$|    FROM session_intervals FINAL WHERE $SCOPE /*PUBLISH_SCOPE*/|"
+      t0=$(now_ms)
+      qf "$TMP/emit.sql" "publish-${run_id}-emit" "&insert_deduplication_token=${run_id}:emit" >/dev/null
+      crash_if emit_stmt
+      t1=$(now_ms); rows="$(written_rows "publish-${run_id}-emit")"
+      mark "$run_id" emitted "$cursor_from" "$cursor_to" "$sessions" "$rows" "$((t1-t0))" ""
+      crash_if emitted
+      say "   emitted   ${rows} delta rows   $((t1-t0)) ms"
+    fi
     phase=emitted
   fi
 
