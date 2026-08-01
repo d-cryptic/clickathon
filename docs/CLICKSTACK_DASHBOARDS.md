@@ -1,15 +1,17 @@
 # CLICKSTACK_DASHBOARDS — what every panel shows, and how to read it
 
-> **Summary:** Panel-by-panel reference for the six HyperDX dashboards on the hosted ClickStack
+> **Summary:** Panel-by-panel reference for the seven HyperDX dashboards on the hosted ClickStack
 > (Cloud), captured **live from the running service** on 2026-08-01, not from the provisioning scripts.
-> **6 dashboards · 41 tiles · 24 sources · 1 connection.** Read this with
-> [CLICKSTACK.md](CLICKSTACK.md), which covers *bringing the stack up*; this file covers *what is on
-> the screen and what it means*. **The single most common failure is the time range** — the data ends
-> 2026-07-26, so HyperDX's default 15-minute window renders every panel empty. Set
-> **2026-07-14 → 2026-07-26** before concluding anything is broken.
+> **7 dashboards · 53 tiles · 24 sources · 1 connection.** Dashboards 1–3 and 7 open with a markdown
+> CAPTION tile stating the trap a viewer would otherwise fall into (peaks not summable, title not a
+> key, users are a set). Read this with [CLICKSTACK.md](CLICKSTACK.md) (*bringing the stack up*); this
+> file covers *what is on screen*. **The single most common failure is the time range** — data ends
+> 2026-07-26; set **2026-07-14 → 2026-07-26** before concluding anything is broken.
 
 **Captured:** 2026-08-01 · hosted HyperDX in ClickHouse Cloud · connection `ClickathonProject` ·
-database `sonyliv` · all tiles read our own serving views, never raw events.
+database `sonyliv` · all tiles read our own serving views, never raw events. Every tile below was
+**executed signed-in through HyperDX's own query path** this session —
+[evidence/clickstack/](../evidence/clickstack/) holds the per-tile results.
 
 **Verified rendering 2026-08-01**, all four headline tiles live on the graded service:
 
@@ -32,17 +34,18 @@ database `sonyliv` · all tiles read our own serving views, never raw events.
         ▼                            ▼                            ▼
    24 HyperDX sources ────────────────────────────────────────────┘
         │
-        ├─▶ 1. SonyLIV concurrency          10 tiles   THE HEADLINE
-        ├─▶ 2. SonyLIV drilldown            8 tiles + 8 filters
-        ├─▶ 3. SonyLIV content              7 tiles
+        ├─▶ 1. SonyLIV concurrency          11 tiles   THE HEADLINE (+ caption)
+        ├─▶ 2. SonyLIV drilldown            9 tiles + 8 filters    (+ caption)
+        ├─▶ 3. SonyLIV content              8 tiles                (+ caption)
         ├─▶ 4. SonyLIV time-window trend    4 tiles
         ├─▶ 5. SonyLIV pipeline health      7 tiles    ← observes US
-        └─▶ 6. SonyLIV query cost           5 tiles    ← observes US
+        ├─▶ 6. SonyLIV query cost           5 tiles    ← observes US
+        └─▶ 7. SonyLIV user-level           9 tiles    (+ caption)
                                             ────────
-                                            41 tiles
+                                            53 tiles
 ```
 
-Dashboards 1–4 chart **the product**. Dashboards 5–6 chart **our own pipeline** — that is the
+Dashboards 1–4 and 7 chart **the product**. Dashboards 5–6 chart **our own pipeline** — that is the
 both-directions claim: ClickStack is not only where our data is drawn, it is where our *pipeline's*
 health is observed. Delete it and the freshness and cost panels have nowhere to come from.
 
@@ -50,9 +53,14 @@ health is observed. Delete it and the freshness and cost panels have nowhere to 
 
 ## 1 · `SonyLIV concurrency` — the headline
 
-The dashboard to open first, and the one the demo leads with.
+The dashboard to open first, and the one the demo leads with. It now **opens with a markdown
+caption — “The gap IS the thesis”** — stating on screen what §1 below explains: 3,708 vs 2,917
+at 10:56 (21.3% over-count eliminated), 33.6% of apparent watch time excluded, naive peaking
+higher *and later*, and the accurate-vs-stateless gap being the pause exclusion.
 
 ```
+ ┌────────────────────────────────────────────────────────────┐
+ │ CAPTION — The gap IS the thesis                            │  ← markdown tile
  ┌──────────────┬──────────────┬──────────────┬──────────────┐
  │ Peak         │ Peak         │ Peak         │ Peak         │  ← 4 number tiles
  │ ACCURATE     │ stateless    │ NAIVE        │ distinct     │
@@ -118,11 +126,16 @@ heartbeats survive a pause. That small gap is the pause exclusion, made visible.
 
 ## 2 · `SonyLIV drilldown — sessions & users` — the filter story
 
-Eight tiles, all from one source (`Session minutes (drilldown)`), plus **8 dashboard filters** wired
-to it: platform, country, title, content_id, app_version, audio_language, subtitle_language,
-player_version. One control drives every tile.
+Eight data tiles, all from one source (`Session minutes (drilldown)`), plus **8 dashboard filters**
+wired to it: platform, country, title, content_id, app_version, audio_language, subtitle_language,
+player_version. One control drives every tile. A **caption tile — “⚠ Peak is NOT summable across
+dimensions”** — heads the dashboard: summing per-platform peaks overstates the true peak by
+**+2.4%**, per-content by **+94.7%** (re-measured 2026-08-01, [EXPLAINER §E.1](EXPLAINER.md)), and
+it restates the zoom caveat and the Hindi-four-ways artifact so a viewer cannot miss them.
 
 ```
+ ┌────────────────────────────────────────────────────────────┐
+ │ CAPTION — ⚠ Peak is NOT summable across dimensions         │  ← markdown tile
  ┌────────────────────────────────────────────────────────────┐
  │ Sessions vs distinct users (= concurrency at 1-min zoom)   │
  └────────────────────────────────────────────────────────────┘
@@ -153,7 +166,13 @@ real, un-normalised source data, not a bug in the panel. Normalisation exists
 
 ## 3 · `SonyLIV content` — demand by title
 
+Headed by a **caption tile — “⚠ Read the labels carefully”** — carrying the two caveats below
+(title is not a key; video_type's blank third value) plus the +94.7% content-grain
+peak-summing warning, so they are stated on screen before a judge finds them.
+
 ```
+ ┌────────────────────────────────────────────────────────────┐
+ │ CAPTION — ⚠ Read the labels carefully                      │  ← markdown tile
  ┌──────────────────────────┬─────────────────────────────────┐
  │ Top titles by peak       │ NOW — by title (last minute)    │  tables
  ├──────────────────────────┼─────────────────────────────────┤
@@ -278,28 +297,83 @@ enough to identify a shape without exploding on parameter values.
 
 ---
 
-## 7 · Operating notes
+## 7 · `SonyLIV user-level` — signed-in concurrency (added 2026-08-01)
+
+The seventh dashboard, closing the required-aggregation list: **user-level distinct counts**.
+URL: `https://hyperdx.clickhouse.cloud/dashboards/6a6e289aa561469a8f4ee7bd`.
+
+```
+ ┌────────────────────────────────────────────────────────────┐
+ │ CAPTION — Users are a set, not a sum                       │  ← markdown tile
+ └────────────────────────────────────────────────────────────┘
+ ┌──────────────────┬──────────────────┬──────────────────────┐
+ │ Peak users       │ Peak sessions    │ Multi-session gap at │  ← number tiles
+ │ (uniqExact) 2,844│ (ACCURATE) 2,917 │ the peak minute: 73  │
+ └──────────────────┴──────────────────┴──────────────────────┘
+ ┌────────────────────────────────────────────────────────────┐
+ │ Users vs sessions — the multi-session gap over time        │  ← raw-SQL join
+ └────────────────────────────────────────────────────────────┘
+ ┌──────────────────────────┬─────────────────────────────────┐
+ │ Sessions per user ratio  │ Users by platform               │
+ ├──────────────────────────┼─────────────────────────────────┤
+ │ Users by country         │ Users by title (top 20)         │
+ └──────────────────────────┴─────────────────────────────────┘
+
+ FILTERS:  platform · country   (apply to the three per-dimension tiles)
+```
+
+| Tile | Reads | What it means |
+|---|---|---|
+| **Caption** | — | Users are `uniqExact(user_id)` per minute, never a sum of per-session deltas (one user can run several sessions — sum would count them once per session). Peaks not summable across dimensions |
+| **Peak — concurrent users** | `User concurrency (minute)` → `max(concurrent_users)` | **2,844.** The uniqExact tier of [sql/45_user_concurrency.sql](../sql/45_user_concurrency.sql), exact not HLL (ADR 0005) |
+| **Peak — concurrent sessions** | `Concurrency ACCURATE (minute)` | **2,917**, for contrast |
+| **Multi-session gap** | raw-SQL join of the session and user total views, row at max sessions | **73** multi-session viewers at 10:56 |
+| **Users vs sessions over time** | same raw-SQL join, `$__timeInterval` bucketed | The gap on every bucket — the two curves never touch |
+| **Sessions per user** | same join, `max(sessions)/nullIf(max(users),0)` | 1.0257 at the peak (1.0 = nobody multi-streams) |
+| **Users by platform / country / title** | `Session minutes (drilldown)` → `count_distinct(user_id)` | Set cardinality per bucket — at 1-min zoom it IS per-dimension user concurrency. **Cross-check:** by-country india = 2,844 at 10:56, agreeing with the uniqExact tier through a completely different path |
+
+Two deliberate design points:
+
+- The **`User concurrency by dimension` source is NOT charted per dimension** here: its grain is
+  (platform, country, content_id, minute), so `max()` per platform is the max single *combination*
+  (ANDROID_PHONE 308) — the same 285-vs-1,837 trap §8 records. Per-dimension users come from
+  `count_distinct(user_id)` over session-minute rows instead (ClickHouse's `count_distinct` *is*
+  `uniqExact` by default).
+- The three **raw-SQL tiles carry a control-plane warning** about missing `$__filters` /
+  `$__sourceTable`. Expected: they JOIN the session tier to the user tier, so no single `sourceId`
+  applies. The Platform/Country dashboard filters therefore drive only the per-dimension tiles.
+
+---
+
+## 8 · Operating notes
 
 | Trap | What happens | Fix |
 |---|---|---|
 | 🔴 **The Cloud service goes IDLE** | **every tile at once** shows *"Error loading chart, please check your query or try again later."* It looks exactly like a dead service or broken dashboards. It is neither | **wake it first:** `tools/ch -c "SELECT 1"` — takes ~30 s cold, then everything is warm. Make this **step 0** of the demo, above the time range |
 | **Default time range** | every panel empty — data ends 2026-07-26 | set **2026-07-14 → 2026-07-26** *before* screen-sharing |
 | **Summing `concurrent` across dimensions** | double counts: a session appears under several content_ids | use the `_total` sources, which re-merge the underlying states |
-| **Users vs sessions** | the user source exposes `concurrent_users`, not `concurrent` | a tile selecting the wrong column silently returns nothing |
+| **Users vs sessions** | the user sources expose `concurrent_users`, not `concurrent` | a tile selecting the wrong column silently returns nothing. Audited 2026-08-01: all 24 sources token-checked against live view columns, 0 mismatches; both user sources proven returning rows end to end ([evidence/clickstack/](../evidence/clickstack/)) |
 | **Zooming out on the drilldown** | `count_distinct` per bucket stops meaning "concurrency" | quote it as "distinct sessions active in the bucket" |
 | **Hindi appears four times** | un-normalised source values | real data; ADR 0011 exists but is not deployed |
 
 **Everything is scripted.** `tools/clickstack-cloud.sh` provisions sources, dashboards and saved
 searches over the Cloud control-plane API and is idempotent — a re-run **PUTs** the dashboard so the
-script stays the source of truth and a hand-edit in the UI cannot silently outlive it.
+script stays the source of truth and a hand-edit in the UI cannot silently outlive it. Two operational
+notes added 2026-08-01: **`CLICKSTACK_SKIP_APPLY=1`** runs the script control-plane-only (skips the
+`sql/87_viz.sql` DDL step — required for sessions that must not write to the graded database; the
+views must already exist), and **tile ids regenerate on every PUT**, so reference dashboards by
+name/URL, never deep-link a tile.
 
 One value the API cannot yield on an empty service is the `connection` id; get it once from the
 clickstack MCP (`clickstack_list_sources` returns a top-level `connections` array even when `sources`
 is empty) and put it in `.env` as `CLICKSTACK_CONNECTION_ID`.
 
-## 8 · Provenance
+## 9 · Provenance
 
 Captured live via the clickstack MCP against the hosted service: `clickstack_list_sources` for the 24
-sources and one connection, `clickstack_get_dashboard` for all six dashboards and their 41 tiles. Every
+sources and one connection, `clickstack_get_dashboard` for all seven dashboards and their 53 tiles. Every
 panel name, source binding, value expression, aggregation and filter above was read from the running
-configuration rather than from the provisioning script's intent — the two have drifted before.
+configuration rather than from the provisioning script's intent — the two have drifted before. On
+2026-08-01 **every tile was additionally executed signed-in** through HyperDX's query path
+(`clickstack_query_tile`), with per-tile results in
+[evidence/clickstack/tile-verification-2026-08-01.txt](../evidence/clickstack/tile-verification-2026-08-01.txt).
