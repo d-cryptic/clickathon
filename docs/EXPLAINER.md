@@ -573,6 +573,8 @@ pipeline, never the input.*
 | 9 | `45_user_concurrency.sql` stale comments | `ReplacingMergeTree(interval_end)`; "297 sessions" (301) | open |
 | 10 | Peak minute ambiguous under ties | hour tier said 16:35, answer phase said 16:59 | open |
 | 11 | `v_concurrency_minute_title` merges distinct assets | 2,773 colliding titles | open |
+| 12 | `sql/80_content.sql` hard-codes `sonyliv` | its views read **production's** dictionary from any other database — exactly the shape of the unseen-day run in `sonyliv_unseen` | open |
+| 13 | A CSV reload **doubles** the data · `CH_DATABASE` silently ignored | load-path defects, both recorded in [`SESSION-2026-08-01.md`](SESSION-2026-08-01.md) §6 | open |
 
 **The unclosed-pause rule, now measured where it counts.** It was left open on a 5.09% *hours*
 difference. `cf80acc` measured the number that is actually graded — the **peak**:
@@ -803,12 +805,26 @@ pushes the opposite way to the `resume`-overload bug, so the two partially mask 
 ## E.3 · Knowingly missing
 
 ```
+ 🔴 THE REPO IS PRIVATE     verified: gh repo view d-cryptic/clickathon → isPrivate true.
+                            The rules require it PUBLIC at submission and through
+                            judging. A missing/private repo is a zero on a required
+                            artifact — the highest-consequence open item here.
  ❌ CONTINUOUS PUBLISHING   spec step 4 · the biggest scored gap · we batch-rebuild
  ❌ HOT TIER                blocked on one human decision (ADR 0005 option 3 is free)
- ❌ /bench                  the cheapest unclaimed evidence in the project
+ ⏸ /bench                  PARKED BY THE OPERATOR, with a reason: the benchmark query
+                            set is not in hand, so the grains would be guesswork.
+                            (Counter worth weighing: `.claude/commands/bench.md` already
+                            anticipates this — "generate those shapes from the statement
+                            and say clearly that they are our reconstruction". Bytes-read
+                            on our own shapes is still evidence where we have none.)
  ❌ DECK · VIDEO · SUMMARY  none started          ✅ LICENSE  ✅ README
  ❌ TEAM CAPTAIN            unnamed — and only they can submit
 ```
+
+Three mechanical defects recorded in [`SESSION-2026-08-01.md`](SESSION-2026-08-01.md) §6 that belong
+here too: **a CSV reload doubles the data**; **`CH_DATABASE` is silently ignored**; and
+**`sql/80_content.sql` hard-codes `sonyliv`**, so its views read production's dictionary from any other
+database — which is exactly the shape of the unseen-day run (`sonyliv_unseen`).
 
 Three more improvements not tracked elsewhere: **`session_start_epoch` is never used** by the model,
 though it is the only exactly-reliable start signal (0 ms deviation across all 10,866 sessions) and is
@@ -834,15 +850,19 @@ Every sentence there is backed. What we **cannot** say is "it is fast" (unmeasur
 ```
  ✅ FIX THE GATE          DONE in 81c0161. Coverage 5 → 17,028 minutes.
 
- 1  RUN /bench            ~45 min  the only scored criterion with ZERO evidence.
-                                   Judges read what a query READS, not just ms.
- 2  TIE BUG               ~15 min  41.5h / 2.1%. A one-character change (> to >=)
+ 0  MAKE THE REPO PUBLIC  ~1 min   a required artifact. Currently PRIVATE.
+                                   Nothing else on this list matters if this
+                                   is missed. Needs a human.
+ 1  TIE BUG               ~15 min  41.5h / 2.1%. A one-character change (> to >=)
                                    in BOTH 30_build_intervals and 90_reconcile —
-                                   they share the spec, so both must move.
- 3  RESUME RULE           ~1 h     up to 189.2h / 9.7%. Needs the mentor answer
+                                   they share the SPEC, so both must move together.
+ 2  RESUME RULE           ~1 h     up to 189.2h / 9.7%. Needs the mentor answer
                                    (doubts/02) or a stated, measured default.
- 4  any() ON THE LAST 4   ~30 min  same non-determinism already fixed for the
+ 3  any() ON THE LAST 4   ~30 min  same non-determinism already fixed for the
                                    other three dimensions in 8bfeeb2.
- 5  NORMALISE DIMENSIONS  ~30 min  or state the limit out loud.
- 6  DECK                  starts at H18 regardless of code state.
+ 4  NORMALISE DIMENSIONS  ~30 min  or state the limit out loud.
+ 5  DECK                  starts at H18 regardless of code state.
+
+ ⏸ /bench                 parked by the operator — see E.3 for the reasoning
+                          and the counter-argument.
 ```
