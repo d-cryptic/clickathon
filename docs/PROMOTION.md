@@ -145,6 +145,30 @@ shape goes last, because it is the hardest to reverse.
 | **5 · Claims and dossiers** | scope-claims pass · the 11 `doubts/` dossiers · adversarial + liveness evidence · audits · queue | Docs-only, but checks 5 and 6 still apply. |
 | **6 · Shape changes** | ADR 0021 projection (already live on the service) · ADR 0022 `cube_level` | Last: they alter a serving table's shape, and their migration is parked in `v2.todo.md` §A3. |
 
+## Check-5 verdicts so far — both DO NOT PROMOTE, both correct
+
+**W1 foundations — DO NOT PROMOTE.** `GRADED_DB` was caller-overridable, so
+`GRADED_DB=anything` disabled both graded-database guards. Verified and fixed (`readonly`). The
+validator also independently confirmed the check-4 attribution: replacing only the two strict `>`
+predicates removes **all 177** mismatches, so the skew is entirely `0c0f020`. Second finding: ADR
+0018's *"every layer"* claim overstates — several shell tools still fall back to a server default.
+
+**W2 model correctness — DO NOT PROMOTE.** ADR 0009 is promoted claiming *"all seven dimensions leave
+`any()`, determinism is end to end"*, and **the branch's own `sql/40_deltas.sql` disproves it**:
+lines 87-89 still execute `any(platform)`, `any(country)`, `any(content_id)`. Verified — those are
+executable, not commentary, and they collapse per-interval labels for 25 live sessions with multiple
+interval platforms.
+
+**Cause: an incomplete cherry-pick.** `dev` removed that `any()` in commit `df6e7a2` (*"the rebuild
+owns every tier it invalidates, and the last any() leaves"*). W2 picked the ADR 0009 derivation fix
+and **not** the follow-up that finished the job, so it promoted a claim its own tree contradicts.
+Everything else in W2 held: both gates pass, ADR 0011's UDFs and the 1,774 → 2,196 Hindi pair are
+live, ADR 0014 agrees 98/98 hours with no bare live-view `argMax`.
+
+**The lesson for every remaining wave:** a cherry-picked feature is not the ADR that introduced it.
+Isolation (check 1) must include the follow-up commits that make the ADR's claims true — grep the
+promoted tree for what the ADR *says* is gone, rather than trusting the ADR.
+
 ## Ledger
 
 `—` not started · `WIP` in a promotion worktree · `GATE n` failed at check n · `✓` on `main`
