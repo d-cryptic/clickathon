@@ -1,0 +1,46 @@
+Q29 EXPERIMENT 1 — forced republication of 300 unchanged sessions
+probe minute 2026-07-26 10:54:00 · db sonyliv_q29vis · 2026-08-01T17:42:39Z
+claimed 300 sessions covering the probe minute
+baseline (3 reads):
+2026-08-01 17:42:41.124	2825	2825	2737
+2026-08-01 17:42:41.547	2825	2825	2737
+2026-08-01 17:42:41.967	2825	2825	2737
+
+publishing (forced, unchanged)…
+  == run 1785606163456  ·  300 session(s) claimed  ·  cursor 2026-08-01 17:40:52.351 -> 2026-08-01 17:40:52.351
+     negated   772 corrective delta rows   1240 ms
+     derived   637 intervals   652 ms   (window 2026-07-26 10:04:53.000 .. 2026-07-26 10:56:59.000)
+     pruned    superseded intervals   1421 ms
+     emitted   772 delta rows   520 ms
+     hours     10182 hour-cube rows re-derived   578 ms
+     users     34299 user-minute buckets re-derived   602 ms
+     committed cursor now 2026-08-01 17:40:52.351
+
+post-run (3 reads):
+2026-08-01 17:43:16.889	2825	2825	2737
+2026-08-01 17:43:17.990	2825	2825	2737
+2026-08-01 17:43:18.444	2825	2825	2737
+
+poller samples: 60  ->  evidence/publish-visibility/10-poll-forced.tsv
+
+phase markers (cc_publish_runs, newest run):
+   ┌─phase─────┬──────────────────────at─┬─rows_written─┬─elapsed_ms─┐
+1. │ claimed   │ 2026-08-01 17:42:44.770 │            0 │          0 │
+2. │ negated   │ 2026-08-01 17:42:51.587 │          772 │       1240 │
+3. │ derived   │ 2026-08-01 17:42:56.161 │          637 │        652 │
+4. │ pruned    │ 2026-08-01 17:42:58.073 │            0 │       1421 │
+5. │ emitted   │ 2026-08-01 17:43:03.699 │          772 │        520 │
+6. │ hours     │ 2026-08-01 17:43:09.667 │        10182 │        578 │
+7. │ users     │ 2026-08-01 17:43:13.918 │        34299 │        602 │
+8. │ committed │ 2026-08-01 17:43:14.436 │            0 │          0 │
+   └───────────┴─────────────────────────┴──────────────┴────────────┘
+
+server-side phase timings (system.query_log), run 1785606163456:
+   ┌─phase──┬────────────────────started─┬───────────────────finished─┬─dur_ms─┐
+1. │ negate │ 2026-08-01 17:42:47.272103 │ 2026-08-01 17:42:47.429103 │    157 │
+2. │ derive │ 2026-08-01 17:42:52.333760 │ 2026-08-01 17:42:52.565760 │    232 │
+3. │ prune  │ 2026-08-01 17:42:57.658526 │ 2026-08-01 17:42:58.683526 │   1025 │
+4. │ emit   │ 2026-08-01 17:42:58.678436 │ 2026-08-01 17:42:58.808436 │    130 │
+5. │ hours  │ 2026-08-01 17:43:04.368985 │ 2026-08-01 17:43:04.522985 │    154 │
+6. │ users  │ 2026-08-01 17:43:10.328872 │ 2026-08-01 17:43:10.528872 │    200 │
+   └────────┴────────────────────────────┴────────────────────────────┴────────┘
