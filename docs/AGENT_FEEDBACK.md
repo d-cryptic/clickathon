@@ -83,3 +83,19 @@
   `sonyliv_unseen` still holding the previous rehearsal's state; a literal runbook run would have
   dropped it. Suggestion: default UNSEEN_DB to `sonyliv_unseen_$(whoami or slug)` or refuse when the
   DB exists non-empty.
+
+## 2026-08-02 · T3 runtime preprocessing (ADR 0025)
+
+- **`build-model.sh` and `reconcile.sh` still carry bug 11.** Both source `.env` with `set -a`
+  *after* reading the environment, so `CH_DATABASE=t3_preproc TARGET=cloud tools/build-model.sh`
+  resolves to `sonyliv` and only the REBUILD_GRADED guard stops it — I had to replay the six stages
+  by hand with `apply-sql.sh --database`. The env-capture fix that already landed in `tools/ch`,
+  `apply-sql.sh` and `load.sh` should be copied into these two; until then a scratch build via env
+  override is impossible and the guard is the only thing between that mistake and the graded DB.
+- **T2's cruel generator had not landed** on any pushed branch when T3 needed its output. The brief
+  said "coordinate by reading its output" — with nothing to read, the classifier was designed from
+  the brief's four classes and self-tested with `char()`-built bytes. Suggest briefs that depend on
+  a sibling worktree's artifact name a fallback explicitly, as this one implicitly required.
+- **The query condition cache makes repeat sweeps look 4× cheaper than cold** (327 ms → 75 ms on the
+  same statement). Anyone benchmarking "preprocessing cost" on a warm service will understate it —
+  worth a line in the evidence conventions.
