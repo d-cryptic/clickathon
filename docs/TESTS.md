@@ -217,3 +217,74 @@ Packages probed and found sound without changes: `otelemit` (wire-level `httptes
 paths, headers, exact JSON), `cmd/sonyliv` dispatch, the reconcile fixtures (byte-for-byte captures
 whose format matches what `tools/reconcile.sh` writes today — verified by diff against
 `evidence/reconcile.txt`; only data values differ, post-model-change).
+
+
+## H — edge-case matrix (Codex 003 §11, semantic golden tests §13.1)
+
+`tools/edge-test.sh` · fixtures + harness doc in [tests/edge/](../tests/edge/README.md) · scratch db
+`edge_matrix`, local-only · run after any change to `sql/30_build_intervals.sql` or `sql/40_deltas.sql`.
+
+26 hand-auditable fixtures, one hazard each, run through the **real** derivation (sed-templated, never
+reimplemented). Expected intervals AND expected per-minute concurrency are **derived by hand from the
+spec** (ADR 0003/0007/0008/0009, `interval-math`) in each fixture header — never from the model, per
+Codex 003 §13.1. All 26 PASS on the shipped model (2026-08-02). Every family is sabotage-checked: 9
+named mutations of the production SQL each turn their paired fixture red (`tools/edge-test.sh
+sabotage`; ledger with the one instructive miss in [tests/edge/README.md](../tests/edge/README.md)).
+Fixtures that pin an **open fork** carry a `FORK` note naming the dossier — they assert the SHIPPED
+reading so a silent semantic change is caught, and a mentor ruling names exactly which expectations
+to rewrite.
+
+| Fixture | Register row | Proves (and the fork it pins, if any) |
+|---|---|---|
+| B01 | §11.3 start on minute boundary | exact-boundary start; tail lands the end on a boundary; minutes floor(s)..floor(e) |
+| B02 | §11.3 end on minute boundary | interior pause ends a segment EXACTLY on :00 — end minute counted with 0 active seconds (**doubts/05**); also the conservative unclosed-pause rule |
+| B03 | §11.3 both ends in one minute | a sub-minute interval yields exactly one active minute |
+| B04 | §11.3 zero-length interval | an isolated event (singleton run) produces NO interval, NO tail, NO minute |
+| B05 | §11.3 + §11.1 | hour-boundary crossing (ADR 0003 re-open, no close in hour 10); a gap of exactly `GAP_S` does NOT split (strict `>`) |
+| B06 | §11.3 | interval ending in the hour's last minute — the `-1` is suppressed, hour 11 shows nothing (asserted 0) |
+| B07 | §11.3 day boundary | run crossing UTC midnight: partitions, hour clip and running sums agree |
+| B08 | §11.3 end on hour boundary | segment ends exactly at :00:00 of the next hour — re-open + close at 11:01, minute 11:00 counted (**doubts/05** at hour grain) |
+| S01 | §11.2 pause→background | bg event renews the run (fail-open), pause becomes interior → NO tail |
+| S02 | §11.2 heartbeats during pause | paused beats keep the run alive but never count; the minute DIPS to 0 mid-session |
+| S03 | §11.2 unmatched resume | resume with no pause has no state effect (**doubts/02**) |
+| S04 | §11.2 pause/pause/resume | overlapping windows fold once, never double-subtract |
+| S06 | §11.2 trailing pause | a pause that ENDS its run still collects the +60 tail (**doubts/07** — S01 is the interior contrast) |
+| S07 | §11.2 bg/fg liveness | bg/fg events bridge 140 s gaps: 9 minutes credited on one heartbeat pair (**doubts/10, doubts/11**) |
+| S08 | §11.3 pause+resume in one minute | the same-minute merge: one viewer, one +1 (the /reconcile-caught double count) |
+| O01 | §11.1 same-second pair | resume-before-pause in one truncated second → pause is a no-op (ADR 0009 `>=`; **doubts/08**) |
+| O02 | §11.1 out-of-order arrival | newest-first insertion, identical derivation (batch property only) |
+| O03 | §11.1 events after end | `VideoSessionEnd` is not terminal: run continues, is_open=0 (**doubts/07**) |
+| O04 | §11.1 duplicates | exact duplicate rows change nothing (adversarial ledger row 18) |
+| O05 | §11.1 multiple ends | two end events + a lone restart beyond the gap → restart yields nothing |
+| L01 | §11.4 late extend | late heartbeat grows the interval; correction adds exactly one minute |
+| L02 | §11.4 late shrink | late pause: minutes 10:01–10:03 exist only in the old world and must NET TO ZERO through `old + (−old + new)` |
+| L03 | §11.4 late bridge | two runs become one; the old `(session, 10:06:00)` interval key vanishes |
+| L04 | §11.4 late dimension flip | attribution flips web→android with time unchanged; the old web tuple must net to zero per-platform |
+| D01 | §11.5 dominant + tie | vote 2:2:1 → tie broken by smallest value, deterministically (ADR 0009) |
+| D02 | §11.5 mid-session dim change | per-segment attribution at interval level; the minute-merge keeps the EARLIER platform (ADR 0008 first-wins, pinned including its weirdness) |
+
+**§11 rows deliberately NOT implemented here** — silent omission reads as coverage, so they are named:
+
+- **§11.1** session ID reuse across days/devices; future-dated timestamps / invalid epochs / clock
+  rollback (no defined spec to derive an expectation from — needs a mentor ruling first); two
+  legitimate events with identical payload but different source offsets (the schema has no source
+  offset to distinguish them by).
+- **§11.2** buffering/seek/ad/casting/error signals *as non-watchable states* (the shipped model has
+  no such states — S07 pins the fail-open reading; the fail-closed alternative is measured in
+  `evidence/liveness/`, decision pending doubts/10–11); explicit end + delayed older heartbeat vs
+  genuine restart (needs the §12.2 Q9 reopen rule).
+- **§11.3** non-UTC/DST zones (out of scope: both servers verified UTC, adversarial row 16; the
+  harness preflight enforces UTC); empty query range / range of only zero minutes and ranges
+  starting inside an hour (query-layer concerns — `evidence/benchmark/` b09–b11 territory, not
+  derivation fixtures).
+- **§11.4** events older than queue TTL / watermark / compacted state; processor crash points; two
+  concurrent finalizers; dedup-window expiry — all **publisher coordination**, owned by
+  `tools/publish-test.sh` (ADR 0019); this matrix tests the correction *algebra*, not the protocol.
+- **§11.5** distinct-user counting (one user, two sessions/platforms in a minute) — the user tier
+  (`sql/45_user_concurrency.sql`) has no fixture here yet; covered at data scale by
+  `tools/publish-test.sh`'s four-tier convergence, not by a hand-derived golden. Catalog arrival /
+  title-to-multiple-content-ids (dictionary layer, `80_content.sql`); case/spelling aliases and
+  sentinels (the normalisation self-test in `15_normalise.sql` owns those).
+- **§11.6** operations (MV install order, parts explosion, mutation backlog, FINAL cost, dictionary
+  refresh lag, cross-generation reads) — not hand-derivable golden material; belongs to
+  `verify-env`, `publish-test.sh` and the scale gates (`evidence/scale.txt`).
