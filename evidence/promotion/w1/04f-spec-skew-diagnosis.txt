@@ -1,0 +1,119 @@
+CHECK 4, SECOND ATTEMPT (post-rebuild) — FAILED AGAIN, DIFFERENT CAUSE. DIAGNOSIS.
+Date: 2026-08-02 (run at 2026-08-01T19:38Z UTC) · branch commit 7551e1f · verifier notes inline.
+Every number below states the exact command and the commit it ran from, so a different
+model can re-derive it without trusting this file.
+
+== 1. What happened
+
+After the operator-authorised rebuild (docs/PROMOTION.md on origin/dev, "Incident
+2026-08-02"), check 4 was re-run from this branch:
+
+  command: TARGET=cloud tools/reconcile.sh        (from chore/promotion-w1-foundations @ 7551e1f)
+  result : minutes_compared=17028 · mismatched=177 · max_abs_diff=39 · peak=2887 · MISMATCH
+  capture: 04d-reconcile-after-rebuild-branch-gate-FAILED.txt
+
+This is NOT the corruption signature (that was 970/17,028 mismatched, max_abs_diff 193,
+serving INFLATED above truth). Here the mismatches are 177 minutes clustered in the
+2026-07-26 10:47–11:12 dense window, serving consistently 26–39 ABOVE this branch's
+recomputed truth, and the serving-side numbers all match the operator's post-rebuild
+verification exactly (headline 1,978.1 h · 33.6% excluded · session_aware peak 2,917).
+
+== 2. The database is healthy — proven with dev's gate, read-only
+
+The identical gate query from origin/dev (commit 803491d, file sql/90_reconcile.sql —
+verified to contain zero write statements before running) was run against the same
+database seconds later:
+
+  command: git show origin/dev:sql/90_reconcile.sql > /tmp/90_dev.sql
+           curl "https://$CH_HOST:$CH_PORT/?database=sonyliv&default_format=PrettyCompact" \
+             --user "$CH_USER:$CH_PASSWORD" --data-binary @/tmp/90_dev.sql
+  result : minutes_compared=17028 · mismatched=0 · max_abs_diff=0 · peak=2917 · PASS
+  capture: 04e-reconcile-after-rebuild-dev-gate-PASS.txt
+
+Same database, same minutes, two gate versions: dev's gate says byte-perfect, this
+branch's gate says 177 minutes off. The database matches dev's spec exactly. The
+disagreement is in the gate SQL, not the data.
+
+== 3. Root cause — the rebuild deployed a wave-2 model spec; this branch carries main's
+
+  git log --oneline chore/promotion-w1-foundations..origin/dev -- sql/90_reconcile.sql
+    -> 0c0f020 fix: close a paused window on a same-second resume, in the model and the gate
+
+Commit 0c0f020 (on dev; NOT on main, NOT on this branch) changes the pause-window
+resume lookup from strict `>` to `>=` in BOTH sql/30_build_intervals.sql (the model)
+and sql/90_reconcile.sql (the gate). Timestamps are truncated to whole seconds, so a
+strict `>` is blind to a resume landing in the same second as its pause — the old spec
+extends that pause window to the NEXT resume or run end, wrongly excluding active time.
+
+Population affected, verified read-only on the graded database from this branch:
+
+  TARGET=cloud tools/ch -c "<same-second pause/resume count — see 04f appendix below>"
+    -> total_pauses=27340 · pauses with a same-second resume=2502 · 9.15%
+
+(dev's in-file comment states 2,697 / 27,340 = 9.86% under its own counting of
+resume events; either count establishes the same mechanism at the same scale.)
+
+The operator's rebuild ran dev's build (the incident record notes it also applied
+ADR 0016/0021/0022), so the graded database now embodies dev's model INCLUDING
+0c0f020 — which docs/PROMOTION.md schedules as WAVE 2 ("ADR 0009 determinism...
+They change the answer"). The check-4 expectation "17,028 · 0 mismatched · peak 2,917"
+is therefore satisfiable only by a gate that carries 0c0f020. This branch — wave 1,
+based on main — cannot produce it from its own code, and importing 0c0f020 here would
+smuggle a wave-2 model change into the foundations wave.
+
+Direction check: old spec excludes more time -> lower truth (peak 2,887) vs new-spec
+serving (2,917). Delta +26..39 concentrated where concurrency is densest. Consistent.
+
+== 4. What this means for the promotion
+
+- Checks 1–3: still stand (01/02/03 captures; no code commits since).
+- Check 4: the graded database reconciles 17,028 · 0 · 0 · 2,917 under dev's gate —
+  the DATA is fine. The W1 branch's own gate cannot pass against it until wave 2
+  (0c0f020, ADR 0009) is promoted, because the rebuild leapfrogged the promotion
+  order for the model spec. Note the peak the brief expects (2,917) is itself a
+  post-0c0f020 number.
+- Resolution is the orchestrator's call, not this session's. The options, honestly:
+  (a) accept 04e (dev-gate PASS) as check-4 evidence for W1 — defensible because W1
+      touches no model SQL, so serving-layer correctness is orthogonal to it;
+  (b) promote wave 2's ADR 0009 pair (0c0f020, 5743b39) first, then re-run W1's
+      check 4 from a rebased branch whose gate matches the deployed spec;
+  (c) neither — operator decision.
+  This session took none of these; per the gate rules a failed check stops the
+  promotion until explained. This file is the explanation.
+
+== 5. Would this branch's guards have caught the 2026-08-02 incident? (honest answer)
+
+NO — neither guard covers that path, and the file the incident came through does not
+exist on this branch.
+
+- The incident's 811 unqualified writes entered via tools/publish-test.sh, which is
+  dev-only (not on main, not on this branch: `ls tools/publish-test.sh` -> absent).
+- build-model.sh's REBUILD_GRADED guard (2c4ff9f) gates ITS OWN cloud builds. It was
+  never in the call path.
+- apply-sql.sh's guard gates DROP/TRUNCATE. The incident was unqualified INSERTs —
+  not gated even if they had been routed through it.
+- What WOULD have caught it: ADR 0018's rule (fb1f98a) — "one target resolves to one
+  database on every layer; both host and database always sent explicitly, never left
+  to the server default" — applied to publish-test.sh. The incident is precisely a
+  statement resolving against the connection's default database. ADR 0018 is the
+  right medicine, but on this branch it is applied to tools/ch and internal/config
+  only; publish-test.sh is a third location in the same family (queue item Q33) and
+  must adopt it when its wave promotes.
+
+The guards this branch ships would have prevented the incident's COUSIN — an
+unauthorised or stale-base rebuild via build-model.sh, which is the 2026-08-01
+incident's mechanism — not this one.
+
+== Appendix: the same-second verification query (read-only)
+
+WITH p AS (SELECT video_session_id, toUInt32(event_timestamp) AS t FROM ev_raw WHERE event = 'pause'),
+     r AS (SELECT video_session_id, toUInt32(event_timestamp) AS t FROM ev_raw WHERE event = 'resume')
+SELECT
+  (SELECT count() FROM p) AS total_pauses,
+  countIf(hit) AS same_second_resume,
+  round(100.0 * countIf(hit) / (SELECT count() FROM p), 2) AS pct
+FROM (SELECT p.video_session_id, p.t, max(r.t = p.t) AS hit
+      FROM p LEFT JOIN r ON r.video_session_id = p.video_session_id
+      GROUP BY p.video_session_id, p.t)
+
+-> 27340 · 2502 · 9.15

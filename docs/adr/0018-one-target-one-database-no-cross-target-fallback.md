@@ -45,6 +45,12 @@ TARGET=local   host CH_LOCAL_URL       database  $CH_DATABASE_LOCAL  > .env CH_D
    invisible to the local target — pinned by `TestLoadLocalNeverReadsCloudDatabase`.
 2. **The database is always sent explicitly.** No query rides the server's default database.
 3. **The environment beats `.env`** (capture before `set -a && . .env`, which otherwise overwrites).
+   Implemented today in `internal/config` (the Go binary) and `tools/ch`. The other shell tools
+   (`build-model.sh`, `apply-sql.sh`, `load.sh`, `reconcile.sh`, `truncation-test.sh`) still source
+   `.env` without capturing first, so for them `.env` wins — exactly as
+   [`RUNBOOK_UNSEEN.md`](../RUNBOOK_UNSEEN.md#a5--ch_database-in-the-environment-is-silently-ignored)
+   §A5 warns. Extending the capture to those five scripts is open work in the same family as Q33;
+   until then, the only way to point them at another database is to edit `.env`.
 4. **`TARGET` is read from the environment on every layer, and an unrecognised value dies.**
    Added 2026-08-01 after the first cut of this ADR shipped: `tools/ch` assigned `TARGET=local`
    unconditionally and switched to Cloud only on a positional `-c` flag, so

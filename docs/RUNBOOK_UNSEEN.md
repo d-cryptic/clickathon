@@ -161,8 +161,10 @@ database first. If you ever re-load by hand, `TRUNCATE TABLE ev_raw` first.
 
 ### A5 — `CH_DATABASE` in the environment is silently ignored
 
-Every tool does `[ -f .env ] && set -a && . ./.env && set +a`, so `.env` **overwrites** anything
+Most tools do `[ -f .env ] && set -a && . ./.env && set +a`, so `.env` **overwrites** anything
 passed in the environment. `CH_DATABASE=sonyliv_unseen tools/build-model.sh` writes to **`sonyliv`**.
+Two exceptions since ADR 0018: `tools/ch` and the Go binary (`internal/config`) capture the
+environment *before* sourcing `.env`, so for those two the environment wins.
 All of `build-model.sh`, `reconcile.sh`, `apply-sql.sh` and `truncation-test.sh` also `cd` to the repo
 root first, so they always read the repo's `.env`. **The only way to point them at another database is
 to edit `.env`.** `tools/load.sh` is the one exception (it does not `cd`), which is why

@@ -1,0 +1,11 @@
+DIAGNOSTIC — dev's gate (origin/dev:sql/90_reconcile.sql, commit 803491d) run read-only against TARGET=cloud database=sonyliv
+run from branch commit: 7551e1f   date: 2026-08-01T19:38:06Z
+
+   ┌─ord─┬─scope───┬─c1─────────────────────┬─c2───────────┬─c3─────────────┬─c4────────┬─verdict─┐
+1. │   0 │ SUMMARY │ minutes_compared=17028 │ mismatched=0 │ max_abs_diff=0 │ peak=2917 │ PASS    │
+2. │   2 │ sample  │ 2026-07-14 15:43:00    │ 1            │ 1              │ 0         │ PASS    │
+3. │   2 │ sample  │ 2026-07-16 12:35:00    │ 0            │ 0              │ 0         │ PASS    │
+4. │   2 │ sample  │ 2026-07-17 08:56:00    │ 0            │ 0              │ 0         │ PASS    │
+5. │   2 │ sample  │ 2026-07-26 10:56:00    │ 2917         │ 2917           │ 0         │ PASS    │
+6. │   2 │ sample  │ 2026-07-26 11:30:00    │ 197          │ 197            │ 0         │ PASS    │
+   └─────┴─────────┴────────────────────────┴──────────────┴────────────────┴───────────┴─────────┘

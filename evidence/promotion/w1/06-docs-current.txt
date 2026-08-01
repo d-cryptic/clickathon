@@ -1,0 +1,48 @@
+CHECK 6 — docs current. Date: 2026-08-02 · verified at branch commit 7551e1f + the doc
+fixes committed alongside this file. Every claim below names the file and line it was
+checked against, so a different model can re-verify without trusting this file.
+
+== What was verified
+
+1. ADR 0018 (docs/adr/0018-one-target-one-database-no-cross-target-fallback.md)
+   against the code it describes:
+   - cloud = CH_HOST+CH_DATABASE, local = CH_LOCAL_URL+CH_DATABASE_LOCAL, both sent
+     explicitly, missing config dies: matches internal/config/config.go (cloud path
+     requires CH_HOST/CH_DATABASE at lines ~107/115; local path requires
+     CH_DATABASE_LOCAL at ~143 with an ADR-0018 error message; local never reads
+     CH_DATABASE — pinned by TestLoadLocalNeverReadsCloudDatabase).
+   - TARGET read from the environment, unrecognised value dies: matches tools/ch
+     (TARGET="${TARGET:-local}", case arm dies on anything not cloud/local).
+2. docs/GO.md — states the same variable split and the direnv workflow; matches.
+3. .env.example — carries both variable sets (CH_HOST/CH_PORT/CH_DATABASE and
+   CH_LOCAL_URL/CH_PASSWORD_LOCAL/CH_DATABASE_LOCAL); matches.
+4. Contradiction sweep: grep -rn CH_DATABASE across docs/, tools/README.md,
+   plus TARGET=cloud/local claims across docs/*.md.
+
+== Finding (fixed in this commit) — both directions of the same overclaim
+
+ADR 0018 rule 3 said "the environment beats .env" under the heading "Resolution rule,
+every layer". On this branch that is implemented on exactly TWO layers — internal/config
+(Go) and tools/ch, which capture the environment before sourcing .env. The five other
+shell tools (build-model.sh, apply-sql.sh, load.sh, reconcile.sh, truncation-test.sh)
+still run a bare `set -a && . ./.env && set +a` (verified by grep: build-model.sh:18,
+apply-sql.sh:17, load.sh:13, reconcile.sh:18, truncation-test.sh:24), so for them .env
+wins.
+
+Meanwhile docs/RUNBOOK_UNSEEN.md §A5 claimed the opposite overreach: "EVERY tool does
+[set -a && . ./.env]" — no longer true for tools/ch and the Go binary after fb1f98a.
+
+Both docs now state the split exactly:
+- ADR 0018 rule 3 names the two layers where the environment wins and the five scripts
+  where it does not, and cross-references RUNBOOK §A5.
+- RUNBOOK §A5 says "most tools" and names the two ADR-0018 exceptions.
+
+Left UNCHANGED, deliberately: docs/SESSION-2026-08-01.md (historical record) and
+docs/EXPLAINER.md's bug-13 row "CH_DATABASE silently ignored — open" — still accurate,
+because the load path (load.sh, build-model.sh) genuinely still ignores the environment.
+Extending the env-capture to those five scripts is open work (same family as Q33).
+
+== Also noted
+
+main (and this branch) has no `scratchpad/` gitignore entry; no scratch files were
+created in the repo and none are committed with this promotion.
