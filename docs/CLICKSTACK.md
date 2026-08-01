@@ -41,8 +41,18 @@ This is the simpler path and needs **no credentials, no connection, and no IP al
 HyperDX is already inside the service, so it reads `sonyliv` as `default` with nothing to configure.
 The local `cs` container and `tools/clickstack-sources.sh` are only for Option A.
 
-The one thing it cannot do is be scripted: the built-in HyperDX authenticates off your ClickHouse
-Cloud console session, not an API key. So the source is created by hand, once:
+**It IS scriptable** — via the Cloud control-plane API, not the console session:
+`/v1/organizations/{org}/services/{svc}/clickstack/{sources,dashboards,alerts,saved-searches,...}`,
+HTTP basic with a Cloud API key (`CH_API_KEY_ID` / `CH_API_KEY_SECRET` in `.env`). Run
+`tools/clickstack-cloud-sources.sh`.
+
+**One manual prerequisite, once.** A source needs a `connection` id, and the API exposes no way to
+list or create connections — `/clickstack/connections` 404s; only sources, dashboards, alerts,
+roles, webhooks and saved-searches exist. The connection is provisioned the first time HyperDX is
+opened in the console. So open it once; the script then discovers the id from any existing source
+and never needs clicking again.
+
+If you would rather do the first source by hand:
 
 **ClickHouse Cloud console → HyperDX → Sources → New source**
 
