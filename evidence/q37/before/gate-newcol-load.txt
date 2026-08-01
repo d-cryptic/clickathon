@@ -1,0 +1,22 @@
+target=cloud  database=sonyliv_q37_newcol  (from --database)  mode=refuse
+header shape: ev_raw <- data/cruel-newcol-raw.csv
+  NEW columns (1): experiment_id
+    -> carried into the `extra` Map — queryable today as extra['experiment_id']
+header shape: content_dim <- data/cruel-content.csv
+  all 4 expected columns present, in the expected order
+
+phase A — landing both files as text (load_id 20260801T224000Z-12425)
+  content_landing <- data/cruel-content.csv ...
+  ev_landing      <- data/cruel-newcol-raw.csv ...
+  landed: ev_landing 128 rows · content_landing 30 rows — nothing typed yet
+
+phase B — casting forward, one row at a time
+
+loaded into TARGET=cloud, database sonyliv_q37_newcol:
+   ┌─t───────────┬─before─┬─rows─┬─added─┐
+1. │ content_dim │      0 │   30 │    30 │
+2. │ ev_raw      │      0 │  128 │   128 │
+   └─────────────┴────────┴──────┴───────┘
+disposition: every landed row reached exactly one terminal state
+  ev_raw       landed 128 = typed 128 + rejected 0
+  content_dim  landed 30 = typed 30 + rejected 0

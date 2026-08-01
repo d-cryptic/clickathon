@@ -1,0 +1,8 @@
+nots     exit=1    REFUSING: missing columns no flag overrides: event_timestamp
+nosid    exit=1    REFUSING: missing columns no flag overrides: video_session_id
+dupe     exit=1    REFUSING: duplicate header columns: country
+badname  exit=1    REFUSING: new column names that are not plain identifiers: 'a-b c'
+empty    exit=1    REFUSING: the raw CSV is empty — no header row
+  MISSING columns (1): country
+       you pass --allow-missing country
+(load.sh is the authority at phase 2 — both entry points refuse misscol)
