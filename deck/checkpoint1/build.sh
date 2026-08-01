@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Build deck/deck.pdf from deck/deck.html via headless Chrome.
-# Usage: deck/build.sh   (from anywhere; no arguments)
+# Build deck/checkpoint1/deck.pdf from deck/checkpoint1/deck.html via headless Chrome.
+# Usage: deck/checkpoint1/build.sh   (from anywhere; no arguments)
 # Requires: Google Chrome (macOS default path, or set CHROME=/path/to/chrome).
 set -euo pipefail
 

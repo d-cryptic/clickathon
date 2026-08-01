@@ -41,7 +41,7 @@ what is verified, what is broken, and what is still missing, in one page.
 | **What happened in the last session, and every bug it found** | [docs/SESSION-2026-08-01.md](docs/SESSION-2026-08-01.md) |
 | **Run the unseen day** | [docs/RUNBOOK_UNSEEN.md](docs/RUNBOOK_UNSEEN.md) — read BEFORE the data drops |
 | Observability / what we emit | [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) |
-| **Edit or rebuild the submission deck** | [deck/README.md](deck/README.md) — source `deck/deck.html`, `deck/build.sh` → `deck/deck.pdf` |
+| **Edit or rebuild the submission deck** | [deck/checkpoint1/README.md](deck/checkpoint1/README.md) — source `deck/checkpoint1/deck.html`, `deck/checkpoint1/build.sh` → `deck/checkpoint1/deck.pdf` |
 | Leave feedback for the operator | [docs/AGENT_FEEDBACK.md](docs/AGENT_FEEDBACK.md) |
 
 ## Doc conventions
