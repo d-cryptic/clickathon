@@ -751,11 +751,18 @@ is a rebuild, of one session.*
 
 ## D.2 · Measured, then rejected
 
-**The projection — killed by its own measurement.** ADR 0002 named the remedy for the access pattern it
-gave up: add a `PROJECTION` by `video_session_id`. We built it and measured **27.7×** on a
-single-session lookup. Then we measured the *actual* access path — the straggler query uses
-`IN (subquery)`, which full-scans anyway. Real gain **1.00×** for **+94% storage**. Kept in the tree,
-documented, **not in the build path**. We rejected a recommendation our own ADR had made.
+**The projection — measured, rejected, then re-measured when the code changed.** ADR 0002 named the
+remedy for the access pattern it gave up: add a `PROJECTION` by `video_session_id`. We built it and
+measured **27.7×** on a single-session lookup. Then we measured the *actual* access path of the day —
+the straggler query used `IN (subquery)`, which full-scans anyway — so the real gain was **1.00×** for
+**+94% storage**, and we rejected a recommendation our own ADR had made.
+
+**Then ADR 0013's finalizer changed the access pattern**, and the number had to be taken again rather
+than inherited. On the finalizer's real query shape the same projection measures **12.8×** — it reads
+0.9% of `ev_raw` instead of 11.6% — for **+91% storage**. Still not shipped: the storage cost is
+unchanged and the finalizer is not deployed to `sonyliv`. The point is the discipline, not the verdict:
+a measurement is only valid for the query shape it was taken on, and ours stopped being valid the
+moment the finalizer landed.
 
 **Dedup — proven unnecessary rather than bolted on.** The full derivation was run twice in one query,
 raw vs `LIMIT 1 BY` the event key, with `any()` pinned to `min()` so dedup was the only variable:
@@ -822,7 +829,7 @@ anyway. That is the call awaiting a human.
  sort key        settled by  17.3× / 2.0× / identical
  gap vs hybrid   settled by  0.047 vs 0.756 vs 4.72 pings/min
  version column  settled by  316 intervals, +37 on the peak
- the projection  settled by  27.7× benchmark → 1.00× reality
+ the projection  settled by  27.7× bench → 1.00× (old shape) → 12.8× (finalizer shape)
  dedup           settled by  0 of 3,725 minutes
  hot tier        settled by  834 hours of exposure
 ```
