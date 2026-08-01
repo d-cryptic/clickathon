@@ -1,11 +1,13 @@
 # ARCHITECTURE — the concurrency model
 
 > **Summary:** Raw events → active intervals (heartbeat-gap derived) → **hour-clipped** minute deltas per
-> dimension combination → concurrency as a running sum within each hour. Serving is **two-tier**: an
-> idempotent hot tier of heartbeat leases (immediate, `uniqExact`) stitched at a watermark to an
-> append-only sealed tier (exact). That split *is* the session-independent vs session-aware comparison.
-> Peak is never stored — it is not summable across dimensions — but hour-clipping makes it summable
-> across time, so hour-grain maxes pre-aggregate. Nothing is ever updated or rebuilt.
+> dimension combination → concurrency as a running sum within each hour. Serving is **one exact tier**,
+> published **incrementally**: a change-log MV marks the sessions each INSERT touched, and a finalizer
+> re-derives only those, appending the difference ([ADR 0013](adr/0013-continuous-publication-by-incremental-finalizer.md)).
+> The hot tier of [ADR 0004](adr/0004-two-tier-lambda-serving.md)/[0005](adr/0005-heartbeat-lease-semantics.md)
+> is **declined**, and `cc_minute_stateless` remains the session-independent half of the mandated
+> comparison. Peak is never stored — it is not summable across dimensions — but hour-clipping makes it
+> summable across time, so hour-grain maxes pre-aggregate. Nothing is ever updated or rebuilt.
 
 ## Layers
 
@@ -38,14 +40,26 @@ minute)` — bounded to the hour, no carry-in from earlier history. **Append-onl
 (concurrency-seconds). Only correct because of hour-clipping. Peak over an hour-aligned range is the max
 of stored maxes; average is `sum(integrals) / range_seconds`.
 
-**5 · `cc_minute_hot`** — the hot tier and the session-independent model. Each heartbeat at `t` grants a
-lease `[t, t + HEARTBEAT_GAP_S)`; an MV `arrayJoin`s it into the minutes that lease covers and
-accumulates `uniqExactState(video_session_id)` ([ADR 0005](adr/0005-heartbeat-lease-semantics.md)).
-Stateless, idempotent, TTL'd to a short window. **`uniqExact`, never `uniq`** — HLL's 1–2% error is a
-silent correctness bug against an exact ground truth.
+**5 · `cc_minute_stateless`** — the session-independent model, straight from `ev_raw` via `mv_stateless`.
+Any heartbeat in a minute means that session was active in that minute; no session reconstruction.
+**`uniqExact`, never `uniq`** — HLL's 1–2% error is a silent correctness bug against an exact ground
+truth. Reads **2,894** at the peak minute against the session-aware **2,917**; that pair *is* the
+comparison the statement mandates.
 
-**6 · `v_concurrency`** — the stitch. `minute < W` reads the sealed running sum; `minute >= W` reads
-`uniqExactMerge` over the hot tier.
+> **`cc_minute_hot` — the lease hot tier — is NOT built, and is not pending either.** Heartbeats renew
+> straight through a `pause` (0.756/min, inside `LEASE = 150 s`), so leases would count paused time as
+> watching: 834 h of exposure against a 1,949 h answer
+> ([ADR 0005](adr/0005-heartbeat-lease-semantics.md)). Its only job was to answer minutes newer than
+> the watermark while the sealed tier lagged 40 minutes; with the finalizer below running every minute
+> that lag is seconds, so the tier buys sub-minute freshness at the price of a same-order error.
+> Declined in [ADR 0013](adr/0013-continuous-publication-by-incremental-finalizer.md).
+
+**6 · `session_dirty` + the finalizer** — how the aggregates stay current. `mv_session_dirty` fires on
+every INSERT into `ev_raw` and records which sessions that insert touched, stamped with **ingest**
+time. `tools/publish.sh` claims what has arrived since its cursor, re-derives **only those sessions**,
+and appends `−deltas(old) + deltas(new)`. `v_cc_publish_lag` is the freshness metric; `v_cc_watermark`
+still reports event-time staleness. See [ADR 0013](adr/0013-continuous-publication-by-incremental-finalizer.md)
+and `evidence/publish.txt`.
 
 ## The three arithmetic rules
 
@@ -62,17 +76,24 @@ silent correctness bug against an exact ground truth.
 
 ## Update handling
 
-Three arrival classes, each absorbed without a rebuild:
+**One mechanism, not three.** Every arrival class is a session that received events; the finalizer
+re-derives it and appends the difference ([ADR 0013](adr/0013-continuous-publication-by-incremental-finalizer.md)).
 
-| Arrival | Absorbed by | Mechanism |
+| Arrival | Mechanism | Measured |
 |---|---|---|
-| Newer than watermark `W` | hot tier | `uniqExact` is idempotent and monotone — replays are no-ops, late beats are pure additions |
-| In normal order | finalizer | re-derives **only sessions touched since the last run**, appends sealed deltas |
-| Older than `W` (straggler) | correction-by-diff | recompute that one session with and without the straggler, append the difference ([ADR 0006](adr/0006-late-arrival-correction-by-diff.md)) |
+| In normal order | claimed from `session_dirty`, re-derived, diffed | 5 sessions in 4.6 s |
+| Still open (no `VideoSessionEnd`) | dirty on every batch, so re-derived every batch — no special path | included above |
+| **Straggler, older than `W`** | *the same path.* Correction-by-diff does not care how old the event is | 1 session in **3.4 s**, 0 of 1,579 minutes wrong |
+| Replay / forced correction | `−deltas(X) + deltas(X) = 0`, so it is a no-op | 200 sessions, 0 minutes moved |
 
-Open sessions need no special path: they keep renewing leases in the hot tier and stay provisional in
-the sealed tier until `W` passes them. **`W` is the metric to instrument in ClickStack** — watermark lag
-is the observable expression of the whole design.
+This is why the **watermark is no longer a gate**. ADR 0004 needed `W = 2400 s` because a sealed minute
+had no way back; correction-by-diff *is* the way back, so nothing has to be held. `W` survives as a
+freshness *label*. The metric to instrument in ClickStack is now `v_cc_publish_lag` — **ingest-time**
+staleness and queue depth — alongside `v_cc_watermark`'s event-time view.
+
+The proof is `evidence/publish.txt` (`tools/publish-test.sh`): at every stage the incrementally
+published tables are byte-identical to a from-scratch rebuild, including the case where a straggler
+makes an `interval_start` vanish.
 
 ## Trade-offs to defend
 
@@ -81,12 +102,13 @@ is the observable expression of the whole design.
 | Interval → delta | per-minute explosion | O(intervals) vs O(sessions × minutes) |
 | Hour-clipped deltas | unclipped | removes the carry-in scan-from-`t=0`; makes hour-grain peak pre-aggregable (day peak reads 24 rows/combo, not 1,440) |
 | Heartbeat gaps | bg/fg pairing | bg/fg are not guaranteed; 379 unmatched in the sample — **conditional on the gating measurement below** |
-| Lease hot tier | compensating deltas | compensation needs the interval's previous end, which a stateless MV cannot know without a racy read-modify-write |
-| Two tiers | one | the comparison is the evidence that we exclude background time — and here it is structural, not bolted on |
-| Correction by diff | `ALTER … UPDATE` / partition rebuild | exactly as correct as a rebuild, of one session; cost scales with stragglers, not history |
+| **One exact tier, published incrementally** | two-tier lambda with a lease hot tier | the hot tier's only job was covering the sealed tier's 40-minute lag; a per-minute finalizer removes the lag, and the tier would have cost 834 h of paused time counted as watching ([ADR 0013](adr/0013-continuous-publication-by-incremental-finalizer.md)) |
+| **Change-log MV** (`session_dirty`) | scan `ev_raw` per batch for what moved | ADR 0006's "compare max event ts per session" is O(history) every run — the hackathon-size shape the statement warns about. An MV sees only the current insert block, which is exactly what needs re-deriving |
+| Correction by diff | `ALTER … UPDATE` / partition rebuild | exactly as correct as a rebuild, of one session; cost scales with stragglers, not history — **measured 3.4 s and 11.6% of `ev_raw` for a 46-minute-late straggler** |
+| Prune superseded intervals | leave them to `FINAL` | `ReplacingMergeTree` replaces a key, it cannot delete one; a straggler bridging a gap makes an `interval_start` vanish and the orphan would compound into the next run's negation |
 | Dimension-first key **on the serving tables** | time-first | dashboards filter then range-scan; measured 122× on a comparable A/B |
 | Time-bucket-first key **on `ev_raw`** | session-id-first | measured 17.3× better on the dashboard shape, identical on the full interval rebuild ([ADR 0002](adr/0002-order-by-time-bucket-then-platform.md)) |
-| `PROJECTION` by `video_session_id` | reverting ADR 0002 | our finalizer and correction paths are point lookups by session; a projection restores them without losing the 17.3× |
+| `PROJECTION` by `video_session_id` | reverting ADR 0002 | our finalizer and correction paths are point lookups by session; a projection restores them without losing the 17.3×. **Still not shipped** — but re-measured on the finalizer's real query shape it takes a one-session read from 11.6% of `ev_raw` to **0.9%**, for +91% storage. The earlier "1.00×" was measured on a different shape; see [ADR 0013](adr/0013-continuous-publication-by-incremental-finalizer.md) |
 
 ## The premise this all rests on
 
