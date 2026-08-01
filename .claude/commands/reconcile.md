@@ -1,16 +1,18 @@
 ---
 description: Prove the serving layer matches raw events. Run after EVERY model change.
 ---
-Recompute concurrency from `ev_raw` directly and compare against the serving layer, then report the
-delta. This is the gate — a mismatch blocks everything else.
+Run `tools/reconcile.sh`. It reconstructs state-gated intervals from `ev_raw` in temporary tables and
+compares five representative minutes against the signed-delta serving layer. This is the gate — a
+mismatch blocks everything else.
 
-1. Pick 5 minutes: the global peak minute, two random, and the two boundary minutes of the data range.
-2. For each, compute the truth straight from `ev_raw` (reconstruct active intervals inline, no MVs).
-3. Compute the same minute from `v_concurrency_minute`.
-4. Print a table: minute | truth | served | delta. Any non-zero delta is a FAILURE.
-5. Also compare the session-aware and session-independent models against each other and explain the
-   gap — that comparison is an explicit deliverable, and the size of the gap is the headline number
-   for "we exclude backgrounded time".
+1. Pick five minutes: the global peak and four evenly spaced samples across the raw event-time range.
+2. For each, compute truth straight from `ev_raw` (reconstruct active intervals inline, no MVs).
+3. Reconstruct the same global minute from hour-local `cc_minute_delta` boundaries plus the latest
+   published per-session correction state.
+4. Print `minute | truth | served | delta | result`. Any non-zero delta is a FAILURE.
+5. Use the state-gate measurements in [ADR 0007](../../docs/adr/0007-state-gate-heartbeats.md) when
+   explaining the difference from a gap-only model; re-run that measurement whenever event semantics
+   change.
 
 Use the `correctness-auditor` agent for step 2 if the arithmetic is non-trivial. Write the output to
 `evidence/reconcile.txt` and commit it.

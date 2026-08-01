@@ -1,8 +1,8 @@
 # DATA_DICTIONARY — the SonyLIV event stream
 
-> **Summary:** Field-by-field reference for `ch-hackathon-raw-data.csv` (905,559 events) and
+> **Summary:** Field-by-field reference for `ch-hackathon-raw-data.csv` (905,558 events) and
 > `ch-hackathon-content-data.csv` (~33K titles), plus the **measured** shape of the provided file and
-> the four traps that decide whether the model survives the unseen day. `event_timestamp` is epoch
+> the eight traps that decide whether the model survives the unseen day. `event_timestamp` is epoch
 > **milliseconds**. Backgrounding is **universal** (every session has one) and background/foreground
 > events are **not guaranteed to pair**. Read [#traps](#traps) before writing any interval logic.
 
@@ -29,7 +29,7 @@ Both files are gitignored (223 MB). Get them with `tools/fetch_data.sh` — chec
 
 | event_type | count | share | meaning |
 |---|---:|---:|---|
-| `VideoHeartbeat` | 843,600 | 93.16% | periodic, **every 60s** — the reliable activity signal |
+| `VideoHeartbeat` | 843,600 | 93.16% | periodic; statement says 60s, observed dominant cadence is 40s — activity evidence, not proof without state |
 | `AppBackgrounded` | 14,700 | 1.62% | app went to background — **not guaranteed** |
 | `AppForegrounded` | 14,321 | 1.58% | app returned — **not guaranteed** |
 | `VideoPlay` | 10,883 | 1.20% | playback started/resumed |
@@ -42,11 +42,17 @@ Both files are gitignored (223 MB). Get them with `tools/fetch_data.sh` — chec
 `content_id` · `title` · `video_type` · `category`. Small and static, so it is also loaded as a
 **dictionary** — `dictGet` measured 34× faster than a `JOIN` on a comparable workload.
 
+It is a **snapshot dimension** in this benchmark, not a slowly changing dimension. The source gate allows
+an exact reload but rejects any one `content_id` with conflicting title/video-type/category values. Otherwise
+the `ReplacingMergeTree` storage engine could select a value during an asynchronous merge, making a
+`video_type` dashboard filter nondeterministic. A production SCD needs an effective-time/version contract
+and the serving query must state whether it means video type at watch time or type as currently catalogued.
+
 ## Measured shape of the provided file
 
 ```
 sessions               10,866
-events                905,559
+events                905,558
 span                   2026-07-14 15:43:58 → 2026-07-26 11:30:04  (283.8 h ≈ 11.8 days)
 distinct content_id     3,357
 distinct platform          10
@@ -57,13 +63,14 @@ sessions that background and never return   418
 sessions with no VideoSessionEnd        0   ← but see trap 3
 ```
 
-## <a id="traps"></a>The four traps
+## <a id="traps"></a>The eight traps
 
 **1 · Background/foreground events do not pair.** 14,700 backgrounds vs 14,321 foregrounds — **379
 unmatched**, and 418 sessions background and never come back. The dictionary says outright they
 "are not guaranteed events and sometimes depend on the system." Any model that reconstructs inactivity
 by pairing `AppBackgrounded` → `AppForegrounded` is wrong on ~4% of sessions here, and wrong by a
-different amount on the unseen day. **Use heartbeat gaps as the primary signal.**
+different amount on the unseen day. **Use the events as hard stop gates, but do not depend on a paired
+foreground event to restart.** A fresh eligible heartbeat is the restart proof.
 
 **2 · Backgrounding is universal, not an edge case.** Every one of the 10,866 sessions has at least one
 background event. Foreground-only exclusion is the entire problem, not a correction term.
@@ -73,13 +80,53 @@ explicit: *"sessions in the dataset include ones still open when the day ends an
 arriving."* Tuning on this file will not exercise that path at all. Test it by truncating the file at
 an arbitrary timestamp and re-running.
 
-**5 · `content_id` can be NEGATIVE.** `content_dim` contains exactly one row with
+**4 · `content_id` can be NEGATIVE.** `content_dim` contains exactly one row with
 `content_id = -987654322` (1 of 33,464; zero such rows in the event file). A `UInt64` column fails the
 load with `Code: 6 CANNOT_PARSE_NUMBER` on row 1193. Use **`Int64`**. This is a planted poison row —
 assume the unseen day has one too, possibly in the *event* stream where it would also break joins.
 
-**4 · One country, ten platforms.** `country` has a single value here, so a bug in country filtering is
+**5 · One country, ten platforms.** `country` has a single value here, so a bug in country filtering is
 invisible in testing and fatal on the unseen day. Always test filters against `platform` too.
+
+**6 · Event identity, lifecycle and dimensions are not immutable.** There are **4,209 exact duplicate rows** but
+no source event id, so the derived model removes exact payload retry copies while retaining raw data.
+Also, 95 sessions change platform and one changes content id. An interval must split when a serving
+dimension changes; grouping a session and selecting `any(platform)` assigns activity arbitrarily.
+The supplied file has zero `video_session_id` values spanning multiple `session_start_epoch` values; do
+not assume this for live input. A reused id would join two playback lifecycles and poison foreground/
+pause state, so production requires `session_incarnation_id` (or an enforced equivalent).
+
+**7 · Bulk-load time is not arrival telemetry.** The supplied corpus has exactly one `ingested_at` value
+(`2026-08-01 08:56:02.042`) across all 905,558 rows. It records when we loaded the CSV, not when devices
+or the source delivered events. Never calculate a production watermark percentile from it; use it only for
+finalizer replay mechanics in this local exercise.
+
+**8 · App-state scope is supplied per session, not inferred from `user_id`.** 61 users have overlapping
+session lifetimes (18,211 overlapping session pairs), and 120 session ids carry more than one `user_id`.
+Yet no `AppBackgrounded`/`AppForegrounded` timestamp is shared by two overlapping sessions of the same user
+in this corpus. That supports treating the delivered app-state event as attached to its
+`video_session_id`, while proving that `user_id` is neither a player-instance key nor a safe state scope.
+At production, require `player_instance_id` and explicit state scope if one app transition can govern
+multiple concurrent playback sessions.
+
+## Heartbeat payload taxonomy is not playback state
+
+`VideoHeartbeat` is a transport envelope, not a single semantic action: the supplied file contains 41
+distinct `event` values inside it. Only the explicitly documented `pause` and `resume` values change the
+playback-state gate. Buffering, seeking, ad, download, rendition, and network payloads remain liveness
+signals; treating their names as stops without a producer contract would invent inactivity and alter the
+private-ground-truth metric.
+
+| Ambiguous payload family | Supplied-data observation | Model decision |
+|---|---|---|
+| `speed-pause` / `speed-resume` | 380 pairs; the paired records share a timestamp | configuration telemetry, not playback pause |
+| `AdPause` / `AdResume` | 45 / 27; following heartbeat median is 2 / 6 seconds | ad telemetry, not a viewer playback stop without an explicit specification |
+| `download_asset_play_stop` | 10; next payload is usually at the same timestamp | download lifecycle, not the streaming session stop |
+| `BufferStart`, `Seek`, network/quality events | frequent, interleaved with active heartbeats | activity/liveness evidence only |
+
+The source-contract gate rejects unknown **event types**, but intentionally permits new heartbeat payloads
+as opaque liveness events. An unseen payload must be promoted to a state transition only with producer
+semantics and a sensitivity/reconciliation result; otherwise it cannot silently change what “watching” means.
 
 ## Traffic is extremely concentrated — this is a live-event dataset
 

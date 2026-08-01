@@ -1,0 +1,10 @@
+   ┌─table───────────────────┬─part_type─┬─parts─┬─raw────────┐
+1. │ content_dim             │ Compact   │     1 │ 884.60 KiB │
+2. │ ev_raw                  │ Wide      │     7 │ 158.92 MiB │
+3. │ finalizer_run_log       │ Wide      │     4 │ 486.00 B   │
+4. │ exact_tail_run_log      │ Wide      │     1 │ 524.00 B   │
+5. │ cc_minute_delta         │ Wide      │     7 │ 1.22 MiB   │
+6. │ exact_tail_minute_stage │ Wide      │     2 │ 813.58 KiB │
+7. │ session_intervals       │ Wide      │     7 │ 5.25 MiB   │
+8. │ session_delta_base      │ Wide      │     7 │ 4.05 MiB   │
+   └─────────────────────────┴───────────┴───────┴────────────┘

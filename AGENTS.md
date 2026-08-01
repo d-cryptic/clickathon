@@ -27,6 +27,7 @@ released in the final hours. Full statement: [docs/PROBLEM.md](docs/PROBLEM.md).
 | Resume a dead session | newest file in [docs/worksheets/](docs/worksheets/) |
 | Run something (query, bench, reconcile, load) | [tools/README.md](tools/README.md) |
 | Know what is already **verified** vs assumed | [docs/VERIFIED.md](docs/VERIFIED.md) ← **read before trusting any ClickHouse claim** |
+| See external research and the implementation decision log | [docs/RESEARCH.md](docs/RESEARCH.md) |
 | Record a design decision | [docs/adr/](docs/adr/) |
 | **Understand the model in depth, with diagrams** | [docs/artifacts/](docs/artifacts/) — open the newest `.html` in a browser |
 | Leave feedback for the operator | [docs/AGENT_FEEDBACK.md](docs/AGENT_FEEDBACK.md) |

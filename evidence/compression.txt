@@ -1,0 +1,27 @@
+    ┌─table───────────────────┬─name────────────────┬─compressed─┬─raw────────┬─ratio─┐
+ 1. │ ev_raw                  │ user_id             │ 1.20 MiB   │ 62.18 MiB  │  51.8 │
+ 2. │ ev_raw                  │ video_session_id    │ 1.19 MiB   │ 62.18 MiB  │  52.1 │
+ 3. │ ev_raw                  │ ingested_at         │ 32.46 KiB  │ 6.91 MiB   │ 217.9 │
+ 4. │ ev_raw                  │ session_start_epoch │ 158.95 KiB │ 6.91 MiB   │  44.5 │
+ 5. │ ev_raw                  │ event_timestamp     │ 3.21 MiB   │ 6.91 MiB   │   2.2 │
+ 6. │ ev_raw                  │ content_id          │ 134.62 KiB │ 6.91 MiB   │  52.6 │
+ 7. │ session_delta_base      │ video_session_id    │ 690.69 KiB │ 3.10 MiB   │   4.6 │
+ 8. │ session_intervals       │ user_id             │ 683.31 KiB │ 2.12 MiB   │   3.2 │
+ 9. │ session_intervals       │ video_session_id    │ 747.47 KiB │ 2.12 MiB   │   2.9 │
+10. │ ev_raw                  │ event               │ 357.18 KiB │ 888.57 KiB │   2.5 │
+11. │ ev_raw                  │ app_version         │ 34.60 KiB  │ 886.97 KiB │  25.6 │
+12. │ ev_raw                  │ event_type          │ 119.30 KiB │ 886.89 KiB │   7.4 │
+13. │ ev_raw                  │ audio_language      │ 81.71 KiB  │ 886.61 KiB │  10.9 │
+14. │ ev_raw                  │ platform            │ 5.67 KiB   │ 886.52 KiB │ 156.2 │
+15. │ ev_raw                  │ player_version      │ 14.32 KiB  │ 886.52 KiB │  61.9 │
+16. │ ev_raw                  │ subtitle_language   │ 66.28 KiB  │ 886.38 KiB │  13.4 │
+17. │ ev_raw                  │ country             │ 4.72 KiB   │ 886.29 KiB │ 187.7 │
+18. │ session_delta_base      │ content_id          │ 66.84 KiB  │ 352.71 KiB │   5.3 │
+19. │ session_delta_base      │ delta               │ 67.93 KiB  │ 352.71 KiB │   5.2 │
+20. │ exact_tail_minute_stage │ run_id              │ 1.54 KiB   │ 342.38 KiB │ 221.9 │
+21. │ cc_minute_delta         │ delta               │ 64.90 KiB  │ 261.77 KiB │     4 │
+22. │ cc_minute_delta         │ content_id          │ 34.86 KiB  │ 261.77 KiB │   7.5 │
+23. │ cc_minute_delta         │ ends                │ 59.13 KiB  │ 261.77 KiB │   4.4 │
+24. │ cc_minute_delta         │ starts              │ 61.31 KiB  │ 261.77 KiB │   4.3 │
+25. │ session_intervals       │ generated_at        │ 1.36 KiB   │ 241.65 KiB │ 177.5 │
+    └─────────────────────────┴─────────────────────┴────────────┴────────────┴───────┘

@@ -1,4 +1,4 @@
-# ADR 0005 — Heartbeat lease semantics for the hot tier
+# ADR 0005 — Heartbeat lease semantics for the hot tier (superseded)
 
 > **Summary:** In the hot tier ([ADR 0004](0004-two-tier-lambda-serving.md)) a session is active in
 > minute M iff some heartbeat lease covers M, where each heartbeat at `t` grants `[t, t + LEASE)` and
@@ -7,9 +7,13 @@
 > unavoidable consequence of streaming, since you cannot know a beat was the last one until the gap has
 > elapsed. Aggregation is `uniqExact`, never `uniq`. Status: proposed, 2026-08-01.
 
-**Status** Proposed · 2026-08-01
+**Status** Superseded by [ADR 0007](0007-state-gate-heartbeats.md) · 2026-08-01
 
 ## Context
+
+The lease is not authoritative because a stateless MV cannot know app/playback state established in a
+previous insert block. Measured backgrounded and paused heartbeats make that omission incorrect; see
+ADR 0007.
 
 The hot tier must be computable by a stateless materialized view: no reading of prior state, no
 knowledge of a session's earlier heartbeats, idempotent under replay and late arrival. The gap model

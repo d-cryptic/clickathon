@@ -1,0 +1,12 @@
+    ┌─q────────────────────────────────────────────────────────────┬─runs─┬─p50_p90───────────────────┬─avg_read───┐
+ 1. │ TRUNCATE TABLE cc_minute_delta                               │   42 │ [14,31.799999999999997]   │ 0.00 B     │
+ 2. │ INSERT INTO finalizer_run_log VALUES                         │   32 │ [57,77.89999999999999]    │ 232.56 B   │
+ 3. │ INSERT INTO default.finalizer_run_log (run_id, run_sequence, │   32 │ [7,26.00000000000002]     │ 104.19 B   │
+ 4. │ TRUNCATE TABLE session_intervals;                            │   31 │ [20,31]                   │ 0.00 B     │
+ 5. │ INSERT INTO cc_minute_delta WITH clipped AS ( SELECT platfor │   29 │ [34,56]                   │ 1.41 MiB   │
+ 6. │ CREATE TEMPORARY TABLE raw_truth_intervals ENGINE = Memory A │   20 │ [472.5,560.2]             │ 143.36 MiB │
+ 7. │ INSERT INTO session_intervals WITH ? AS heartbeat_gap_s, ? A │   20 │ [606.5,746.2000000000002] │ 143.36 MiB │
+ 8. │ SELECT max(ingested_at) FROM ev_raw                          │   19 │ [3,41.999999999999986]    │ 6.91 MiB   │
+ 9. │ SELECT ? AS gap_s, ? AS tail_s, count() AS intervals, sum(da │   18 │ [1,2.3000000000000007]    │ 224.73 KiB │
+10. │ SELECT ? AS table, count() AS rows FROM session_intervals UN │   12 │ [1,1.9000000000000004]    │ 32.00 B    │
+    └──────────────────────────────────────────────────────────────┴──────┴───────────────────────────┴────────────┘

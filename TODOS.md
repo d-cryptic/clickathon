@@ -9,27 +9,35 @@
 - [ ] **[H0]** Provision ClickHouse Cloud service; fill `.env`; `/verify-env` against Cloud
 - [ ] **[H0]** Copy the two CSVs into `data/`; `docker compose up -d`; `tools/load.sh`
 - [ ] **[H1]** Confirm the measured shape matches `docs/DATA_DICTIONARY.md` on OUR load
-- [ ] **[H1] GATE ①** Do heartbeats continue while backgrounded? Count beats strictly inside each
-      bg→fg pair. **≈0 → ADR 0001 stands. ≈1/min → gaps are blind and the model becomes a hybrid.**
-      Nothing past H2 starts until this is answered.
-- [ ] **[H1] GATE ②** Census the `event` sub-column for pause states; do heartbeats survive a pause?
-      The statement excludes paused time explicitly and we have no handling for it.
+- [x] **[H1] GATE ①** Heartbeats continue while backgrounded: 4,503 after the latest background marker.
+      Gap-only logic is invalid; ADR 0007 makes background a hard state gate.
+- [x] **[H1] GATE ②** `event` contains `pause`/`resume`; 94,463 heartbeats occur while paused and 6,868
+      pause→resume gaps last at least one minute. Pause is a hard state gate (ADR 0007).
+- [x] **[H1]** Source-contract preflight blocks ambiguous lifecycle reuse, invalid timestamps, unknown
+      event types, tied serving-dimension conflicts, and missing content references before materialization.
 - [ ] **[H1] GATE ③** Out-of-order arrival frequency — sets the watermark width `W`.
-- [ ] **[H2]** Build `session_intervals` from heartbeat gaps — **one row visible end to end**
+      Blocked by source telemetry, not SQL: supplied CSV has one bulk-load `ingested_at` timestamp.
+- [x] **[H2]** Build state-gated `session_intervals` — 30,931 rows on the supplied load.
 
 ## Next
 
-- [ ] **[H3]** `cc_minute_delta` with **hour-clipped** emission (ADR 0003) + `v_concurrency_minute`
-- [ ] **[H4]** `/reconcile` passing on 5 minutes — **this is the gate, do not pass it by**
-- [ ] **[H4]** Finalizer + watermark; truncation test proving open-session absorption.
-      ← **MVP LINE: sealed tier + stateless baseline is a complete submission from here**
-- [ ] **[H4]** `PROJECTION` on `ev_raw` ordered by `video_session_id` — the finalizer and the
-      straggler path are point lookups by session, which ADR 0002's key no longer serves. ADR 0002
-      names this remedy explicitly. **Measure it; do NOT revert ADR 0002.**
-- [ ] **[H5]** Hot tier: `mv_lease` → `cc_minute_hot` (`uniqExact`) + the stitched serving view (ADR 0004/0005)
-- [ ] **[H6]** `cc_hour_agg` (max + integral); peak/average at minute/hour/day grain with dimension filters
+- [x] **[H3]** `cc_minute_delta` with **hour-clipped** emission + `v_concurrency_change`.
+- [ ] **[H4]** `/reconcile` passing on 5 minutes — **implemented; capture Cloud evidence before checking off**
+- [x] **[H4]** Finalizer + watermark metadata: published per-session correction state, checkpoint,
+      resume protocol, and a synthetic late-background correction proven against raw re-derivation.
+- [x] **[H4]** Open-session truncation gate: a 10:30 event-time cut retained 144 state-machine-open
+      sessions, 75 active at the cut minute, and zero intervals beyond the 60-second tail bound.
+- [x] **[H5]** Truncation test proving open-session absorption through a bounded exact tail.
+      At a 10:30 cut, the staged tail serves all 75 active sessions and no interval extends past 60 seconds.
+- [x] **[H4]** `PROJECTION` on `ev_raw` ordered by `video_session_id` — the finalizer and the
+      straggler path are point lookups by session; `by_session` is present and selected in local
+      `EXPLAIN indexes = 1`. Re-measure it on Cloud before benchmark evidence.
+- [x] **[H5]** Bounded exact tail: versioned exact minute snapshot + stitched serving view (ADR 0012)
+- [ ] **[H6]** Benchmark scoped additive hourly integrals and only exact peak cuboids. Do **not** sum
+      per-dimension hour maxima for a filtered peak; ADR 0015 proves that loses time alignment.
 - [ ] **[H7]** ClickStack up, `tools/clickstack-bootstrap.sh` — **instrument watermark lag**, not just ingestion lag
-- [ ] **[H8]** Straggler correction-by-diff path (ADR 0006) + the live late-arrival demo
+- [x] **[H8]** Straggler correction path (ADR 0006): synthetic late background marker changed the
+      six-minute Android integral 1,841 → 1,836 and exactly matched an independent raw re-derivation.
 - [ ] **[H8]** Tail-sensitivity sweep (gap × tail grid) — the ground truth is private and unfittable
 
 ## Then

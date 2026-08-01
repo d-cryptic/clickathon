@@ -1,16 +1,22 @@
-# ADR 0004 — Two-tier serving: idempotent hot tier stitched to an append-only sealed tier
+# ADR 0004 — Two-tier serving: ungated heartbeat leases (superseded)
 
 > **Summary:** Replaces the "compensating delta" update mechanism, which cannot be implemented in
 > ClickHouse because an incremental materialized view sees only the current insert block and would have
 > to read the target table mid-insert to learn an interval's previous end. Instead: a **hot tier** of
 > heartbeat leases aggregated with `uniqExact` (immediate, idempotent, no state), and a **sealed tier**
 > of gap-derived intervals emitted as append-only hour-clipped deltas behind a watermark. A serving view
-> stitches them at the watermark. Nothing is ever updated or rebuilt. Status: proposed, 2026-08-01.
-> Supersedes the update-handling section of `docs/ARCHITECTURE.md`.
+> stitches them at the watermark. Nothing is ever updated or rebuilt. This proposal is historical: the
+> ungated lease is invalid under the measured playback states and its update section is superseded by
+> published correction state. Status: superseded, 2026-08-01.
 
-**Status** Proposed · 2026-08-01
+**Status** Superseded by [ADR 0007](0007-state-gate-heartbeats.md) and
+[ADR 0009](0009-published-correction-state.md) · 2026-08-01
 
 ## Context
+
+The incremental-MV and signed-correction reasoning below remains useful, but the proposed ungated
+lease tier is invalid: heartbeats continue while the app is backgrounded and paused. A state-aware,
+bounded mutable tail replaces it; see ADR 0007.
 
 `docs/ARCHITECTURE.md` specified: *"New heartbeats extend the interval (`ReplacingMergeTree` on
 `interval_end`) and emit a compensating delta. Nothing is rebuilt."*

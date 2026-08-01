@@ -1,11 +1,11 @@
 # ARCHITECTURE — the concurrency model
 
-> **Summary:** Raw events → active intervals (heartbeat-gap derived) → **hour-clipped** minute deltas per
-> dimension combination → concurrency as a running sum within each hour. Serving is **two-tier**: an
-> idempotent hot tier of heartbeat leases (immediate, `uniqExact`) stitched at a watermark to an
-> append-only sealed tier (exact). That split *is* the session-independent vs session-aware comparison.
-> Peak is never stored — it is not summable across dimensions — but hour-clipping makes it summable
-> across time, so hour-grain maxes pre-aggregate. Nothing is ever updated or rebuilt.
+> **Summary:** Raw events → state-gated active intervals → **hour-clipped** minute deltas per dimension
+> combination → concurrency as a running sum within each hour. The implemented historical spine is
+> deterministic and excludes backgrounded and paused heartbeats; a published correction-state finalizer
+> incrementally absorbs late or evolving sessions, while a published bounded exact tail serves the newest
+> event-time window. Peak is never summable across dimensions, while hour clipping removes
+> carry-in and makes a future time rollup safe. Read [ADR 0007](adr/0007-state-gate-heartbeats.md) first.
 
 ## Layers
 
@@ -21,31 +21,31 @@ dashboard shape than leading with the session id).
 > reverting the key."* Add it at H4 and measure it — do **not** revert ADR 0002, whose 17.3× is on the
 > access pattern that runs far more often.
 
-**2 · `session_intervals`** — one row per contiguous *active* range. Derived by walking a session's
-events in time order and closing an interval when the heartbeat gap exceeds `HEARTBEAT_GAP_S`.
-`ReplacingMergeTree(interval_end)` so a re-derivation replaces rather than duplicates. `is_open` marks
-sessions with no `VideoSessionEnd` yet. Produced by the **finalizer**, not by a materialized view —
-interval derivation is a cross-block, per-session, time-ordered computation and a streaming MV cannot
-express it ([ADR 0004](adr/0004-two-tier-lambda-serving.md)).
+**2 · `session_intervals`** — one row per contiguous *active* range. An event-time state machine gates
+heartbeats on foreground AND unpaused playback, then closes a run on a >150-second gap or immediate
+stop marker. `is_open` marks sessions with no end. It is produced by the materializer, not an MV:
+interval derivation is cross-block, per-session and time ordered ([ADR 0007](adr/0007-state-gate-heartbeats.md)).
 
-**3 · `cc_minute_delta`** — the sealed serving layer. `+1` at the minute an interval opens, `−1` at the
+**3 · `cc_minute_delta`** — the compact bootstrap serving layer. `+1` at the minute an interval opens, `−1` at the
 minute after it closes, **clipped to each hour the interval touches**
 ([ADR 0003](adr/0003-hour-clipped-interval-splitting.md)). Keyed `(platform, country, content_id,
 minute)`. Concurrency at minute *M* is `sum(delta) OVER (PARTITION BY toStartOfHour(minute) ORDER BY
 minute)` — bounded to the hour, no carry-in from earlier history. **Append-only.**
 
-**4 · `cc_hour_agg`** — per `(dims, hour)`, the hour's `max` of that running sum and its `integral`
-(concurrency-seconds). Only correct because of hour-clipping. Peak over an hour-aligned range is the max
-of stored maxes; average is `sum(integrals) / range_seconds`.
+**4 · Next: `cc_hour_agg`** — per `(dims, hour)`, an hour max and integral. It is deferred until the
+delta layer has a raw-data reconciliation gate.
 
-**5 · `cc_minute_hot`** — the hot tier and the session-independent model. Each heartbeat at `t` grants a
-lease `[t, t + HEARTBEAT_GAP_S)`; an MV `arrayJoin`s it into the minutes that lease covers and
-accumulates `uniqExactState(video_session_id)` ([ADR 0005](adr/0005-heartbeat-lease-semantics.md)).
-Stateless, idempotent, TTL'd to a short window. **`uniqExact`, never `uniq`** — HLL's 1–2% error is a
-silent correctness bug against an exact ground truth.
+**4 · `session_delta_base` + `session_delta_correction_stage`** — the update layer. The bootstrap stores
+each session's contribution; a finalizer re-derives only sessions whose `ingested_at` is in an overlapping
+source window, stages their complete target correction, and publishes it atomically at the query boundary.
+The serving query overlays `argMax(correction_delta, run_sequence)` from published runs on the compact
+baseline. See [ADR 0006](adr/0006-late-arrival-correction-by-diff.md).
 
-**6 · `v_concurrency`** — the stitch. `minute < W` reads the sealed running sum; `minute >= W` reads
-`uniqExactMerge` over the hot tier.
+**5 · `exact_tail_minute_stage`** — the old ungated lease MV is invalid because heartbeats survive known
+inactive states. `refresh-tail.sh` snapshots only a short, state-machine-derived event-time window after
+a finalizer run. A snapshot is query-selected only when its `finalizer_run_sequence` equals the selected
+correction sequence; a newer correction makes an older tail invisible rather than stale. It replaces the
+ledger only inside its recorded `[event_watermark, tail_until]` range, never after it. See [ADR 0012](adr/0012-exact-tail-publication-fence.md).
 
 ## The three arithmetic rules
 
@@ -62,17 +62,17 @@ silent correctness bug against an exact ground truth.
 
 ## Update handling
 
-Three arrival classes, each absorbed without a rebuild:
+The finalizer handles normal arrival and stragglers as a versioned correction overlay. The exact tail
+then gives a bounded, current snapshot without allowing stale data to override that correction:
 
 | Arrival | Absorbed by | Mechanism |
 |---|---|---|
-| Newer than watermark `W` | hot tier | `uniqExact` is idempotent and monotone — replays are no-ops, late beats are pure additions |
-| In normal order | finalizer | re-derives **only sessions touched since the last run**, appends sealed deltas |
-| Older than `W` (straggler) | correction-by-diff | recompute that one session with and without the straggler, append the difference ([ADR 0006](adr/0006-late-arrival-correction-by-diff.md)) |
+| Newer than watermark `W` | exact tail | versioned bounded minute snapshot calculated from state-machine markers |
+| In normal order | finalizer | re-derives touched sessions and publishes their replacement correction state |
+| Older than `W` (straggler) | correction overlay | same re-derivation; a published correction replaces the previous one |
 
-Open sessions need no special path: they keep renewing leases in the hot tier and stay provisional in
-the sealed tier until `W` passes them. **`W` is the metric to instrument in ClickStack** — watermark lag
-is the observable expression of the whole design.
+Open sessions remain provisional in the bounded tail until `W` passes them. **`W` is the metric to
+instrument in ClickStack** — watermark lag is the observable expression of the whole design.
 
 ## Trade-offs to defend
 
@@ -80,9 +80,9 @@ is the observable expression of the whole design.
 |---|---|---|
 | Interval → delta | per-minute explosion | O(intervals) vs O(sessions × minutes) |
 | Hour-clipped deltas | unclipped | removes the carry-in scan-from-`t=0`; makes hour-grain peak pre-aggregable (day peak reads 24 rows/combo, not 1,440) |
-| Heartbeat gaps | bg/fg pairing | bg/fg are not guaranteed; 379 unmatched in the sample — **conditional on the gating measurement below** |
-| Lease hot tier | compensating deltas | compensation needs the interval's previous end, which a stateless MV cannot know without a racy read-modify-write |
-| Two tiers | one | the comparison is the evidence that we exclude background time — and here it is structural, not bolted on |
+| State-gated heartbeats | gap-only / bg-fg pairing | state markers prevent known false positives; heartbeat cadence still bridges missing markers |
+| Bounded exact tail | stateless heartbeat leases | a stateless MV cannot see previous app/playback state and would count known-inactive heartbeats |
+| Sealed delta + exact tail | one mutable history table | bounded mutability keeps historical reads append-friendly |
 | Correction by diff | `ALTER … UPDATE` / partition rebuild | exactly as correct as a rebuild, of one session; cost scales with stragglers, not history |
 | Dimension-first key **on the serving tables** | time-first | dashboards filter then range-scan; measured 122× on a comparable A/B |
 | Time-bucket-first key **on `ev_raw`** | session-id-first | measured 17.3× better on the dashboard shape, identical on the full interval rebuild ([ADR 0002](adr/0002-order-by-time-bucket-then-platform.md)) |
@@ -90,10 +90,8 @@ is the observable expression of the whole design.
 
 ## The premise this all rests on
 
-**Unverified:** that heartbeats *stop* while the app is backgrounded. If they continue, gap detection is
-blind, and both ADR 0001 and the lease model need a state-machine layer over background/foreground and
-pause events. Measure it before writing model SQL — see [TODOS.md](../TODOS.md) `[H1]` gates and
-[docs/artifacts/](artifacts/) for the query.
+**Verified:** heartbeats continue while the app is backgrounded and paused. The gates found 4,503 and
+94,463 such rows respectively, so all authoritative interval work uses the state machine in ADR 0007.
 
 Full reasoning, with diagrams for every step above:
 [docs/artifacts/2026-08-01-concurrency-model-deep-dive.html](artifacts/2026-08-01-concurrency-model-deep-dive.html).

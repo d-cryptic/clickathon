@@ -1,31 +1,11 @@
 -- ============================================================================
--- 10_intervals.sql — THE MODEL. Active intervals -> minute deltas -> concurrency.
+-- 10_intervals.sql — durable tables for the foreground-only serving model.
 --
--- Why deltas and not per-minute explosion: exploding every session into one row
--- per active minute is O(sessions x minutes) and the statement calls it out as
--- the approach that collapses at scale. A delta is O(intervals): +1 when an
--- active range opens, -1 when it closes. Concurrency at minute M is the running
--- sum of deltas up to M. Peak over a range is max of that running sum.
---
--- Why heartbeat GAPS and not AppBackgrounded/AppForegrounded:
--- the data dictionary says those events are NOT GUARANTEED. Measured on the
--- provided file: 14,700 backgrounds vs 14,321 foregrounds -> 379 unmatched, and
--- 418 sessions background and never return. A model that pairs bg->fg is wrong
--- on ~4% of sessions and will be wrong differently on the unseen day.
--- Heartbeats are emitted every 60s, so a gap > threshold IS the inactivity signal.
--- bg/fg are used as a CORROBORATING signal, never as the sole one.
+-- `queries/materialize_intervals.sql` performs the cross-block sessionization.
+-- It intentionally is not an incremental MV: an MV sees only its insert block
+-- and cannot safely reconstruct a session spanning blocks or late arrivals.
 -- ============================================================================
 
--- ---------------------------------------------------------------------------
--- Tunables, in one place, so the whole model can be re-tuned from here.
--- HEARTBEAT_GAP_S : a gap longer than this ends the active interval.
---                   60s cadence + jitter -> 150s is ~2.5 missed beats.
--- TAIL_GRACE_S    : how much credit the last heartbeat of an interval gets.
---                   One cadence: the viewer was watching until at least the next
---                   expected beat. Do NOT give a full gap of credit.
--- ---------------------------------------------------------------------------
-
--- Session-aware active intervals, one row per contiguous active range.
 CREATE TABLE IF NOT EXISTS session_intervals
 (
     video_session_id String,
@@ -35,23 +15,17 @@ CREATE TABLE IF NOT EXISTS session_intervals
     country          LowCardinality(String),
     interval_start   DateTime64(3),
     interval_end     DateTime64(3),
-    is_open          UInt8,          -- 1 = session had no VideoSessionEnd at build time
-    INDEX idx_start interval_start TYPE minmax GRANULARITY 1
+    is_open          UInt8,
+    generated_at     DateTime64(3)
 )
-ENGINE = ReplacingMergeTree(interval_end)      -- late heartbeats EXTEND an interval;
-ORDER BY (video_session_id, interval_start)     -- replacing on interval_end keeps the latest
+ENGINE = MergeTree
+PARTITION BY toYYYYMMDD(interval_start)
+ORDER BY (platform, country, content_id, interval_start, video_session_id)
 SETTINGS min_bytes_for_wide_part = 0;
 
--- ---------------------------------------------------------------------------
--- The serving layer: minute deltas per dimension combination.
---
--- SimpleAggregateFunction(sum, Int64) not plain Int64 — on 26.7 a plain column in
--- an AggregatingMergeTree that is neither in the sort key nor an aggregate is
--- REJECTED with Code: 36. (Verified; it is one of two breaking changes in 26.7.)
---
--- The sort key is dimension-first, time last-but-one: dashboards filter by
--- platform/content then scan a time range, which is exactly this prefix order.
--- ---------------------------------------------------------------------------
+-- One signed boundary per active interval per hour.  An hour-local running sum
+-- is an absolute concurrency value, so range queries never need a historical
+-- carry-in scan.  `delta` remains additive, making late corrections appendable.
 CREATE TABLE IF NOT EXISTS cc_minute_delta
 (
     minute      DateTime,
@@ -65,47 +39,162 @@ CREATE TABLE IF NOT EXISTS cc_minute_delta
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMMDD(minute)
 ORDER BY (platform, country, content_id, minute)
-SETTINGS min_bytes_for_wide_part = 0;
+SETTINGS
+    min_bytes_for_wide_part = 0,
+    -- A finalizer retry must not append a second copy of an identical run.
+    -- This is a bounded transport aid, not the correctness boundary; published
+    -- correction snapshots below remain invisible until their run is committed.
+    non_replicated_deduplication_window = 1000;
 
--- ---------------------------------------------------------------------------
--- Session-INDEPENDENT view: concurrency straight from event state, no session
--- reconstruction. The statement asks for both and for a comparison — this is the
--- cheap, always-fresh model; session_intervals is the accurate one. Comparing
--- them IS the trade-off evidence the judges asked for.
--- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS cc_minute_stateless
+-- Bootstrap snapshot of each session's hour-clipped boundary markers.
+-- `cc_minute_delta` is the fast baseline; this table is only point-read by the
+-- finalizer to calculate a late/session correction exactly.
+CREATE TABLE IF NOT EXISTS session_delta_base
 (
-    minute       DateTime,
-    platform     LowCardinality(String),
-    country      LowCardinality(String),
-    content_id   Int64,
-    -- uniqEXACT, not uniq. `uniq` is a HyperLogLog-family estimator carrying ~1-2% error;
-    -- against an EXACT private ground truth that is a silent correctness bug on every number
-    -- that passes through here. Memory is proportional to distinct sessions per minute bucket,
-    -- which is affordable at this grain. See ADR 0005.
-    active_state AggregateFunction(uniqExact, String)
+    video_session_id String,
+    platform         LowCardinality(String),
+    country          LowCardinality(String),
+    content_id       Int64,
+    minute           DateTime,
+    delta            Int64
 )
-ENGINE = AggregatingMergeTree
+ENGINE = MergeTree
 PARTITION BY toYYYYMMDD(minute)
-ORDER BY (platform, country, content_id, minute)
-SETTINGS min_bytes_for_wide_part = 0;
+ORDER BY (video_session_id, platform, country, content_id, minute)
+SETTINGS
+    min_bytes_for_wide_part = 0,
+    non_replicated_deduplication_window = 1000;
 
--- Any heartbeat in a minute means that session was active in that minute.
--- This is deliberately naive — it is the baseline the accurate model is measured against.
---
--- NOTE (ADR 0004/0005): this evolves into the HOT TIER. The change is to grant each heartbeat a
--- LEASE [t, t + HEARTBEAT_GAP_S) and arrayJoin it across the minutes that lease covers, rather
--- than crediting only the minute the beat landed in. That one change makes this model agree with
--- the gap model on every interior minute (overlapping leases bridge a missed beat exactly as the
--- gap threshold does), differing only at the tail. It stays stateless and idempotent, which is
--- what lets it absorb open sessions and late arrivals with no compensation mechanism at all.
-CREATE MATERIALIZED VIEW IF NOT EXISTS mv_stateless TO cc_minute_stateless AS
+-- Immutable phase log. A correction run is query-visible only when its greatest
+-- ordered phase is `published`; a crash in prepare/stage leaves no partial correction
+-- in the dashboard. `run_sequence` establishes the deterministic latest state
+-- for a session marker without depending on asynchronous part merges.
+CREATE TABLE IF NOT EXISTS finalizer_run_log
+(
+    run_id                UUID,
+    run_sequence          UInt64,
+    phase                 Enum8('prepared' = 1, 'staged' = 2, 'published' = 3, 'aborted' = 4),
+    source_from           DateTime64(3),
+    source_high_watermark DateTime64(3),
+    event_watermark       DateTime64(3),
+    affected_sessions     UInt64,
+    staged_rows           UInt64,
+    model_version         LowCardinality(String),
+    recorded_at           DateTime64(3)
+)
+ENGINE = MergeTree
+ORDER BY (run_id, recorded_at)
+SETTINGS
+    min_bytes_for_wide_part = 0,
+    non_replicated_deduplication_window = 1000;
+
+-- A row is the current correction (new marker minus bootstrap marker) for one
+-- session/dimension/minute. Zero rows are deliberate tombstones. The serving
+-- query reads argMax(delta, run_sequence) only from published runs, so a retry
+-- or a staged-but-unpublished batch cannot double-count.
+CREATE TABLE IF NOT EXISTS session_delta_correction_stage
+(
+    run_id             UUID,
+    run_sequence       UInt64,
+    video_session_id   String,
+    platform           LowCardinality(String),
+    country            LowCardinality(String),
+    content_id         Int64,
+    minute             DateTime,
+    correction_delta   Int64
+)
+ENGINE = MergeTree
+PARTITION BY toYYYYMMDD(minute)
+ORDER BY (video_session_id, platform, country, content_id, minute, run_sequence)
+SETTINGS
+    min_bytes_for_wide_part = 0,
+    non_replicated_deduplication_window = 1000;
+
+-- Versioned, bounded, exact minute snapshots for the newest event-time window.
+-- A snapshot is only used when it was built from the selected correction run;
+-- otherwise serving falls back to the correction overlay.  This prevents a
+-- stale hot tier from hiding a newly published late-event correction.
+CREATE TABLE IF NOT EXISTS exact_tail_run_log
+(
+    run_id                    UUID,
+    run_sequence              UInt64,
+    finalizer_run_sequence    UInt64,
+    phase                     Enum8('prepared' = 1, 'staged' = 2, 'published' = 3, 'aborted' = 4),
+    event_watermark           DateTime,
+    tail_until                DateTime,
+    source_high_watermark     DateTime64(3),
+    staged_rows               UInt64,
+    model_version             LowCardinality(String),
+    recorded_at               DateTime64(3)
+)
+ENGINE = MergeTree
+ORDER BY (run_id, recorded_at)
+SETTINGS
+    min_bytes_for_wide_part = 0,
+    non_replicated_deduplication_window = 1000;
+
+-- One full, publication-gated snapshot over a deliberately short window.
+-- Rows with zero concurrency are omitted: absence inside the selected snapshot
+-- means zero, while a run with no published matching correction is not used.
+CREATE TABLE IF NOT EXISTS exact_tail_minute_stage
+(
+    run_id        UUID,
+    platform      LowCardinality(String),
+    country       LowCardinality(String),
+    content_id    Int64,
+    minute        DateTime,
+    concurrency   UInt64
+)
+ENGINE = MergeTree
+PARTITION BY toYYYYMMDD(minute)
+ORDER BY (run_id, platform, country, content_id, minute)
+SETTINGS
+    min_bytes_for_wide_part = 0,
+    non_replicated_deduplication_window = 1000;
+
+-- A compact change-point serving view. Consumers generate the requested minute
+-- grid and forward-fill within each hour; this avoids permanently exploding all
+-- historical intervals into per-minute rows.
+CREATE OR REPLACE VIEW v_concurrency_change AS
+WITH
+    published_runs AS
+    (
+        SELECT run_id
+        FROM finalizer_run_log
+        GROUP BY run_id
+        HAVING max(phase) = 'published'
+    ),
+    correction_state AS
+    (
+        SELECT
+            platform,
+            country,
+            content_id,
+            minute,
+            argMax(correction_delta, run_sequence) AS delta
+        FROM session_delta_correction_stage
+        WHERE run_id IN published_runs
+        GROUP BY video_session_id, platform, country, content_id, minute
+    )
 SELECT
-    toStartOfMinute(event_timestamp) AS minute,
+    minute,
     platform,
     country,
     content_id,
-    uniqExactState(video_session_id) AS active_state
-FROM ev_raw
-WHERE event_type IN ('VideoHeartbeat', 'VideoPlay')
+    sum(sum(delta)) OVER
+    (
+        PARTITION BY platform, country, content_id, toStartOfHour(minute)
+        ORDER BY minute
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+    ) AS concurrency
+FROM
+(
+    SELECT minute, platform, country, content_id, delta
+    FROM cc_minute_delta
+
+    UNION ALL
+
+    SELECT minute, platform, country, content_id, delta
+    FROM correction_state
+)
 GROUP BY minute, platform, country, content_id;

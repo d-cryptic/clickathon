@@ -15,6 +15,7 @@ set -euo pipefail
 RAW="${1:-data/ch-hackathon-raw-data.csv}"
 CONTENT="${2:-data/ch-hackathon-content-data.csv}"
 TARGET="${TARGET:-local}"          # TARGET=cloud tools/load.sh
+CONTAINER_NAME="${CH_CONTAINER:-ch}"
 
 RAW_COLS='content_id Int64, video_session_id String, user_id String, event_type String, event String, event_timestamp UInt64, platform String, app_version String, country String, audio_language String, subtitle_language String, player_version String, session_start_epoch UInt64'
 CONTENT_COLS='content_id Int64, title String, video_type String, category String'
@@ -29,8 +30,14 @@ run() {  # run <sql> ; CSV arrives on stdin
     curl -sS --fail-with-body \
       "https://$(ch_host):${CH_PORT}/?database=${CH_DATABASE}&query=$(python3 -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1]))' "$1")" \
       --user "${CH_USER}:${CH_PASSWORD}" --data-binary @-
+  elif [ "$TARGET" = local ]; then
+    docker exec -i "$CONTAINER_NAME" clickhouse-client \
+      --user app \
+      --password "${CH_PASSWORD_LOCAL:?CH_PASSWORD_LOCAL must be set for TARGET=local}" \
+      --query "$1"
   else
-    docker exec -i ch clickhouse-client --query "$1"
+    echo "TARGET must be local or cloud" >&2
+    return 2
   fi
 }
 
@@ -45,7 +52,7 @@ echo "loading content_dim from $CONTENT ..."
 run "INSERT INTO content_dim SELECT content_id, title, video_type, category FROM input('$CONTENT_COLS') FORMAT CSVWithNames" < "$CONTENT"
 
 echo "loading ev_raw from $RAW ..."
-run "INSERT INTO ev_raw SELECT content_id, video_session_id, user_id, event_type, event, toDateTime64(event_timestamp/1000, 3), platform, app_version, country, audio_language, subtitle_language, player_version, toDateTime64(session_start_epoch/1000, 3) FROM input('$RAW_COLS') FORMAT CSVWithNames" < "$RAW"
+run "INSERT INTO ev_raw (content_id, video_session_id, user_id, event_type, event, event_timestamp, platform, app_version, country, audio_language, subtitle_language, player_version, session_start_epoch) SELECT content_id, video_session_id, user_id, event_type, event, toDateTime64(event_timestamp/1000, 3), platform, app_version, country, audio_language, subtitle_language, player_version, toDateTime64(session_start_epoch/1000, 3) FROM input('$RAW_COLS') FORMAT CSVWithNames" < "$RAW"
 
 # Count through run(), not docker exec — a TARGET=cloud load has no local container,
 # and reporting local counts after a Cloud load would be actively misleading.

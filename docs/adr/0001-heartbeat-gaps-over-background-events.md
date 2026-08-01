@@ -1,14 +1,17 @@
-# ADR 0001 — Derive inactivity from heartbeat gaps, not background events
+# ADR 0001 — Derive inactivity from heartbeat gaps, not background events (superseded)
 
 > **Summary:** Active intervals are closed by heartbeat gaps, with `AppBackgrounded`/`AppForegrounded`
 > used only as corroboration. Chosen because those events are documented as not guaranteed and are
 > measurably unpaired in the provided data. Status: accepted, 2026-08-01.
 
-**Status** Accepted · 2026-08-01
+**Status** Superseded by [ADR 0007](0007-state-gate-heartbeats.md) · 2026-08-01
 
 ## Context
 The problem is to count only *truly active* playback. Two candidate signals exist: explicit
 background/foreground state events, and the 60-second heartbeat cadence.
+
+Subsequent gating measurements found 4,503 heartbeats while backgrounded and 94,463 while paused. The
+original conclusion that heartbeats alone proved activity was therefore false.
 
 ## Decision
 Heartbeat gaps are the **primary** signal. A gap greater than `HEARTBEAT_GAP_S` closes the active

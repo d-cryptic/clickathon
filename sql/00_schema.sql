@@ -27,6 +27,15 @@ CREATE TABLE IF NOT EXISTS ev_raw
     subtitle_language   LowCardinality(String),
     player_version      LowCardinality(String),
     session_start_epoch DateTime64(3),
+    ingested_at         DateTime64(3) DEFAULT now64(3),
+    -- No organiser event id is supplied. This is an auditable logical-payload
+    -- fingerprint for duplicate-rate monitoring; derivation still uses the full
+    -- payload so a hash collision cannot collapse activity.
+    event_fingerprint   UInt64 MATERIALIZED cityHash64(
+        content_id, video_session_id, user_id, event_type, event, event_timestamp,
+        platform, app_version, country, audio_language, subtitle_language,
+        player_version, session_start_epoch
+    ),
 
     -- skip indexes: the two lookups that are not the sort key prefix
     INDEX idx_content content_id TYPE bloom_filter(0.01) GRANULARITY 1,
@@ -42,6 +51,14 @@ SETTINGS index_granularity = 8192,
          -- non-replicated MergeTree has insert dedup OFF by default (window = 0).
          -- Turn it on so a replayed batch is idempotent — the unseen day may be re-loaded.
          non_replicated_deduplication_window = 1000;
+
+-- The dashboard-oriented key intentionally does not start with session id.  The
+-- finalizer does need point session reads, so this projection supplies that
+-- access path without sacrificing the measured dashboard pruning of the base key.
+ALTER TABLE ev_raw ADD PROJECTION IF NOT EXISTS by_session
+(
+    SELECT * ORDER BY (video_session_id, event_timestamp)
+);
 
 -- ---------------------------------------------------------------------------
 -- Content dimension. Small and static -> also exposed as a DICTIONARY (20_dicts.sql)

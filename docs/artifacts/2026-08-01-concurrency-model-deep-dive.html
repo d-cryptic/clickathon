@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Foreground-Only Concurrency — Model Deep Dive &amp; Design Evolution</title>
+<title>Foreground-Only Concurrency — Superseded Design Exploration</title>
 <meta name="cc-type"    content="plan">
 <meta name="cc-project" content="clickathon-project">
 <meta name="cc-date"    content="2026-08-01">
-<meta name="cc-title"   content="Foreground-Only Concurrency — Model Deep Dive &amp; Design Evolution">
-<meta name="cc-summary" content="In-depth explanation of the SonyLIV concurrency problem, three mechanical flaws found in the baseline design, and four evolutions that fix them.">
+<meta name="cc-title"   content="Foreground-Only Concurrency — Superseded Design Exploration">
+<meta name="cc-summary" content="Historical design exploration. The authoritative model is the state-gated interval architecture in ADR 0007 and docs/ARCHITECTURE.md.">
 <meta name="cc-tags"    content="clickhouse,concurrency,sonyliv,clickathon,data-modelling,materialized-views,lambda-architecture">
 <style>
 :root{
@@ -147,6 +147,17 @@ li::marker{color:var(--faint)}
 </head>
 <body>
 <main>
+
+<div class="call risk">
+  <div class="ct">Superseded model exploration — do not implement directly</div>
+  <p>
+    This artifact predates the loaded-data gate. It correctly motivates interval-to-delta serving and
+    late correction, but its gap-only and stateless heartbeat-lease tail proposals are invalid:
+    4,503 heartbeats occur while backgrounded and 94,463 while paused. The authoritative model is the
+    state-gated interval builder in <a href="../adr/0007-state-gate-heartbeats.md">ADR 0007</a> and
+    <a href="../ARCHITECTURE.md">docs/ARCHITECTURE.md</a>.
+  </p>
+</div>
 
 <!-- ================= MASTHEAD ================= -->
 <section class="mast" aria-labelledby="title">
