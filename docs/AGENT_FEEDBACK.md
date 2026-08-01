@@ -65,3 +65,21 @@
 - **The max-combo trap cost the old dashboard its three breakdown tiles** (285 shown vs 1,837
   true). The arithmetic rules in ARCHITECTURE.md cover sums; "max() over a finer grain" deserved a
   line too — added to CLICKSTACK.md.
+
+## 2026-08-01 · unseen-day rehearsal (synthetic day)
+
+- **A green gate cannot see a wrong tie-break.** The rehearsal's sharpest lesson: the gate passed on
+  all 1,080 minutes while the submitted peak MINUTE was wrong (bare argMax under a 64-minute tie).
+  Value-level reconciliation needs a companion that checks the *answer we would type into the form*.
+  The designed-truth generator (`tools/unseen-gen.sh`) is that companion — consider requiring it in
+  the same breath as `/reconcile` before submission.
+- **`sed \b` is a GNU-ism and this repo runs on macOS.** `render()` in unseen-run.sh silently
+  no-opped for its entire life; only a file that legitimately failed the guard exposed it. A cheap
+  pre-commit lint for `sed.*\\b` would have caught it the day it was written.
+- **Comments that quote defects can re-trigger the defect's guard** (ADR 0010's comments killed
+  phase 6). When a guard greps rendered SQL, strip comments first — now done, but the pattern
+  generalises to every grep-a-file guard in tools/.
+- **Concurrent agents + a fixed default scratch DB name is a foot-gun.** Preflight found the default
+  `sonyliv_unseen` still holding the previous rehearsal's state; a literal runbook run would have
+  dropped it. Suggestion: default UNSEEN_DB to `sonyliv_unseen_$(whoami or slug)` or refuse when the
+  DB exists non-empty.
