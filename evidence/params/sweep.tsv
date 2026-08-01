@@ -1,0 +1,27 @@
+#	GAP_S / TAIL_S sensitivity sweep — measured 2026-08-02, local ClickHouse 26.7.1.1315
+#	source: default.ev_raw (905,558 rows) · harness: evidence/adversarial/README.md, scratch db params_v2
+#	baseline reproduced exactly: GAP_S=150 TAIL_S=60 -> 30,323 intervals · 1,978.1 h · peak 2,917 @ 2026-07-26 10:56
+#	peak_minute was 2026-07-26 10:56 for EVERY row below — no variant moved it.
+param	value	intervals	hours	peak	peak_delta	peak_delta_pct	table
+GAP_S	45	31734	2015.5	2968	+51	+1.75	params_v2.si_gap45
+GAP_S	60	31265	2005.2	2964	+47	+1.61	adv_q19.si_gap60
+GAP_S	75	31044	2000.6	2956	+39	+1.34	params_v2.si_gap75
+GAP_S	90	30708	1986.1	2934	+17	+0.58	adv_q19.si_gap90
+GAP_S	105	30574	1982.3	2924	+7	+0.24	params_v2.si_gap105
+GAP_S	120	30467	1980.4	2919	+2	+0.07	adv_q19.si_gap120
+GAP_S	135	30391	1978.8	2918	+1	+0.03	params_v2.si_gap135
+GAP_S	150	30323	1978.1	2917	0	0.00	params_v2.si_check150_60
+GAP_S	165	30265	1976.4	2914	-3	-0.10	params_v2.si_gap165
+GAP_S	180	30214	1975.3	2909	-8	-0.27	adv_q19.si_gap180
+GAP_S	210	30116	1974.4	2904	-13	-0.45	params_v2.si_gap210
+GAP_S	240	30033	1973.5	2902	-15	-0.51	adv_q19.si_gap240
+GAP_S	300	29933	1972.2	2897	-20	-0.69	adv_q19.si_gap300
+GAP_S	465	29742	1971.8	2891	-26	-0.89	params_v2.si_gap465
+TAIL_S	0	30323	1828.5	2758	-159	-5.45	adv_q19.si_tail0
+TAIL_S	20	30323	1878.3	2821	-96	-3.29	params_v2.si_tail20
+TAIL_S	40	30323	1928.2	2872	-45	-1.54	adv_q19.si_tail40
+TAIL_S	60	30323	1978.1	2917	0	0.00	params_v2.si_check150_60
+TAIL_S	80	30323	2028.0	2968	+51	+1.75	adv_q19.si_tail80
+TAIL_S	100	30323	2077.8	3012	+95	+3.26	params_v2.si_tail100
+TAIL_S	120	30323	2127.7	3047	+130	+4.46	adv_q19.si_tail120
+GAP_S_per_platform	123/120/288/120/120/120/123/153/168/123	30389	1978.8	2915	-2	-0.07	params_v2.si_perplatform
