@@ -1,0 +1,12 @@
+UNSEEN-DAY RUN
+generated 2026-08-01T22:39:10Z   commit 7789748
+target database sonyliv_q37_newcol   ·   raw data/cruel-newcol-raw.csv   ·   content data/cruel-content.csv
+--------------------------------------------------------------------------
+reset: DROP DATABASE sonyliv_q37_newcol — re-loading without this DOUBLES ev_raw (measured; see the note in this script)
+preflight ok · server 26.2.1.525 · database sonyliv_q37_newcol ready and empty
+
+=== FAILED: preflight ===
+raw CSV header does not match what tools/load.sh inserts.
+expected: content_id,video_session_id,user_id,event_type,event,event_timestamp,platform,app_version,country,audio_language,subtitle_language,player_version,session_start_epoch
+actual  : content_id,video_session_id,user_id,event_type,event,event_timestamp,platform,app_version,country,audio_language,subtitle_language,player_version,session_start_epoch,experiment_id
+Columns are mapped by POSITION, not by name. Fix the loader before continuing.
