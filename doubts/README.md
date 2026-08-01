@@ -13,21 +13,28 @@
 |---|---|---|---|
 | [01](01-heartbeat-cadence.md) | The heartbeat ticks at **40s**, the spec says 60s | every interval boundary in the model | `TAIL_S`, `GAP_S` |
 | [02](02-resume-semantics.md) | `resume` fires for four different reasons | **189.2 h — 9.7%** of counted watch time | the pause-exclusion rule |
-| [03](03-content-catalog.md) | Empty `video_type`, colliding titles, a poison id | how content-level answers are labelled | `sql/80_content.sql` views |
+| [03](03-content-catalog.md) | **ANSWERED** — handle erroneous data (empty/null/dup) in a pre-processing stage *before* joins/MVs | how content-level answers are labelled | `sql/80_content.sql` views · new pre-processing stage |
+| [04](04-preprocessing-boundary.md) | Does "erroneous" include case/alias/sentinel labels? `hin`+`HIN`+`hin-hindi` = **77.6%** of events | every language-filtered benchmark answer | the pre-processing stage's scope · ADR 0008 |
+| [05](05-continuous-aggregates.md) | Does a watermark micro-batch satisfy "continuously updated aggregates"? | the largest unshipped deliverable | whether the interval model needs an MV redesign |
 
 ## How these differ from `docs/MENTOR_QUESTIONS.md`
 
 `MENTOR_QUESTIONS.md` ranks all seventeen and carries our current assumption for each, so a mentor can
 confirm or deny rather than compose an answer. That file stays authoritative for *what to ask first*.
 
-A `doubts/` file exists where measuring the data **changed the question**. Two of the three below
-supersede the version in `MENTOR_QUESTIONS.md`:
+A `doubts/` file exists where measuring the data **changed the question**. Several supersede or extend
+the versions in `MENTOR_QUESTIONS.md`:
 
 - **01 supersedes Q17.** Q17 says "your doc claims 1/min, our data is aperiodic." That was wrong — the
   data is not aperiodic, it ticks at 40 s. The sharper question is answerable; the old one invited a
   shrug.
 - **02 deepens Q3.** Q3 asks "why are there more resumes than pauses?" and assumes unpaired resumes are
   noise to ignore. They are not noise; they are load-bearing, and the assumption is worth 9.7%.
+- **04 follows from 03's answer.** The mentor's "handle erroneous data before joins/MVs" directive
+  collides with ADR 0008's raw-string policy; 04 asks where normalisation stops (77.6% of events at
+  stake on `audio_language` alone).
+- **05 is new** — no `MENTOR_QUESTIONS.md` counterpart. It asks what satisfies README step 4's
+  "continuously updated aggregates", the largest unshipped deliverable.
 
 ## Rules for this folder
 

@@ -219,7 +219,7 @@ sufficient, or do you want it user-facing?
 
 | Date | Who | Questions answered | Landed in |
 |---|---|---|---|
-| _—_ | _—_ | _—_ | _—_ |
+| 2026-08-01 | mentor (verbal) | doubts/03 — handle erroneous data (empty strings, nulls, duplication) in a **pre-processing stage before joins/MVs**. Did not adjudicate the `content_id`-vs-`title` grouping key (re-ask), and opened a new question on normalisation scope → [doubts/04](../doubts/04-preprocessing-boundary.md) | [doubts/03 Answer](../doubts/03-content-catalog.md#answer) · TODOS.md pre-processing item |
 
 When a question is answered, fill the `Answer:` line above, add a row here, and update the affected
 ADR or tunable **in the same commit**.

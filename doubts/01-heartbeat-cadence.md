@@ -9,7 +9,11 @@
 > **Supersedes Q17 in [docs/MENTOR_QUESTIONS.md](../docs/MENTOR_QUESTIONS.md).**
 
 **Status:** open · **Evidence measured:** 2026-08-01, local `csv_audit.raw_str`, fresh CSV load,
-905,558 rows
+905,558 rows · **Re-verified 2026-08-01 (independent reload + re-run):** every headline number
+reproduced — sub-event split, mixed quantiles (0.142 / 40.001 / 48.8 / 805 / 142,542), three
+metronomes at p50 = p90 = 40.0 s, 40 s histogram mode. One correction: `network-bandwidth` measures
+**p50 = 40 s, p90 = 120 s** (not ~120 s for both) — consistent with a 40 s base clock emitting every
+third beat, which *strengthens* the 40 s-pulse reading.
 
 ---
 

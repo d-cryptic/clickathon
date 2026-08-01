@@ -10,7 +10,11 @@
 > unclosed-pause question (99.3 h / 5.09%) that ADR 0007 calls "the single largest unresolved number in
 > the model."** It is not. This is. **Deepens Q3 in [docs/MENTOR_QUESTIONS.md](../docs/MENTOR_QUESTIONS.md).**
 
-**Status:** open · **Evidence measured:** 2026-08-01, local `csv_audit.raw_str`, fresh CSV load
+**Status:** open · **Evidence measured:** 2026-08-01, local `csv_audit.raw_str`, fresh CSV load ·
+**Re-verified 2026-08-01 (independent reload + re-run):** every number reproduced — 27,340/31,780
+ledger, 9,958 resume→resume, 560 pause→pause, 900 first-is-resume, 6,124 unresumed pauses across
+5,858 sessions, Rule A 21,216 windows / 816.1 h vs Rule B 20,921 / 1,005.2 h (Δ 189.1 h), and the
+836 look-alike rows (`speed-pause/resume` 380+380, `AdPause` 45, `AdResume` 27, `download_resumed` 4)
 
 ---
 

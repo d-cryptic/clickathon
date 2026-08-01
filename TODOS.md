@@ -6,6 +6,18 @@
 
 ## Now
 
+- [ ] **[MENTOR-ANSWERED · doubts/03]** **Pre-processing stage before joins/MVs.** Mentor (2026-08-01):
+      the solution must handle erroneous data — empty strings, nulls, duplication — in a
+      **pre-processing/validation stage that runs before any join or materialised view**, not inside
+      the serving views. Concretely: (a) dedup exact replays (4,209 rows measured; key on the full
+      tuple minus volatile dims — one group differs only in `subtitle_language` UNK/OFF);
+      (b) normalise empty-string dims to an explicit `'unknown'` (`audio_language` 1,991 ·
+      `subtitle_language` 2,006 · `player_version` 1,534 · catalog `video_type` 1,089);
+      (c) quarantine hard-invalid rows (bad timestamp, empty ids — zero today, unseen day unknown)
+      into a visible reject table; (d) re-point `dict_content` at the cleaned dimension;
+      (e) load-time assertions (row count, orphan count, dup count, ts parseability) that fail loudly.
+      Then re-run `/reconcile` — peak must not move (duplicates measured inert); if it moves, that is
+      a finding. Full mapping in [doubts/03-content-catalog.md](doubts/03-content-catalog.md#answer).
 - [x] **[GATE]** **FIXED.** Minutes now DERIVED from ev_raw, dense spine so idle minutes are
       compared, and `minutes_compared` asserted by reconcile.sh. 5 -> **17,028 minutes** on
       production; runs unchanged on the holdout day (1,364 minutes, peak 13). Negative-tested:

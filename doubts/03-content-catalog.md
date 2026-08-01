@@ -10,8 +10,9 @@
 > `content_id` (`-987654322`) with zero events — a planted poison row that kills a `UInt64` column.
 > All three are cheap to handle now and expensive to discover on the unseen day.
 
-**Status:** open · **Evidence measured:** 2026-08-01, local `csv_audit.content_str` (33,464 rows) and
-`csv_audit.raw_str` (905,558 rows), fresh CSV load
+**Status:** ANSWERED 2026-08-01 — see [Answer](#answer) · **Evidence measured:** 2026-08-01, local
+`csv_audit.content_str` (33,464 rows) and `csv_audit.raw_str` (905,558 rows), fresh CSV load ·
+**Re-verified 2026-08-01 (second load):** every number in this file reproduced exactly
 
 ---
 
@@ -173,4 +174,40 @@ rather than dropped.
 
 ## Answer
 
-_unrecorded_
+**Recorded 2026-08-01, from a mentor conversation (verbal).** The mentor did not adjudicate the three
+labelling sub-questions individually. The answer was broader and prescriptive:
+
+> The solution should **handle erroneous data** — empty strings, nulls, duplication — and it should be
+> handled **before joins and before any materialised view is built**: a data **pre-processing /
+> validation stage**, not case-by-case patches inside the serving views.
+
+### What that decides, mapped onto the decision table above
+
+| Sub-question | Verdict implied by the answer |
+|---|---|
+| empty `video_type` | It is *erroneous data to be handled*, not meaningful blank. Relabel `''` → `'unknown'` **at the pre-processing stage** (i.e. in the cleaned dimension the dictionary loads from), not per-view. The 25,810 events (2.85%) stay counted, under an explicit bucket. |
+| duplication | Pre-processing must dedup **before** the joins/MVs, even though we measured the 4,209 exact duplicates as inert to the interval model. "Proven inert" is no longer a sufficient answer — dedup is an expected, visible stage of the pipeline. |
+| nulls / orphans | Handle defensively before the join: keep `LEFT` semantics + `'(unknown)'` dictGet default, and assert orphan-count at load so an unseen-day orphan fails loudly. Same posture for a negative `content_id` appearing in the *event* stream. |
+| grouping key (`content_id` vs `title`) | **Not answered.** Still open — re-ask. `content_id` stays our canonical grain meanwhile. |
+
+### What this obligates us to build (tracked in TODOS.md)
+
+1. **A pre-processing stage between load and model** — either a cleaned landing table
+   (`ev_clean` / `content_clean`) or a validated INSERT…SELECT — that (a) deduplicates exact replays,
+   (b) normalises empty-string dimension values to an explicit `'unknown'` label
+   (`audio_language` 1,991 · `subtitle_language` 2,006 · `player_version` 1,534 empty rows measured;
+   catalog `video_type` 1,089), (c) quarantines rows failing hard validation (unparseable timestamp,
+   empty `video_session_id`/`content_id` — today zero, unseen day unknown) into a visible reject
+   table rather than dropping them.
+2. **`dict_content` re-pointed at the cleaned dimension**, so the `''` → `'unknown'` relabel happens
+   once, upstream of every view.
+3. **Load-time assertions** promoted from "nice to have" to required: row-count vs source, orphan
+   count, duplicate count, timestamp-parseability — each printed by `tools/load.sh` and failing loudly.
+4. The dedup caveat stands: one duplicate group differs in `subtitle_language` (`UNK` vs `OFF`), so
+   dedup must key on the full tuple *minus* volatile dimension columns, with a deterministic winner —
+   not `DISTINCT *`.
+
+**Caution:** pre-processing must not silently *change* graded answers. The cleaned tables feed the
+model; `csv_audit` stays byte-faithful, and `/reconcile` must be re-run after the stage lands to prove
+the interval arithmetic is unchanged (duplicates were measured inert, so the peak should not move; if
+it moves, that is a finding, not a cleanup).
