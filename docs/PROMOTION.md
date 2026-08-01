@@ -4,7 +4,8 @@
 > feature merges that were reviewed **only by the orchestrator that briefed them** — self-review at
 > one remove. This defines the second-level gate each feature passes **individually** before it
 > reaches `main`: promoted in dependency order, one at a time, each re-validated against the live
-> ClickHouse Cloud service, cross-checked by a **different model** (`claude-fable-5`), with its docs
+> ClickHouse Cloud service, cross-checked by a **different LINEAGE** (Codex — see check 5; the
+> original `claude-fable-5` wording was superseded on 2026-08-02), with its docs
 > proven current. A blanket `dev → main` fast-forward is explicitly rejected — it would promote 31
 > features on the strength of one decision. **Nothing lands on `main` that has not passed all six
 > checks below with committed evidence.**
@@ -12,6 +13,40 @@
 **Started:** 2026-08-02. Ledger at the bottom; update it in the same commit that promotes a feature.
 
 ---
+
+## Incident 2026-08-02 — paused, rebuilt, resumed. Read this before trusting a green gate.
+
+**Resolved.** Promotion is live again. Kept as a record because the failure mode is subtle and will
+recur if the cause is forgotten.
+
+**What happened.** The gate on `sonyliv` failed: 17,028 minutes compared, **970 mismatched**,
+`max_abs_diff` 193, served concurrency inflated above truth. `session_intervals` read 33,900 against
+a true 30,323 and `cc_minute_delta` 42,396 against 28,073.
+
+**Cause.** `tools/publish-test.sh` cuts SQL extracts and runs them against a scratch database, but
+many extracted statements are **unqualified**, so they resolved against the *connection's* default
+database — `sonyliv`. **811 unqualified writes** landed there after 19:00 on 2026-08-01. The query
+log shows the two forms side by side in the same run: `INSERT INTO sonyliv_pub.cc_publish_lease …`
+next to a bare `INSERT INTO cc_publish_lease …`. Same database-resolution family as queue item
+**Q33**, third location.
+
+**Why it hid for a day.** `ev_raw` was untouched and the **peak still read 2,917**, so every
+spot-check of the headline number passed. Only the full gate — which compares *every* minute rather
+than the peak — could see it. Repeated identical count queries also appear to have been served from
+cache, so re-checking the same number several times gave false reassurance.
+
+**The lesson, and it is a gate rule now:** *the headline being right is not evidence that the model
+is right.* A spot-check of peak, or of a row count, is not a substitute for the gate. Check 4 exists
+precisely because it compares all 17,028 minutes.
+
+**Recovery.** `ev_raw` was byte-intact (905,558 rows, 10,866 sessions, unchanged max timestamp), so an
+operator-authorised `REBUILD_GRADED=yes` restored every tier exactly: 30,323 / 28,073 / 26,254 /
+91,692, peak 2,917, gate **17,028 · 0 mismatched · max_abs_diff 0**. The same rebuild cleared the
+ADR 0016 and ADR 0022 migration debt, so `v2.todo.md` §A3 is closed.
+
+**Also found by it:** ADR 0022 added `cube_level` to `cc_hour_agg` but never added the migration step,
+so the first authorised rebuild after it died at stage 4/6. `build-model.sh` now migrates that table
+the same way it already migrated `cc_user_minute`.
 
 ## Why not just merge `dev`
 
@@ -39,14 +74,46 @@ the feature touches applies cleanly to a **scratch** database, never the graded 
 numbers the feature claims rather than trusting the ones in its commit message. A feature whose
 claimed number cannot be reproduced does not promote — that is the whole point of this gate.
 
-**4 · The correctness gate.** `TARGET=cloud tools/reconcile.sh` must still report **17,028 minutes ·
-0 mismatched · peak 2,917**. Any movement is a finding, not a rounding difference, and stops the
-promotion until explained.
+**4 · The correctness gate — two measurements, not one.** Revised 2026-08-02 after W1 refused twice
+and was right both times.
 
-**5 · Cross-model validation.** A **`claude-fable-5`** agent — a different model from the one that
-built and the one that merged — independently verifies the feature's claims against the live
-database and the repo. Its brief is adversarial: *find the claim that does not hold.* Its verdict is
-committed alongside the feature.
+**4a · The graded database passes the gate matching its DEPLOYED spec.** Currently that is `dev`'s
+gate: **17,028 minutes · 0 mismatched · max_abs_diff 0 · peak 2,917**. This is the correctness
+measurement — is the database right?
+
+**4b · Run the promoting branch's OWN gate too, and account for any difference.** If it disagrees,
+the difference must be explained as **known spec skew** with the commit that causes it named. Any
+disagreement that cannot be attributed to a specific known change is a **failure**.
+
+**Why this is stricter, not weaker.** The original wording assumed the graded database matched
+`main`. It does not: the 2026-08-02 recovery rebuild ran `dev`'s build, so the graded database now
+embodies `dev`'s spec — including ADR 0009's same-second resume fix (`>` → `>=`), which affects
+**2,502 of 27,340 pauses (9.15%)**. `main`'s gate still carries the strict `>` and therefore reports
+**177 mismatched, max_abs_diff 39** against a database that is *correct*. Running a stale gate
+measures spec difference, not correctness — 4b now surfaces that as its own signal instead of
+letting it masquerade as either a pass or a data fault.
+
+**The orchestrator's error, recorded so the sequencing lesson survives:** rebuilding the graded
+database from `dev` while promoting wave-by-wave from `main` put the deployed spec *ahead* of the
+branch being promoted. Either the rebuild should have come from `main` plus the wave under
+promotion, or wave 2 should have been promoted first. It could not have come from `main` — that
+would have undone ADR 0009 and reintroduced a known bug — so the real consequence is below.
+
+**Wave 2 is now on the critical path.** `main` currently ships SQL and docs that do not match the
+deployed database. Until ADR 0009/0011/0014 are promoted, every wave-1-based branch will show 4b
+skew, and `main` is not independently releasable in the sense this document requires. Promote wave 2
+next, and do not let other waves overtake it.
+
+**5 · Cross-model validation — by a different LINEAGE, not just a different checkpoint.** A **Codex**
+agent (`--provider codex`) independently verifies the feature's claims against the live database and
+the repo. Its brief is adversarial: *find the claim that does not hold.* Its verdict is committed
+alongside the feature.
+
+Codex rather than another Claude model deliberately: the failure this check exists to catch is a
+**shared blind spot**, and two checkpoints of the same family share more of those than two families
+do. Codex audits already found real defects here — the split-generation incident in
+`docs/codex-validation/002.md` and four P0s in `003.md`, including the unguarded write path that
+later corrupted the graded database.
 
 **6 · Docs current.** Every doc the feature touches states what is true **after** it, and no doc
 elsewhere contradicts it. This is the check that failed most often today: five files still asserted
@@ -65,6 +132,31 @@ contradicting themselves a few lines apart.
 - **Docs-only features still pass checks 5 and 6.** Most of today's real defects were wrong *claims*,
   not wrong code.
 
+## ⚠ The waves are SEQUENTIAL. Do not run them in parallel — measured, 2026-08-02.
+
+The orchestrator spawned W1, W2 and W3 concurrently to save wall-clock. W3's check-1 analysis proved
+that cannot work, with three concrete dependencies:
+
+```
+ W1  tooling   apply-sql.sh --database parser · env-capture · the write guards
+       │
+       ▼
+ W2  model     sql/15_normalise.sql (ADR 0011) · 0009 · 0014
+       │
+       ▼
+ W3  publication  needs BOTH: the parser to install into scratch, normalise to build at all
+```
+
+W3 could not run check 3 **at all** — not "ran and failed", could not run — because `main`'s
+`apply-sql.sh` has no option parser, so its convergence claim was unverifiable. A promotion that
+cannot execute a check has failed check 1, and parallelism is what produced that state.
+
+**W3 is parked**, its cherry-picks and dependency analysis pushed to
+`chore/promotion-w3-publication`. It re-runs after W1 and W2 are on `main` — not before.
+
+**The general rule:** promote one wave, land it on `main`, then start the next. The wall-clock saving
+from parallel waves is illusory when each later wave has to be thrown away and re-derived.
+
 ## Promotion order — dependencies decide it, not importance
 
 Infrastructure that everything else assumes goes first; anything that changes a serving table's
@@ -79,17 +171,99 @@ shape goes last, because it is the hardest to reverse.
 | **5 · Claims and dossiers** | scope-claims pass · the 11 `doubts/` dossiers · adversarial + liveness evidence · audits · queue | Docs-only, but checks 5 and 6 still apply. |
 | **6 · Shape changes** | ADR 0021 projection (already live on the service) · ADR 0022 `cube_level` | Last: they alter a serving table's shape, and their migration is parked in `v2.todo.md` §A3. |
 
+## Check-5 verdicts so far — both DO NOT PROMOTE, both correct
+
+**W1 foundations — DO NOT PROMOTE.** `GRADED_DB` was caller-overridable, so
+`GRADED_DB=anything` disabled both graded-database guards. Verified and fixed (`readonly`). The
+validator also independently confirmed the check-4 attribution: replacing only the two strict `>`
+predicates removes **all 177** mismatches, so the skew is entirely `0c0f020`. Second finding: ADR
+0018's *"every layer"* claim overstates — several shell tools still fall back to a server default.
+
+**W2 model correctness — DO NOT PROMOTE.** ADR 0009 is promoted claiming *"all seven dimensions leave
+`any()`, determinism is end to end"*, and **the branch's own `sql/40_deltas.sql` disproves it**:
+lines 87-89 still execute `any(platform)`, `any(country)`, `any(content_id)`. Verified — those are
+executable, not commentary, and they collapse per-interval labels for 25 live sessions with multiple
+interval platforms.
+
+**Cause: an incomplete cherry-pick.** `dev` removed that `any()` in commit `df6e7a2` (*"the rebuild
+owns every tier it invalidates, and the last any() leaves"*). W2 picked the ADR 0009 derivation fix
+and **not** the follow-up that finished the job, so it promoted a claim its own tree contradicts.
+Everything else in W2 held: both gates pass, ADR 0011's UDFs and the 1,774 → 2,196 Hindi pair are
+live, ADR 0014 agrees 98/98 hours with no bare live-view `argMax`.
+
+**The lesson for every remaining wave:** a cherry-picked feature is not the ADR that introduced it.
+Isolation (check 1) must include the follow-up commits that make the ADR's claims true — grep the
+promoted tree for what the ADR *says* is gone, rather than trusting the ADR.
+
+### Both verdicts answered — 2026-08-02, awaiting a fresh check 5
+
+Neither branch merges on the strength of these answers. A **new** Codex pass runs first, because
+these are the two branches that already failed one.
+
+**W1 — answered.**
+[`evidence/promotion/w1/codex-check5-answers.md`](../evidence/promotion/w1/codex-check5-answers.md).
+`GRADED_DB` is `readonly` in both guards, so the bypass Codex found is closed — demonstrated against
+the *pre-fix* script with unroutable credentials, which walked past the guard and reached its first
+TRUNCATE, versus the fixed script which refuses. The destructive-form scanner now blocks **14 of 14**
+probe spellings, including the two line-oriented bypasses (`TRUNCATE\nTABLE`, and a `--` inside a
+string literal) that `06a720d` alone did **not** close, with zero false positives across `sql/*.sql`.
+Only refusals were tested; no override was ever set. ADR 0018's *"every layer"* claim is **withdrawn
+and replaced** with a measured nine-layer table — which layers validate `TARGET`, which send an
+explicit database per target, which let the environment beat `.env`. The guards now carry an explicit
+note that they are not a write boundary around `sonyliv`, because `tools/ch` and `tools/load.sh`
+reach it ungated.
+
+**W2 — answered, and 4b now passes with no excuse.**
+`evidence/promotion/w2/codex-check5-answers.md` (lands with W2; not on this branch). `df6e7a2`'s
+`sql/40_deltas.sql` blob cherry-picked, so ADR 0009's title is true of the tree; before/after scratch
+rebuilds put the pre-fix branch at ANDROID_PHONE **16,357** rows against the deployed **16,366**, and
+the post-fix branch byte-identical to live. Gates: 4a PASS, 4b PASS.
+
+**Applied to both, as the rule now demands:** every ADR on each branch was grepped against the
+promoted tree for what it says is gone.
+
+## W3 refused at check 1 — the wave order is a real dependency, not a preference
+
+W3 (publication) cherry-picked ADR 0013+0016+0019 onto `main`, verified all three named risk checks
+against the **promoted tree rather than the ADR prose** — `mv_user_minute` has no surviving
+`CREATE MATERIALIZED VIEW`, `cc_user_minute` is `ReplacingMergeTree(computed_at)`, all 20 write
+statements in `publish-test.sh` are qualified — and then **refused at check 1** on three
+wave-1/wave-2 dependencies:
+
+| | dependency | consequence on `main` |
+|---|---|---|
+| **D1** | `publish-test.sh` calls `apply-sql.sh --database`; `main`'s copy has **no option parser** | the convergence claim cannot be re-derived, so check 3 never ran |
+| **D2** | `main`'s `apply-sql.sh` sources `.env` *after* the caller's environment | **there is no route on `main` that installs `sql/12_publish.sql` anywhere but the graded database.** Same Q33 family as the 2026-08-02 incident |
+| **D3** | ADR 0016's `build-model.sh` applies `sql/15_normalise.sql` (ADR 0011, wave 2), absent on `main` | `make model` is broken |
+
+**D2 is the one to sit with.** It is not a promotion problem — it is a property of `main` as it
+stands today: the only place the publisher can be installed is the database we are scored on. That is
+exactly the shape of the incident that already happened once.
+
+**It also corrected an attribution that two prior reviews had agreed on.** W1 and Codex both
+concluded "two characters (`>` → `>=`) account for all 177 mismatches". W3 re-verified rather than
+trusting either, and found `main`'s gate differs from `dev`'s in **three** places — the two resume
+predicates **plus a zero-length-window `arrayFilter`**. Patching only the two still takes the branch
+gate to 0/0/2,917, so the attribution's *conclusion* holds — but the third difference is real, and it
+is the zero-length-segment handling that queue item **Q35** is about (182 runs, peak 2,917 → 2,927).
+Two independent reviews had said "two" and the number was three.
+
+**The lesson, now a rule:** a promotion that *cannot run* a check is a check-1 failure, not a pass
+with a caveat. And an attribution agreed by two reviews is still worth re-deriving — "two characters"
+was very nearly right, and very nearly is how a third difference stays invisible.
+
 ## Ledger
 
-`—` not started · `WIP` in a promotion worktree · `GATE n` failed at check n · `✓` on `main`
+`—` not started · `WIP` in a promotion worktree · `GATE n` failed at check n ·
+`GATE 5 → ANSWERED` findings closed with evidence, awaiting a **fresh** check 5 · `✓` on `main`
 
 | Wave | Feature | Status | Evidence |
 |---|---|---|---|
-| 1 | ADR 0018 target resolution + `tools/ch` | GATE 4 | [evidence/promotion/w1/](../evidence/promotion/w1/) — checks 1–3 ✓ (code is on `chore/promotion-w1-foundations`, `fb1f98a`), check 2 re-run green on the final branch state (`02b`), check 6 ✓ after fixing one two-directional doc contradiction (`06-docs-current.txt`). Check 4 has now failed twice for two different reasons. First: the graded db was corrupt (970/17,028 mismatched; resolved by the operator rebuild, see "Incident 2026-08-02"). Second, post-rebuild: the db is byte-perfect under **dev's** gate (17,028 · 0 mismatched · peak 2,917, `04e`) but this branch's own gate reads 177/17,028 mismatched (`04d`) because the rebuild deployed dev's model **including wave-2 commit `0c0f020`** (same-second pause/resume, ADR 0009) that `main` does not carry. Spec skew, not data damage — diagnosis in `04f`, **proven by isolation in `04g`**: applying only that two-character `>=` change to this branch's own gate (read-only, never committed) takes it from 177 mismatched to **0 mismatched · peak 2,917**, which rules out ADR 0016/0021/0022 and residual data damage as causes. Unblocking is the orchestrator's call; `04g` recommends **promoting wave 2's ADR 0009 pair next** (the promotion order already puts it there) because it needs no gate exception and it repairs the fact that `main`'s model SQL currently cannot reproduce the graded service's numbers. |
-| 1 | write guards on the graded database | GATE 4 | same bundle — checks 1–3 ✓ (`2c4ff9f`, refusals proven without ever setting an override against the service); stopped by the same check-4 spec skew. `04f` §5 states honestly that these guards would NOT have caught the 2026-08-02 unqualified-SQL incident (wrong door: `publish-test.sh` is dev-only); ADR 0018's resolution rule extended to that script (Q33) is what would. |
-| 2 | ADR 0009 interval-delta determinism | — | |
-| 2 | ADR 0011 query-time normalisation | — | |
-| 2 | ADR 0014 peak-minute tie-break | — | |
+| 1 | ADR 0018 target resolution + `tools/ch` | `GATE 5 → ANSWERED` | [`w1/`](../evidence/promotion/w1/codex-check5-answers.md) — the *"every layer"* claim is withdrawn and replaced by a measured nine-layer table. `tools/ch` and the Go binary hold the full rule on both targets; `apply-sql.sh`/`load.sh`/`reconcile.sh` hold it on cloud only and inherit the server default on local; five tools accept an unrecognised `TARGET`. Check 4b's 177-mismatch skew re-reproduced and re-attributed to `0c0f020` by isolation — two characters take it to 0 |
+| 1 | write guards on the graded database | `GATE 5 → ANSWERED` | [`w1/`](../evidence/promotion/w1/codex-check5-answers.md) — `readonly GRADED_DB` closes the caller-override bypass (proven against the pre-fix script, which reached its first TRUNCATE); the destructive-form scanner blocks 14/14 probe spellings including the two `06a720d` missed, with 0 false positives on `sql/*.sql`. Refusals tested only, never an override. The guards now state in-file that they are **not** a write boundary — `tools/ch` and `load.sh` reach `sonyliv` ungated |
+| 2 | ADR 0009 interval-delta determinism | `GATE 5 → ANSWERED` | `w2/codex-check5-answers.md` (lands with W2) |
+| 2 | ADR 0011 query-time normalisation | `GATE 5 → ANSWERED` | `w2/codex-check5-answers.md` (lands with W2) |
+| 2 | ADR 0014 peak-minute tie-break | `GATE 5 → ANSWERED` | `w2/codex-check5-answers.md` (lands with W2) |
 | 3 | ADR 0013 + 0016 publication (one group) | — | |
 | 4 | benchmark evidence bundle | — | |
 | 4 | `make ci` + the Go test suites | — | |

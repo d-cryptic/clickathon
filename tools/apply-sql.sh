@@ -45,16 +45,55 @@ die() { printf 'tools/apply-sql.sh: %s\n' "$*" >&2; exit 1; }
 # and UDFs are legitimately applied to `sonyliv`, and gating those would turn
 # this into ceremony people learn to route around. Local is never gated: the
 # graded database lives only on Cloud.
-GRADED_DB="${GRADED_DB:-sonyliv}"
+# NOT overridable — see tools/build-model.sh for the reasoning. Codex check 5
+# found the same hole in both guards on 2026-08-02.
+readonly GRADED_DB=sonyliv
+
+# ── WHAT THIS GUARD IS, AND WHAT IT IS NOT ─────────────────────────────────
+# It is: a refusal to apply a FILE containing destructive DDL to the graded
+# database through THIS script, unless the caller says so explicitly.
+#
+# It is NOT a write boundary around `sonyliv`. Codex check 5 asked directly
+# whether another destructive route exists, and the answer is yes:
+#   * `tools/ch` forwards arbitrary SQL to Cloud with no graded-write check
+#   * `tools/load.sh` INSERTs into `content_dim` and `ev_raw` with none either
+#   * plain `INSERT` through this script is not gated at all — only DDL is
+# A guard sold as more than it is gets trusted for more than it can do, which
+# is how the 2026-08-01 incident happened in the first place. Two narrow script
+# guards, honestly labelled, beat one boundary claim that is not true.
 if [ "$TARGET" = cloud ] && [ "${CH_DATABASE:-}" = "$GRADED_DB" ] \
    && [ "${APPLY_GRADED_DESTRUCTIVE:-}" != yes ]; then
   for f in "${FILES[@]}"; do
     [ -f "$f" ] || continue
-    # Strip `--` comments first: ADR 0010's own commentary QUOTES a DROP, and a
-    # guard that greps comments as code blocks a clean run. The unseen-day
-    # rehearsal hit exactly that (finding R2).
-    if sed 's/--.*//' "$f" | grep -qiE '(^|[[:space:];])(DROP|TRUNCATE)[[:space:]]'; then
-      die "$f contains DROP or TRUNCATE and '$GRADED_DB' is the GRADED database.
+    # The scan, in three normalising steps, each one closing a spelling that
+    # Codex check 5 (2026-08-02) demonstrated executes while the original
+    # predicate returned "clean". Read them in order — order is the whole point.
+    #
+    #   1. BLANK SINGLE-QUOTED STRING LITERALS.  `SELECT '-- not a comment';
+    #      TRUNCATE TABLE session_intervals;` is one executable multi-statement
+    #      line. Stripping comments first would delete from the `--` INSIDE the
+    #      string to end of line, taking the live TRUNCATE with it. Literals are
+    #      blanked before anything looks for a comment.
+    #   2. STRIP `--` COMMENTS, per line.  ADR 0010's own commentary QUOTES a
+    #      DROP, and a guard that greps comments as code blocks a clean run —
+    #      the unseen-day rehearsal hit exactly that (finding R2). This must run
+    #      per line, because that is what `--` means.
+    #   3. JOIN LINES.  `TRUNCATE\nTABLE session_intervals;` is valid SQL and the
+    #      original line-oriented grep could not see it. Newlines become spaces
+    #      only AFTER (2), so joining cannot resurrect a commented-out statement.
+    #
+    # The form list was broadened at the same time: the original caught only DROP
+    # and TRUNCATE and missed every other executable way to destroy or replace
+    # data — ALTER ... DELETE/UPDATE/DROP COLUMN/DROP PARTITION/CLEAR COLUMN,
+    # DETACH, RENAME TABLE, EXCHANGE TABLES, REPLACE TABLE.
+    #
+    # This is a SCANNER, not a parser, and it is deliberately not sold as one —
+    # see the boundary note above the guard. `'` escaping and `/* */` spanning a
+    # keyword are not handled.
+    scan="$(sed "s/'[^']*'/''/g" "$f" | sed 's/--.*//' | tr '\n' ' ')"
+    if printf '%s' "$scan" | grep -qiE '(^|[[:space:];])(DROP|TRUNCATE|DETACH|RENAME[[:space:]]+TABLE|EXCHANGE[[:space:]]+TABLES|REPLACE[[:space:]]+TABLE)[[:space:]]' \
+       || printf '%s' "$scan" | grep -qiE 'ALTER[[:space:]]+TABLE[^;]*(DELETE|UPDATE|DROP[[:space:]]+(COLUMN|PARTITION)|CLEAR[[:space:]]+COLUMN)'; then
+      die "$f contains a destructive statement and '$GRADED_DB' is the GRADED database.
 
 Applying it destroys answers we are scored on, and there is no undo. If that is
 genuinely what you want, confirm the tree is the one you mean to apply

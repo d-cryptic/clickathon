@@ -34,7 +34,16 @@ q() {  # q <sql>
 # So: rebuilding the graded database is allowed, but it must be DELIBERATE.
 # Set REBUILD_GRADED=yes for that one invocation. Every other target — local,
 # any scratch database — is unaffected and needs no ceremony.
-GRADED_DB="${GRADED_DB:-sonyliv}"
+#
+# NOT overridable. Cross-model validation (Codex, check 5, 2026-08-02) found that
+# `GRADED_DB="${GRADED_DB:-sonyliv}"` let any caller disable this guard with
+# GRADED_DB=anything — `CH_DATABASE=sonyliv GRADED_DB=scratch` no longer matches,
+# so the script walks straight past this block into its two unqualified
+# TRUNCATEs. A guard whose SUBJECT is caller-controlled is not a guard: the whole
+# point is to protect one fixed database whose identity is not a runtime opinion.
+# `readonly` makes a later assignment fail loudly instead of silently widening
+# the hole.
+readonly GRADED_DB=sonyliv
 if [ "$TARGET" = cloud ]; then
   TARGET_DB="${CH_DATABASE:-}"
   if [ "$TARGET_DB" = "$GRADED_DB" ] && [ "${REBUILD_GRADED:-}" != yes ]; then
