@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # tools/clickstack-cloud.sh — provision the HyperDX built into ClickHouse Cloud:
-# sources, SIX dashboards, and saved searches. Idempotent — a re-run converges
+# sources, SEVEN dashboards, and saved searches. Idempotent — a re-run converges
 # the remote to this script (dashboards are PUT, not skipped).
 #
 # Drives the Cloud control-plane API, NOT the console session, so all of this is
@@ -22,6 +22,15 @@
 #                                  lives on the local stack, docs/OBSERVABILITY.md)
 #   6 SonyLIV query cost         — p95 latency AND bytes read of our own queries,
 #                                  straight from system.query_log
+#   7 SonyLIV user-level         — signed-in concurrency: uniqExact distinct
+#                                  users vs sessions, the multi-session gap, and
+#                                  per-dimension user counts (never delta sums)
+#
+# Dashboards 1–3 and 7 carry a MARKDOWN CAPTION tile stating the traps a viewer
+# would otherwise fall into (peak not summable: +2.4% platform / +94.7% content,
+# re-measured 2026-08-01 — docs/EXPLAINER.md §E.1; 33.6% of apparent watch time
+# excluded; title is not a key). The caption is part of the dashboard, not the
+# demo script, so the warning survives us.
 #
 # ARITHMETIC RULE the tiles obey (learned the hard way — the first version of
 # the by-platform tile showed 285 where the true figure was 1,837): max() over a
@@ -58,7 +67,12 @@ py() { python3 -c "$1"; }
 # only, reconcile-gated). apply-sql.sh needs the `ch` container for the native
 # client; fail with instructions rather than registering sources over views
 # that do not exist.
-if docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^ch$'; then
+if [ "${CLICKSTACK_SKIP_APPLY:-0}" = "1" ]; then
+  # Control-plane-only run: provision sources/dashboards/searches WITHOUT the
+  # DDL step. For sessions that must not write to the graded database at all —
+  # the views must already exist (SHOW TABLES FROM sonyliv LIKE 'v\\_%').
+  echo "NOTE: CLICKSTACK_SKIP_APPLY=1 — skipping sql/87_viz.sql apply (control-plane only)." >&2
+elif docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^ch$'; then
   TARGET=cloud tools/apply-sql.sh sql/87_viz.sql
 else
   echo "NOTE: docker container 'ch' not running — skipping sql/87_viz.sql apply." >&2
@@ -299,6 +313,10 @@ def filt(label, column, source, applies):
     return {"type": "QUERY_EXPRESSION", "name": label, "expression": column,
             "sourceId": source, "appliesToSourceIds": applies}
 
+def md(n, x, y, w, h, text):
+    return {"name": n, "x": x, "y": y, "w": w, "h": h,
+            "config": {"displayType": "markdown", "markdown": text}}
+
 dashboards = []
 
 # 1 ── THE HEADLINE ───────────────────────────────────────────────────────────
@@ -311,22 +329,30 @@ dashboards.append({
   "tags": ["clickathon"],
   "filters": [],
   "tiles": [
-    number("Peak — ACCURATE (foreground-only)", acc,   0, 0, 3, 3,
+    md("The gap IS the thesis", 0, 0, 12, 2,
+       "**Three definitions of “watching”, never merged behind one name.** "
+       "At the accurate model's peak minute (2026-07-26 10:56) NAIVE session-span reads "
+       "**3,708** vs ACCURATE **2,917** — a **21.3% over-count eliminated**. "
+       "**33.6% of apparent watch time is backgrounded or paused** and is excluded. "
+       "Naive's own peak is 3,743 and lands *later* (10:59): it keeps counting sessions "
+       "after their viewers are gone. Stateless (2,894) still counts paused viewers — "
+       "the small accurate-vs-stateless gap is the pause exclusion, made visible."),
+    number("Peak — ACCURATE (foreground-only)", acc,   0, 2, 3, 3,
            [sel("concurrent", "peak accurate")]),
-    number("Peak — stateless baseline",         total, 3, 0, 3, 3,
+    number("Peak — stateless baseline",         total, 3, 2, 3, 3,
            [sel("concurrent", "peak stateless")], color="chart-cyan"),
-    number("Peak — NAIVE session-span",         naive, 6, 0, 3, 3,
+    number("Peak — NAIVE session-span",         naive, 6, 2, 3, 3,
            [sel("concurrent", "peak naive")], color="chart-cyan"),
-    number("Peak — distinct users",             user,  9, 0, 3, 3,
+    number("Peak — distinct users",             user,  9, 2, 3, 3,
            [sel("concurrent_users", "peak users")], color="chart-cyan"),
     line("Concurrency — ACCURATE, gap + pause excluded (peak 2,917 @ 2026-07-26 10:56)",
-         acc, 0, 3, 12, 4, [sel("concurrent", "accurate")]),
-    line("ACCURATE (session-aware)",            acc,   0, 7, 4, 4, [sel("concurrent", "accurate")]),
-    line("STATELESS (session-independent MV)",  total, 4, 7, 4, 4, [sel("concurrent", "stateless")]),
-    line("NAIVE session-span — the over-count", naive, 8, 7, 4, 4, [sel("concurrent", "naive")]),
-    line("Distinct users (uniqExact — NOT summable deltas)", user, 0, 11, 6, 4,
+         acc, 0, 5, 12, 4, [sel("concurrent", "accurate")]),
+    line("ACCURATE (session-aware)",            acc,   0, 9, 4, 4, [sel("concurrent", "accurate")]),
+    line("STATELESS (session-independent MV)",  total, 4, 9, 4, 4, [sel("concurrent", "stateless")]),
+    line("NAIVE session-span — the over-count", naive, 8, 9, 4, 4, [sel("concurrent", "naive")]),
+    line("Distinct users (uniqExact — NOT summable deltas)", user, 0, 13, 6, 4,
          [sel("concurrent_users", "users")]),
-    line("Rolling 15-min peak",                 roll,  6, 11, 6, 4, [sel("peak_15m", "peak_15m")]),
+    line("Rolling 15-min peak",                 roll,  6, 13, 6, 4, [sel("peak_15m", "peak_15m")]),
   ]})
 
 # 2 ── DIMENSIONAL DRILLDOWN ──────────────────────────────────────────────────
@@ -352,17 +378,25 @@ dashboards.append({
     filt("Player version",    "player_version",    sm, sm_only),
   ],
   "tiles": [
+    md("⚠ Peak is NOT summable across dimensions", 0, 0, 12, 2,
+       "**Do not add the bars.** Summing per-platform peaks overstates the true peak by "
+       "**+2.4%**; per-content by **+94.7%** (re-measured 2026-08-01 — sub-peaks land at "
+       "different minutes). Tiles count distinct sessions/users per bucket: at 1-minute "
+       "zoom that *is* concurrency (2,917 / 2,844 at the peak minute); zoomed out it is "
+       "“distinct actives in the bucket”, a larger number — say which you mean. "
+       "`audio_language` shows Hindi four ways (`hin`, `HIN`, `hin-hindi`, `hin-Hindi`): "
+       "real un-normalised source data, not a panel bug (ADR 0011, not deployed to Cloud)."),
     line("Sessions vs distinct users — active in bucket (= concurrency at 1-min zoom)",
-         sm, 0, 0, 12, 4,
+         sm, 0, 2, 12, 4,
          [sel("video_session_id", "sessions", agg="count_distinct"),
           sel("user_id", "users", agg="count_distinct")]),
-    line("by platform",          sm, 0, 4,  6, 4, [sel("video_session_id", "sessions", agg="count_distinct")], group="platform"),
-    line("by country",           sm, 6, 4,  6, 4, [sel("video_session_id", "sessions", agg="count_distinct")], group="country"),
-    line("by app_version",       sm, 0, 8,  6, 4, [sel("video_session_id", "sessions", agg="count_distinct")], group="app_version"),
-    line("by audio_language",    sm, 6, 8,  6, 4, [sel("video_session_id", "sessions", agg="count_distinct")], group="audio_language"),
-    line("by subtitle_language", sm, 0, 12, 6, 4, [sel("video_session_id", "sessions", agg="count_distinct")], group="subtitle_language"),
-    line("by player_version",    sm, 6, 12, 6, 4, [sel("video_session_id", "sessions", agg="count_distinct")], group="player_version"),
-    line("by title (top 20)",    sm, 0, 16, 12, 4, [sel("video_session_id", "sessions", agg="count_distinct")], group="title"),
+    line("by platform",          sm, 0, 6,  6, 4, [sel("video_session_id", "sessions", agg="count_distinct")], group="platform"),
+    line("by country",           sm, 6, 6,  6, 4, [sel("video_session_id", "sessions", agg="count_distinct")], group="country"),
+    line("by app_version",       sm, 0, 10, 6, 4, [sel("video_session_id", "sessions", agg="count_distinct")], group="app_version"),
+    line("by audio_language",    sm, 6, 10, 6, 4, [sel("video_session_id", "sessions", agg="count_distinct")], group="audio_language"),
+    line("by subtitle_language", sm, 0, 14, 6, 4, [sel("video_session_id", "sessions", agg="count_distinct")], group="subtitle_language"),
+    line("by player_version",    sm, 6, 14, 6, 4, [sel("video_session_id", "sessions", agg="count_distinct")], group="player_version"),
+    line("by title (top 20)",    sm, 0, 18, 12, 4, [sel("video_session_id", "sessions", agg="count_distinct")], group="title"),
   ]})
 
 # 3 ── CONTENT ────────────────────────────────────────────────────────────────
@@ -375,16 +409,23 @@ dashboards.append({
   "tags": ["clickathon"],
   "filters": [],
   "tiles": [
-    table("Top titles by peak", title, 0, 0, 6, 4, "title",
+    md("⚠ Read the labels carefully", 0, 0, 12, 2,
+       "**`title` is not a key** — 2,773 titles are shared by 2–4 different `content_id`s "
+       "(1,418 collisions span categories), so a title row can merge distinct assets. The "
+       "arithmetic is right; the label is ambiguous. **`video_type` has three values**: "
+       "`vod`, `live`, and the empty string (2.85% of events) — the blank third series is "
+       "real. Summing peaks across titles overstates the true peak by **+94.7%** at "
+       "content grain: peaks are not summable."),
+    table("Top titles by peak", title, 0, 2, 6, 4, "title",
           [sel("concurrent", "peak")], '"peak" DESC'),
-    table("NOW — concurrency by title (as of last minute)", now_title, 6, 0, 6, 4, "title",
+    table("NOW — concurrency by title (as of last minute)", now_title, 6, 2, 6, 4, "title",
           [sel("concurrent", "current")], '"current" DESC'),
-    line("by video_type", vt, 0, 4, 6, 4, [sel("concurrent", "concurrent")], group="video_type"),
-    line("by category (top 20)", cat, 6, 4, 6, 4, [sel("concurrent", "concurrent")], group="category"),
-    line("Top titles over time (top 20)", title, 0, 8, 12, 4, [sel("concurrent", "concurrent")], group="title"),
-    table("NOW — by video_type", now_vt, 0, 12, 6, 3, "video_type",
+    line("by video_type", vt, 0, 6, 6, 4, [sel("concurrent", "concurrent")], group="video_type"),
+    line("by category (top 20)", cat, 6, 6, 6, 4, [sel("concurrent", "concurrent")], group="category"),
+    line("Top titles over time (top 20)", title, 0, 10, 12, 4, [sel("concurrent", "concurrent")], group="title"),
+    table("NOW — by video_type", now_vt, 0, 14, 6, 3, "video_type",
           [sel("concurrent", "current")], '"current" DESC'),
-    table("NOW — by category", now_cat, 6, 12, 6, 3, "category",
+    table("NOW — by category", now_cat, 6, 14, 6, 3, "category",
           [sel("concurrent", "current")], '"current" DESC'),
   ]})
 
@@ -485,6 +526,66 @@ dashboards.append({
            sel("query_duration_ms", "p95 ms", agg="quantile", level=0.95, where=W_OURS),
            sel("query_duration_ms", "runs", agg="count", where=W_OURS)],
           '"total bytes" DESC'),
+  ]})
+
+# 7 ── USER-LEVEL (SIGNED-IN) CONCURRENCY ────────────────────────────────────
+# Users are a SET CARDINALITY, never a delta sum: one user can hold several
+# concurrent sessions (sql/45_user_concurrency.sql — uniqExact states, ADR
+# 0005: exact, not the HLL estimator). The overlay and ratio tiles join the
+# session tier to the user tier in raw SQL because a builder tile reads one
+# source; the per-dimension tiles reuse the session-minute drilldown source
+# with count_distinct(user_id) — the only aggregation that stays correct under
+# any filter, and ClickHouse's count_distinct IS uniqExact by default. The
+# "User concurrency by dimension" SOURCE is deliberately NOT charted per
+# dimension here: it is grained (platform, country, content_id), so max() over
+# it is the max single combination — the same 285-vs-1,837 trap the header
+# comment records.
+USERS_SESSIONS_JOIN = (
+    f"FROM {db}.v_concurrency_minute_delta_total s "
+    f"INNER JOIN {db}.v_user_concurrency_minute_total u ON u.minute = s.minute "
+    f"WHERE $__timeFilter(s.minute)")
+dashboards.append({
+  "name": "SonyLIV user-level",
+  "tags": ["clickathon"],
+  "filters": [
+    filt("Platform", "platform", sm, [sm]),
+    filt("Country",  "country",  sm, [sm]),
+  ],
+  "tiles": [
+    md("Users are a set, not a sum", 0, 0, 12, 2,
+       "**Signed-in concurrency is `uniqExact(user_id)` per minute** — exact, not the "
+       "HLL estimator, and never a sum of per-session deltas: one user can run several "
+       "sessions at once, and a delta sum would count them once per session. At the peak "
+       "minute (2026-07-26 10:56): **2,917 sessions vs 2,844 distinct users — 73 "
+       "multi-session viewers**. Peaks are **not summable** across platforms/countries/"
+       "titles: a user watching on two devices is one user in the total but appears "
+       "under both platforms."),
+    number("Peak — concurrent users (uniqExact)", user, 0, 2, 4, 3,
+           [sel("concurrent_users", "peak users")]),
+    number("Peak — concurrent sessions (ACCURATE)", acc, 4, 2, 4, 3,
+           [sel("concurrent", "peak sessions")], color="chart-cyan"),
+    sqltile("Multi-session gap at the accurate peak minute (sessions − users)",
+            8, 2, 4, 3,
+            f"SELECT s.concurrent - u.concurrent_users AS gap "
+            f"{USERS_SESSIONS_JOIN} ORDER BY s.concurrent DESC LIMIT 1",
+            display="number"),
+    sqltile("Users vs sessions — the multi-session gap over time",
+            0, 5, 12, 4,
+            f"SELECT $__timeInterval(s.minute) AS ts, "
+            f"max(u.concurrent_users) AS users, max(s.concurrent) AS sessions "
+            f"{USERS_SESSIONS_JOIN} GROUP BY ts ORDER BY ts"),
+    sqltile("Sessions per user — concurrency ratio (1.0 = nobody multi-streams)",
+            0, 9, 6, 4,
+            f"SELECT $__timeInterval(s.minute) AS ts, "
+            f"round(max(s.concurrent) / nullIf(max(u.concurrent_users), 0), 4) "
+            f"AS sessions_per_user "
+            f"{USERS_SESSIONS_JOIN} GROUP BY ts ORDER BY ts"),
+    line("Users by platform — distinct users active in bucket", sm, 6, 9, 6, 4,
+         [sel("user_id", "users", agg="count_distinct")], group="platform"),
+    line("Users by country", sm, 0, 13, 6, 4,
+         [sel("user_id", "users", agg="count_distinct")], group="country"),
+    line("Users by title (top 20)", sm, 6, 13, 6, 4,
+         [sel("user_id", "users", agg="count_distinct")], group="title"),
   ]})
 
 for i, d in enumerate(dashboards, 1):
