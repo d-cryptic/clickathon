@@ -16,9 +16,14 @@
 | open-session probe | the model absorbs sessions with no `VideoSessionEnd` | folded into the truncation test (52.6% of sessions are open at the cut) |
 | late-arrival probe | a heartbeat arriving after its minute was aggregated updates the served value | folded into the truncation test (447,081 events arrive after the cut) |
 | hour-clip probe | an interval spanning ≥3 hours reads correctly **at a minute inside the middle hour** — the case that fails if clipping is wrong | after any change to delta emission |
-| stitch-boundary probe | a query spanning the watermark neither double-counts nor drops the boundary minute | after any change to `W` or the serving view |
-| straggler probe | a heartbeat dated inside an already-sealed window moves the served value to match a brute-force recomputation from `ev_raw` | before the unseen run |
+| **continuous-publication test** | the aggregates move **without a rebuild** and land byte-identical to one — on ALL FOUR serving tiers (minute deltas, intervals, user-minute buckets, hour/day cube — ADR 0016). Covers the straggler, open-session, bootstrap, SHRINK (a late pause pulls an interval_end earlier), DIMENSION-FLIP (late events change an interval's dominant platform) and idempotence probes in one run | `tools/publish-test.sh` — after any change to `sql/12_publish.sql`, `tools/publish.sh`, `sql/30_build_intervals.sql`, `sql/40_deltas.sql`, `sql/45_user_concurrency.sql` or `sql/50_hour_agg.sql`. Evidence: `evidence/publish.txt` |
+| straggler probe | a heartbeat dated **46 minutes behind the watermark** moves the served value AND matches a from-scratch rebuild on all 1,579 minutes — not merely "the value changed", which is the anti-pattern ADR 0006 names | folded into the publication test |
+| vanishing-interval probe | a straggler bridging a gap merges two runs, so an `interval_start` ceases to exist; asserts **0 orphan rows** survive. `ReplacingMergeTree` cannot delete a key, so without the prune phase this silently over-counts for ever | folded into the publication test |
+| bootstrap-equals-steady-state probe | the FIRST publish run on an empty database (every session dirty) produces exactly what a batch rebuild produces — there is no separate initial-build path to drift | folded into the publication test |
+| publication idempotence probe | republishing 200 **unchanged** sessions moves 0 of 1,579 minutes — the property that makes replays, resumed runs and forced corrections safe | folded into the publication test |
 | tail-sensitivity sweep | peak/avg across `HEARTBEAT_GAP_S` ∈ {120,150,180} × `TAIL_GRACE_S` ∈ {0,60,150} — proves robustness, or names the point we knowingly chose | before submission |
+| **normalisation self-test** | the dimension-normalisation rule behaves — 24 `throwIf` assertions over **literals only**, so it needs no tables and fails at apply time (Code: 395) rather than as a wrong dashboard number. Includes negative assertions: `jap` must **not** merge with `jpn`, `norm_version` must **not** strip a subtag from `v-0.0.117.12.05.1_adNE`, `9.0.0` must **not** fold to `9` | runs automatically whenever `sql/15_normalise.sql` is applied |
+| **dimension drift audit** | every normalisation group carrying more than one raw spelling is listed from `ev_raw` — so an unseen day's new value family is *seen* rather than silently splitting a bucket. On the provided file: audio 14 groups / 903,857 rows, subtitle 4 / 897,227, app_version 1 / 872, and **zero** for platform/player_version/country | `SELECT * FROM v_dimension_drift_summary` — **before** trusting any filtered number from the unseen day |
 
 ## How to write a correctness test here
 
@@ -76,23 +81,42 @@ than reimplemented, so the test cannot drift from the model it tests.
 | Sub-check | What it catches | Status |
 |---|---|---|
 | control build vs production, every minute | non-determinism in the derivation | PASS — 2,887 @10:56 and 2,450 @11:10, exact |
-| incremental absorption vs control, every minute | anything that makes incremental ≠ rebuild | **FAIL as shipped** — 3 of 1,578 minutes, **+37 at the peak** |
+| incremental absorption vs control, every minute — **`build_version`, i.e. what production runs** | anything that makes incremental ≠ rebuild | **PASS** — `CONVERGES` on all 1,578 minutes, peak **2,887** (`evidence/truncation.txt`) |
+| the same, on the retained `interval_end` variant | that the test can still **detect** the historical defect | DIVERGES by design — 3 of 1,578 minutes, +37 at the peak. This is the regression guard firing, **not** a report that we have the bug |
 | delta arithmetic isolated from interval state | whether ADR 0006's negate-and-re-emit is itself lossy | PASS — exact on all 1,578 minutes |
-| versioned `session_intervals` vs control | that the proposed fix actually fixes it | PASS — row for row identical, converges on all 1,578 minutes |
 
-**The bug this test found.** `session_intervals` is `ReplacingMergeTree(interval_end)`, which resolves
-duplicates by keeping the **largest** `interval_end`. `sql/10_intervals.sql` justifies that with "late
-heartbeats EXTEND an interval" — i.e. it assumes re-derivation is monotonically increasing. It is not.
-A provisional interval carries `TAIL_S = 60s` of grace because its run appeared to end; the completed
-derivation places the true end **earlier** (at a pause, or at a real `VideoSessionEnd` inside the
-grace window). The stale, longer row then outranks the correct one permanently and drags a stale
-`is_open = 1` with it. Measured: **316 intervals up to 60s too long, 315 stuck at `is_open = 1`,
-+1.3% on the headline peak.** Fix: a monotonic `build_version UInt64` as the version column.
+**This test is two-sided — read both rows before concluding anything.** `sql/70_truncation_test.sql`
+deliberately **keeps** a `ReplacingMergeTree(interval_end)` variant so the historical defect stays
+detectable; the `build_version` variant is the one production runs. Until `1dee090` this table said
+*"FAIL as shipped — 3 of 1,578 minutes, +37 at the peak"*, which was true when written and false
+after `388a845`.
 
-**Second finding.** `cc_minute_delta.starts`/`ends` are `SimpleAggregateFunction(sum, UInt64)`, so the
-negative corrective row ADR 0006 mandates is not representable. ClickHouse does **not** reject it — it
-wraps to `2^64 - n`. `sum()` still comes out right by modular arithmetic, but `max()` returns 1.8e19
-and any pre-merge single-row read is garbage. Make both `Int64`.
+**The bug this test found, and where it was fixed.** `session_intervals` *was*
+`ReplacingMergeTree(interval_end)`, which resolves duplicates by keeping the **largest**
+`interval_end` — justified with "late heartbeats EXTEND an interval", i.e. assuming re-derivation is
+monotonically increasing. It is not. A provisional interval carries `TAIL_S = 60s` of grace because
+its run appeared to end; the completed derivation places the true end **earlier** (at a pause, or at a
+real `VideoSessionEnd` inside the grace window). The stale, longer row then outranked the correct one
+permanently and dragged a stale `is_open = 1` with it. Measured: **316 intervals up to 60s too long,
+315 stuck at `is_open = 1`, +37 on the peak minute (2,924 vs 2,887, +1.3%).**
+
+- **Fixed in `388a845`** — `session_intervals` is now `ReplacingMergeTree(build_version)`, a monotonic
+  build counter; `cc_minute_delta.starts`/`ends` became `Int64` in the same commit.
+- **The test itself was repaired in `1dee090`** — it had broken on the ADR 0008 7-dimension schema
+  (hard-coded column lists, a dead `sed` anchor) and its verdict text still claimed the model did not
+  converge.
+- **Evidence:** `evidence/truncation.txt` — `CONVERGES  versioned incremental == production truth on
+  all 1578 minutes · peak 2887`, and `FIXED  versioned session_intervals is row-for-row identical to
+  a clean rebuild`. ⚠️ The trailing `VERDICT` block of that committed run predates the `1dee090`
+  verdict-text repair and still reads "does NOT converge"; the machine-compared lines above it are the
+  authoritative part, and the next regeneration of the file replaces the block with the two-sided
+  wording already in `tools/truncation-test.sh`.
+
+**Second finding — also fixed in `388a845`.** `cc_minute_delta.starts`/`ends` **were**
+`SimpleAggregateFunction(sum, UInt64)`, so the negative corrective row ADR 0006 mandates was not
+representable. ClickHouse does **not** reject it — it wraps to `2^64 - n`. `sum()` still comes out
+right by modular arithmetic, but `max()` returns 1.8e19 and any pre-merge single-row read is garbage.
+Both are `Int64` now.
 
 **Anti-patterns specific to this test:**
 
@@ -108,17 +132,45 @@ and any pre-merge single-row read is garbage. Make both `Int64`.
 
 ## Self-observation (H7)
 
-`internal/otelemit`, `internal/pipelinehealth` · `go test ./internal/...` · see
+`internal/otelemit`, `internal/pipelinehealth`, `internal/chdb`, `cmd/sonyliv` · `make test` · see
 [OBSERVABILITY.md](OBSERVABILITY.md) for what `sonyliv observe` emits and why.
+
+**The Go unit suite is database-free by construction.** Every test runs against fixtures, fakes of
+the `driver.Conn` interface, `httptest` collectors, or loopback ports nothing listens on — `make ci`
+never opens a connection to any ClickHouse, least of all the graded `sonyliv` database. Coverage
+after the 2026-08-01 audit: `pipelinehealth` 90.8%, `otelemit` 95.7%, `chdb` 93.1%, `config` 91.4%
+(was 79.6% — the default-resolution paths were unexercised), `cmd/sonyliv` 58.7% (the remainder is
+`main`/`cli` and the live-connection halves of `verify`/`observe`, which cannot be unit-tested
+without a server and are exercised by `make verify` instead), 77.6% total. Treat these numbers as a
+ceiling on ignorance, not proof of coverage — the audit below found eight breaks the pre-audit
+suite could not see at almost identical percentages.
 
 | Test | Proves |
 |---|---|
-| `TestReadReconcileEvidence_Pass` | the gate-evidence parser reads the REAL box-drawing `evidence/reconcile.txt` format byte-for-byte, including the peak minute (2887 @ 10:56) — not a simplified stand-in |
-| `TestReadReconcileEvidence_Mismatch` | a failing gate is surfaced, not averaged away — pinned to the historical `+37 at the peak` defect TESTS.md already documents above |
-| `TestReconcileEvidence_PassOnEmptyIsFalse` | a format change that silently parses zero rows cannot read as "everything passed" |
+| `TestReadReconcileEvidence_GreenFixture` | the parser reads `testdata/reconcile_green.txt` — a byte-for-byte CAPTURE of a real green `tools/reconcile.sh` run (2026-08-01, commit d6c85e2), never a hand-written stand-in. The verdict comes from the SUMMARY row (`minutes_compared=17028`), not from counting sample rows |
+| `TestReadReconcileEvidence_MismatchFixture` | a failing gate is surfaced, not averaged away — the fixture is a REAL captured failure (cloud serving-layer drift, 177 mismatched minutes, max abs diff 39) |
+| `TestReadReconcileEvidence_OldFormatIsNotAPass` | the pre-81c0161 five-column format — the exact shape the parser once pinned while production output had moved on — parses as NOT a pass: no SUMMARY row means unattested evidence |
+| `TestReadReconcileEvidence_OldFormatMismatchStillVisible` | even without a SUMMARY, the row-level fallback still surfaces the historical `+37 at the peak` defect magnitude |
+| `TestReadReconcileEvidence_EmptyFileIsNotAPass` / `_MalformedFileIsNotAPass` | an empty or garbage evidence file cannot read as "everything passed" |
+| `TestReadReconcileEvidence_SurvivesAddedColumn` | the regression the 2026-08-01 rewrite exists for: adding a column to the gate's table must not silently zero the parse — SUMMARY tokens are key=value, detail rows anchor on the timestamp |
+| `TestPass_SummaryGuards` | `Pass()` requires all of: summary present, verdict PASS, ≥1 minute compared, 0 mismatched — a self-contradictory summary fails |
+| `TestReadReconcileEvidence_SectionFence` | the `== 1.`/`== 2.` section fence itself: a fully gate-shaped row (timestamp, three ints, PASS) placed outside section 1 must NOT parse into `Minutes`. Added by the 2026-08-01 audit — removing the fence previously survived every test, because no fixture had a verdict-bearing row outside the gate section |
 | `TestIntAttrEncodesAsJSONString` | OTLP/HTTP JSON's int64-as-decimal-string mapping is actually followed — a bare `int64` JSON field would lose precision above 2^53 |
 | `TestSeverityConstantsAreLowerCase` | `severity:error` saved searches keep matching — HyperDX stores `SeverityText` lower-cased (VERIFIED.md), and this is the one constant a careless edit would recapitalize |
 | `TestNewTraceID` / `TestNewSpanID` / `TestNewTraceIDIsRandom` | id shape (16/8 random bytes, lower-case hex) and that two runs do not collide |
+| `TestQueryWatermark_*` (`health_test.go`) | the v_cc_watermark sign convention survives the code path: **negative lag is healthy**, positive lag is not; an all-NULL row (fresh database) scans to zero values instead of panicking; a scan failure names the view. Since the audit, all seven columns scan with **distinct** fixture values asserted field-by-field — swapping two scan destinations (raw↔sealed) previously survived a not-zero check |
+| `TestQueryBuildStages_*` | stage rows come typed off `system.query_log`; a stage with no recorded run is `Found=false`, **not** an error and not a fabricated row; a real query failure names which stage died. Since the audit, the two queries' load-bearing fragments are pinned (`has(tables, 'db.…')` per stage, `NOT has(…ev_raw)`, `type = 'QueryFinish'`, `query_kind = 'Insert'`) — corrupting a table name in the predicate previously survived, because the fake routed on `NOT has` alone |
+| `TestClientPostsEachSignalToItsPath` / `TestClientMetricsWireShape` (`otelemit/client_test.go`) | each signal POSTs to its `/v1/<signal>` path with the ingestion key in `authorization` and the OTLP JSON field names actually on the wire (`asDouble`, `timeUnixNano` as a decimal string) |
+| `TestClientNon2xxIsAnError` / `TestClientUnreachableCollectorIsAnError` | a 401 (wrong key) or a dead collector is a loud error carrying the status and response body — not a silent drop |
+| `TestClientUnmarshalablePayloadFailsBeforePosting` | a NaN gauge fails at marshal time, before any bytes reach the collector |
+| `TestAttrConstructorsEncodeTheTaggedUnion` / `TestSeverityNumberMapsPerOTLPSpec` / `TestLogRecordCarriesBodySeverityAndTraceCorrelation` / `TestGaugeMetricShape` | every constructor sets exactly one arm of the OTLP AnyValue union (`boolValue:false` survives `omitempty`), severity text↔number stay in sync, logs keep their trace correlation |
+| `TestTables` / `TestTablesErrors` / `TestServerVersion*` (`chdb_test.go`) | the inventory reads `system.tables` (never per-table `count()`) **with `ORDER BY name`** (deterministic verify output), binds the database as a parameter, closes its rows, and each of the three failure points names itself |
+| `TestOpenUnreachable` | a dead endpoint fails **at Open** (via the ping), naming the address and user — for both plain and TLS configs. Target is a loopback port nothing listens on |
+| `TestRunDispatch` / `TestVerifyAndObserveRejectBadInputBeforeConnecting` (`cmd/sonyliv`) | CLI dispatch, and that both subcommands reject bad flags / an unknown target **before** any connection attempt |
+| `TestObserveRunLifecycle` / `TestNewChildSpanStatus` / `TestObserve*` | one trace per observe run: children parented to the root, a query failure still yields a `StatusError` span, missing reconcile evidence is a legitimate state |
+| `TestBuildMetrics` / `TestBuildLogsSeverities` | every gauge **value** (not just its name): lag −90 emits −90, `gate_pass` is 1 on a green gate and 0 with `max_abs_delta=39` on the captured drift failure; metric families with no data behind them are **absent, not zero** (a fabricated 0 reads as healthy on a dashboard); unhealthy watermark and failing/unattested gate log at `error`, missing evidence and never-run stages at `warn`. Before the audit only metric NAMES were asserted — an inverted `gate_pass` and a zeroed lag gauge both survived |
+| `TestLoadCloudDefaults` / `TestLoadLocalDefaults` (`config_test.go`) | an all-defaults cloud load resolves to port 8443 with **TLS on** and user `default`; local stays plaintext `localhost:8123` as `app`. Added by the audit — flipping `Secure` to false or the default port to 9000 previously survived, because every test set those variables explicitly |
+| `TestPrintSummary` / `TestClampUint64ToInt64` | the human summary names what it could not find; `uint64→int64` clamps at MaxInt64 instead of wrapping negative |
 
 **Anti-pattern avoided:** re-deriving build-stage duration or benchmark-query latency by wrapping a
 client-side timer around a re-run query. `system.query_log` already has the real, server-measured
@@ -126,9 +178,42 @@ number (and `granules_read`/`bytes_read`, which a client cannot know at all) —
 only ever be a strictly worse copy of data ClickHouse already recorded. See OBSERVABILITY.md's
 "what is deliberately not instrumented" section.
 
-**Not yet covered by an automated test:** the OTLP emission path itself (`internal/otelemit.Client`)
-has no unit test against a fake HTTP server — it was verified by hand against the real ClickStack
-collector instead (curl probes, then `sonyliv observe`, then reading the rows back out of
-`otel_metrics_gauge`/`otel_logs`/`otel_traces` — see OBSERVABILITY.md). A `httptest.Server`-backed
-test for the 401-without-a-key and non-2xx-wraps-body-in-error paths would be the next thing to add
-here.
+**Now covered (was the gap named here until 2026-08-01):** the OTLP emission path
+(`internal/otelemit.Client`) has `httptest.Server`-backed tests for the success, 401-wrong-key,
+dead-collector and marshal-failure paths (`client_test.go`). The by-hand verification against the
+real ClickStack collector (curl probes, then reading rows back out of
+`otel_metrics_gauge`/`otel_logs`/`otel_traces` — see OBSERVABILITY.md) remains the ground truth the
+fakes were modeled on.
+
+**Not yet covered by an automated test:** the connected halves of `sonyliv verify`/`observe`
+(`cmdVerify`/`cmdObserve` past config validation) and the `chdb.Open` success path — all need a live
+ClickHouse and are exercised by `make verify` / `sonyliv observe -dry-run` against the local stack
+instead.
+
+## False-confidence audit — 2026-08-01
+
+Method (rule 14): for each suspect test, deliberately break the code it claims to cover and confirm
+whether the suite notices. A test that stays green through a real break is confirmed false
+confidence. Every sabotage was reverted; the fixes below are test-side only.
+
+**10 probes run · 2 caught by the original suite (controls) · 8 survived · all 8 now fixed and
+re-probed as caught.** No test reaches a live database — verified by reading every fake/fixture and
+by the loopback/`httptest` designs above.
+
+| # | Sabotage | Original result | Fix |
+|---|---|---|---|
+| A | invert `Watermark.Healthy()` sign | **caught** (control) | — |
+| B | drop the `Mismatched == 0` guard from `Pass()` | **caught** (control) | — |
+| 1 | invert the `gate_pass` gauge value | survived | `TestBuildMetrics` asserts gauge **values**, both green and failing-gate cases |
+| 2 | emit 0 for `sealed_lag_seconds` | survived | same |
+| 3 | corrupt `ev_raw` table name in the build-stage `query_log` predicate | survived | `TestQueryBuildStages_BothStagesFound` pins each query's predicate fragments |
+| 4 | swap raw/sealed watermark scan destinations | survived | distinct per-column fixture values, asserted field-by-field |
+| 5 | flip cloud `Secure` default to false | survived | `TestLoadCloudDefaults` |
+| 6 | change cloud default port 8443→9000 | survived | same |
+| 7 | remove the reconcile `== 1.`/`== 2.` section fence | survived | `TestReadReconcileEvidence_SectionFence` |
+| 8 | drop `ORDER BY name` from `chdb.Tables` | survived | query-content assertion in `TestTables` |
+
+Packages probed and found sound without changes: `otelemit` (wire-level `httptest` assertions pin
+paths, headers, exact JSON), `cmd/sonyliv` dispatch, the reconcile fixtures (byte-for-byte captures
+whose format matches what `tools/reconcile.sh` writes today — verified by diff against
+`evidence/reconcile.txt`; only data values differ, post-model-change).

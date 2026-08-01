@@ -99,16 +99,30 @@ WITH
             r.r_start AS r_start,
             r.r_end   AS r_end,
             r.run_ts  AS run_ts,
-            arraySort(arrayMap(
+            -- `>=` on the resume lookup, MATCHING sql/30_build_intervals.sql.
+            -- Timestamps are truncated to whole seconds, so a strict `>` is blind
+            -- to a resume landing in the same second as its pause: 2,697 of 27,340
+            -- pauses (9.86%). This gate carried the IDENTICAL expression, so it
+            -- reproduced the bug and agreed with the model — an independent
+            -- implementation of a wrong DEFINITION proves nothing. Like
+            -- UNCLOSED_PAUSE_TO_RUN_END above, the SPEC is shared here and the
+            -- CODE is not; changing one file without the other is a divergence
+            -- this gate will (correctly) fail on. ADR 0009.
+            -- The permissive branch's lookup into `run_ts` stays STRICT — the
+            -- pause is itself in `run_ts` at p.
+            -- Zero-length tie windows dropped, as in the model: they are absorbed
+            -- correctly by the fold either way, but they split one interval into
+            -- two abutting ones and an interval boundary carries meaning.
+            arrayFilter(w -> w.2 > w.1, arraySort(arrayMap(
                 p -> (p, least(
-                        if(arrayFirst(x -> x > p, p2.rs) = 0,
+                        if(arrayFirst(x -> x >= p, p2.rs) = 0,
                            if(UNCLOSED_PAUSE_TO_RUN_END = 1,
                               r.r_end,
                               if(arrayFirst(x -> x > p, r.run_ts) = 0, r.r_end, arrayFirst(x -> x > p, r.run_ts))),
-                           arrayFirst(x -> x > p, p2.rs)),
+                           arrayFirst(x -> x >= p, p2.rs)),
                         r.r_end)),
                 arrayFilter(p -> (p >= r.r_start) AND (p < r.r_end), p2.ps)
-            )) AS wins
+            ))) AS wins
         FROM runs AS r
         LEFT JOIN pauses AS p2 ON p2.video_session_id = r.video_session_id
     ),

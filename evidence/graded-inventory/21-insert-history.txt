@@ -1,0 +1,215 @@
+2026-08-01 08:39:10	2	33464	_table_function.input	INSERT INTO content_dim SELECT content_id, title, video_type, category FROM input(\'content
+2026-08-01 08:39:36	2	996850	_table_function.input	INSERT INTO ev_raw SELECT content_id, video_session_id, user_id, event_type, event, toDate
+2026-08-01 09:12:15	1	30769	sonyliv.ev_raw	-- ============================================================================ -- 30_buil
+2026-08-01 09:12:59	1	30769	sonyliv.ev_raw	-- ============================================================================ -- 30_buil
+2026-08-01 09:55:33	1	35013	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 09:57:27	1	24951	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 09:59:30	1	30769	sonyliv.ev_raw	-- ============================================================================ -- 30_buil
+2026-08-01 09:59:33	1	24958	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 10:06:18	2	1	sonyliv.cc_minute_delta	INSERT INTO sonyliv.cc_minute_delta (minute, platform, country, content_id, delta, starts,
+2026-08-01 10:06:51	1	30769	sonyliv.ev_raw	-- ============================================================================ -- 30_buil
+2026-08-01 10:06:54	1	24951	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 10:12:28	2	458477	sonyliv.ev_raw	 INSERT INTO sonyliv_trunc.ev_raw SELECT content_id, video_session_id, user_id, event_type
+2026-08-01 10:14:37	1	26162	sonyliv.cc_hour_agg	-- --------------------------------------------------------------------------- -- Populate
+2026-08-01 10:14:41	1	26162	sonyliv.cc_hour_agg	-- --------------------------------------------------------------------------- -- Populate
+2026-08-01 10:15:14	1	26162	sonyliv.cc_hour_agg	-- --------------------------------------------------------------------------- -- Populate
+2026-08-01 10:15:21	1	26162	sonyliv.cc_hour_agg	-- --------------------------------------------------------------------------- -- Populate
+2026-08-01 10:15:25	2	458477	sonyliv.ev_raw	INSERT INTO sonyliv_trunc.ev_raw SELECT content_id, video_session_id, user_id, event_type,
+2026-08-01 10:15:33	2	447081	sonyliv.ev_raw	INSERT INTO sonyliv_trunc.ev_raw SELECT content_id, video_session_id, user_id, event_type,
+2026-08-01 10:15:51	1	26162	sonyliv.cc_hour_agg	-- --------------------------------------------------------------------------- -- Populate
+2026-08-01 10:17:29	1	26162	sonyliv.cc_hour_agg	-- --------------------------------------------------------------------------- -- Populate
+2026-08-01 10:20:49	2	458477	sonyliv.ev_raw	INSERT INTO sonyliv_trunc.ev_raw SELECT content_id, video_session_id, user_id, event_type,
+2026-08-01 10:20:58	2	447081	sonyliv.ev_raw	INSERT INTO sonyliv_trunc.ev_raw SELECT content_id, video_session_id, user_id, event_type,
+2026-08-01 10:22:05	2	458477	sonyliv.ev_raw	INSERT INTO sonyliv_trunc.ev_raw SELECT content_id, video_session_id, user_id, event_type,
+2026-08-01 10:22:12	2	447081	sonyliv.ev_raw	INSERT INTO sonyliv_trunc.ev_raw SELECT content_id, video_session_id, user_id, event_type,
+2026-08-01 10:48:26	1	90723	sonyliv.cc_user_minute	-- --------------------------------------------------------------------------- -- One-time
+2026-08-01 10:53:51	1	121492	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 10:53:55	1	24951	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 11:22:16	1	121492	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 11:22:18	1	28139	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 11:24:26	2	28139	sonyliv.cc_minute_delta	 INSERT INTO sonyliv_dimbench.cc_delta_map SELECT minute, platform, country, content_id, m
+2026-08-01 11:24:27	2	28139	sonyliv.cc_minute_delta	INSERT INTO sonyliv_dimbench.cc_delta_cols SELECT * FROM sonyliv.cc_minute_delta
+2026-08-01 11:24:49	2	1406950	sonyliv.cc_minute_delta	 INSERT INTO sonyliv_dimbench.big_cols SELECT minute, platform, country, content_id + n*10
+2026-08-01 11:24:56	2	1406950	sonyliv.cc_minute_delta	 INSERT INTO sonyliv_dimbench.big_map SELECT minute, platform, country, content_id + n*100
+2026-08-01 11:29:35	1	121492	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 11:29:37	1	28139	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 11:33:18	1	121492	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 11:33:21	1	28139	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 11:34:54	2	458477	sonyliv.ev_raw	INSERT INTO sonyliv_trunc.ev_raw SELECT content_id, video_session_id, user_id, event_type,
+2026-08-01 11:35:18	2	458477	sonyliv.ev_raw	INSERT INTO sonyliv_trunc.ev_raw SELECT content_id, video_session_id, user_id, event_type,
+2026-08-01 11:36:47	2	458477	sonyliv.ev_raw	INSERT INTO sonyliv_trunc.ev_raw SELECT content_id, video_session_id, user_id, event_type,
+2026-08-01 11:37:33	2	458477	sonyliv.ev_raw	INSERT INTO sonyliv_trunc.ev_raw SELECT content_id, video_session_id, user_id, event_type,
+2026-08-01 11:38:07	2	458477	sonyliv.ev_raw	INSERT INTO sonyliv_trunc.ev_raw SELECT content_id, video_session_id, user_id, event_type,
+2026-08-01 11:38:16	2	447081	sonyliv.ev_raw	INSERT INTO sonyliv_trunc.ev_raw SELECT content_id, video_session_id, user_id, event_type,
+2026-08-01 11:41:35	2	458477	sonyliv.ev_raw	INSERT INTO sonyliv_trunc.ev_raw SELECT content_id, video_session_id, user_id, event_type,
+2026-08-01 11:41:43	2	447081	sonyliv.ev_raw	INSERT INTO sonyliv_trunc.ev_raw SELECT content_id, video_session_id, user_id, event_type,
+2026-08-01 11:51:48	2	458477	sonyliv.ev_raw	INSERT INTO sonyliv_trunc.ev_raw SELECT content_id, video_session_id, user_id, event_type,
+2026-08-01 11:51:58	2	447081	sonyliv.ev_raw	INSERT INTO sonyliv_trunc.ev_raw SELECT content_id, video_session_id, user_id, event_type,
+2026-08-01 12:05:28	2	1	sonyliv.cc_minute_delta	INSERT INTO sonyliv.cc_minute_delta (minute, platform, country, content_id, subtitle_langu
+2026-08-01 12:05:38	1	121492	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 12:05:42	1	28139	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 12:27:41	1	121492	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 12:27:43	1	28139	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 12:28:06	1	121492	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 12:28:09	1	28139	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 12:28:16	1	121492	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 12:28:20	1	28139	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 12:28:41	1	127345	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 12:28:44	1	28284	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 12:28:52	1	121492	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 12:28:54	1	28139	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 12:29:23	1	127345	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 12:29:27	1	28284	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 12:29:38	1	121492	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 12:29:40	1	28139	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 12:30:47	1	127345	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 12:30:51	1	28284	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 12:31:03	1	121492	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 12:31:06	1	28139	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 12:55:08	1	121492	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 12:55:12	1	28139	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 12:57:26	1	123417	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 12:57:29	1	28053	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 12:58:36	1	121802	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 12:58:39	1	28063	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 13:00:59	1	122015	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 13:01:01	1	28074	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 13:02:23	2	91692	sonyliv.cc_user_minute	INSERT INTO cc_user_minute SELECT toDateTime(m) AS minute, platform, country, content_id, 
+2026-08-01 13:02:39	1	122015	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 13:02:42	1	28074	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 13:10:56	2	996850	sonyliv.ev_raw	INSERT INTO ev_raw SELECT * FROM sonyliv.ev_raw
+2026-08-01 13:10:56	2	33464	sonyliv.content_dim	INSERT INTO content_dim SELECT * FROM sonyliv.content_dim
+2026-08-01 13:35:18	9	1579	scratch_rmv.`.tmp.inner_id.b4c9e874-08a7-4f47-996d-eb48725884c0`	INSERT INTO scratch_rmv.`.tmp.inner_id.b4c9e874-08a7-4f47-996d-eb48725884c0` (minute, c) S
+2026-08-01 13:39:43	1	122015	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 13:39:46	1	28074	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 13:39:58	1	122015	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 13:40:01	1	28074	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 13:40:25	1	127468	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 13:40:27	1	28190	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 13:40:41	1	122015	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 13:40:44	1	28074	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 13:41:37	1	26242	sonyliv.cc_hour_agg	-- --------------------------------------------------------------------------- -- Populate
+2026-08-01 13:43:35	1	122015	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 13:43:39	1	28074	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 13:43:43	1	26242	sonyliv.cc_hour_agg	-- --------------------------------------------------------------------------- -- Populate
+2026-08-01 13:44:05	1	122015	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 13:44:09	1	28074	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 13:44:13	1	26242	sonyliv.cc_hour_agg	-- --------------------------------------------------------------------------- -- Populate
+2026-08-01 13:44:27	1	122015	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 13:44:31	1	28074	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 13:44:34	1	26242	sonyliv.cc_hour_agg	-- --------------------------------------------------------------------------- -- Populate
+2026-08-01 13:44:59	1	127468	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 13:45:08	1	122015	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 13:45:13	1	28074	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 13:45:16	1	26242	sonyliv.cc_hour_agg	-- --------------------------------------------------------------------------- -- Populate
+2026-08-01 13:45:34	1	91692	sonyliv.cc_user_minute	-- --------------------------------------------------------------------------- -- One-time
+2026-08-01 13:45:58	1	127468	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 13:46:02	1	122015	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 13:46:06	1	91692	sonyliv.cc_user_minute	-- --------------------------------------------------------------------------- -- One-time
+2026-08-01 13:46:17	1	122015	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 13:46:22	1	28074	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 13:46:25	1	26242	sonyliv.cc_hour_agg	-- --------------------------------------------------------------------------- -- Populate
+2026-08-01 13:50:11	2	513560	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 13:51:03	2	506901	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 13:52:15	1	122015	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 13:52:20	1	28073	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 13:52:24	1	26254	sonyliv.cc_hour_agg	-- --------------------------------------------------------------------------- -- Populate
+2026-08-01 13:53:45	1	122015	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 13:53:52	1	28073	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 13:53:54	1	26254	sonyliv.cc_hour_agg	-- --------------------------------------------------------------------------- -- Populate
+2026-08-01 13:55:33	2	513560	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 13:55:35	2	506901	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 13:56:07	2	4165	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 13:56:08	2	4160	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 13:56:49	2	493578	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 13:56:50	2	485860	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 13:57:39	1	122015	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 13:57:44	1	28073	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 13:57:46	1	26254	sonyliv.cc_hour_agg	-- --------------------------------------------------------------------------- -- Populate
+2026-08-01 13:58:07	1	122015	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 13:58:11	1	28073	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 13:58:14	1	26254	sonyliv.cc_hour_agg	-- --------------------------------------------------------------------------- -- Populate
+2026-08-01 13:58:23	2	91692	sonyliv.cc_user_minute	INSERT INTO cc_user_minute SELECT toDateTime(m), platform, country, content_id, uniqExactS
+2026-08-01 13:58:43	1	122015	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 13:58:47	1	28073	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 13:58:51	1	26254	sonyliv.cc_hour_agg	-- --------------------------------------------------------------------------- -- Populate
+2026-08-01 13:59:39	1	122015	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 13:59:43	1	28073	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 13:59:48	1	26254	sonyliv.cc_hour_agg	-- --------------------------------------------------------------------------- -- Populate
+2026-08-01 14:00:28	2	513560	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 14:00:30	2	506901	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 14:01:08	2	4165	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 14:01:09	2	4160	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 14:01:57	2	493578	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 14:01:59	2	485860	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 14:05:09	2	513560	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 14:05:11	2	506901	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 14:05:52	2	4165	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 14:05:52	2	4160	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 14:06:43	2	493578	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 14:06:44	2	485860	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 14:09:42	2	513560	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 14:09:44	2	506901	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 14:10:25	2	4165	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 14:10:25	2	4160	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 14:11:26	2	493578	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 14:11:27	2	485860	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 14:16:25	2	513560	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 14:16:28	2	506901	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 14:17:14	2	4165	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 14:17:15	2	4160	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 14:18:02	2	493578	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 14:18:03	2	485860	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 14:25:11	2	513560	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 14:25:13	2	506901	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 14:26:04	2	4165	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 14:26:04	2	4160	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 14:26:53	2	493578	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 14:26:54	2	485860	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 14:29:33	2	458477	sonyliv.ev_raw	INSERT INTO sonyliv_trunc.ev_raw SELECT content_id, video_session_id, user_id, event_type,
+2026-08-01 14:29:41	2	447081	sonyliv.ev_raw	INSERT INTO sonyliv_trunc.ev_raw SELECT content_id, video_session_id, user_id, event_type,
+2026-08-01 14:35:04	2	513560	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 14:35:06	2	506901	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 14:35:50	2	4165	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 14:35:51	2	4160	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 14:36:41	2	493578	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 14:36:43	2	485860	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 14:40:59	2	458477	sonyliv.ev_raw	INSERT INTO sonyliv_trunc.ev_raw SELECT content_id, video_session_id, user_id, event_type,
+2026-08-01 14:41:07	2	447081	sonyliv.ev_raw	INSERT INTO sonyliv_trunc.ev_raw SELECT content_id, video_session_id, user_id, event_type,
+2026-08-01 14:50:34	2	513560	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 14:50:36	2	506901	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 14:51:19	2	4165	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 14:51:19	2	4160	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 14:52:07	2	493578	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 14:52:08	2	485860	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 15:38:31	2	0	sonyliv.cc_publish_batch	INSERT INTO cc_publish_batch (run_id, video_session_id, lo_event_ts, hi_event_ts) WITH cla
+2026-08-01 16:16:35	1	121492	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 16:16:38	1	28139	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 16:38:14	2	513560	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 16:38:17	2	506901	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 16:39:09	2	4165	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 16:39:10	2	4160	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 16:39:14	1	122015	sonyliv.cc_user_minute	-- ============================================================================ -- 30_buil
+2026-08-01 16:39:19	1	28073	sonyliv.cc_minute_delta	-- ============================================================================ -- 40_delt
+2026-08-01 16:39:21	1	26254	sonyliv.cc_hour_agg	-- --------------------------------------------------------------------------- -- Populate
+2026-08-01 16:40:17	2	493578	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 16:40:18	2	485860	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 16:45:45	2	513560	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 16:45:48	2	506901	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 16:46:41	2	4165	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 16:46:42	2	4160	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 16:48:07	2	493578	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 16:48:09	2	485860	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 16:53:34	2	513560	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 16:53:36	2	506901	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 16:54:33	2	4165	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 16:54:34	2	4160	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 16:55:50	2	493578	sonyliv.ev_raw	INSERT INTO sonyliv_pub.ev_raw SELECT content_id, video_session_id, user_id, event_type, e
+2026-08-01 16:55:51	2	485860	sonyliv.ev_raw	INSERT INTO sonyliv_pub_ctl.ev_raw SELECT content_id, video_session_id, user_id, event_typ
+2026-08-01 17:18:30	2	81312	sonyliv.ev_raw	INSERT INTO sonyliv_q8scratch.ev_raw SELECT content_id, video_session_id, user_id, event_t
+2026-08-01 17:27:27	2	81312	sonyliv.ev_raw	INSERT INTO sonyliv_q8scratch.ev_raw SELECT content_id, video_session_id, user_id, event_t
+2026-08-01 17:30:17	2	905558	sonyliv.ev_raw	INSERT INTO sonyliv_q25.ev_raw SELECT * FROM sonyliv.ev_raw
+2026-08-01 17:30:26	2	28073	sonyliv.cc_minute_delta	INSERT INTO sonyliv_q25.cc_minute_delta SELECT * FROM sonyliv.cc_minute_delta
+2026-08-01 17:30:28	2	33464	sonyliv.content_dim	INSERT INTO sonyliv_q25.content_dim SELECT * FROM sonyliv.content_dim
+2026-08-01 17:40:53	2	513560	sonyliv.ev_raw	INSERT INTO sonyliv_q29vis.ev_raw SELECT content_id, video_session_id, user_id, event_type
+2026-08-01 17:44:53	2	497672	sonyliv.ev_raw	INSERT INTO sonyliv_q29vis.ev_raw SELECT content_id, video_session_id, user_id, event_type
