@@ -1,12 +1,13 @@
 # CLICKSTACK — the OSS integration, and where the concurrency chart comes from
 
-> **Summary:** ClickStack (HyperDX all-in-one) runs locally from `docker-compose.yml` under the `oss`
-> profile and does **two** jobs: it observes our own pipeline over OTLP (ingestion lag, query
-> latency), and it *is* the concurrency visualization the problem statement asks for — so we ship no
-> custom frontend. `make stack-up && make clickstack` gets both. Charts read the graded **Cloud**
-> service through a HyperDX connection, over the views in `sql/20_views.sql`, because a chart tool
-> cannot read an `AggregateFunction` column. The dataset ends **2026-07-26**: HyperDX's default
-> "last 15 minutes" window renders an empty chart and looks broken. Set the range.
+> **Summary:** ClickStack does **two** jobs — it observes our pipeline over OTLP (ingestion lag,
+> query latency) and it *is* the concurrency visualization the statement asks for, so we ship no
+> custom frontend. **Two ways to run it. We use Option B:** HyperDX built into ClickHouse Cloud
+> (confirm via the `hyperdx-alert-internal` user) reads `sonyliv` directly — no credentials, no
+> connection, no IP allowlist — but sources are created by hand, since it authenticates off the
+> console session. **Option A** is the local all-in-one (`make stack-up && make clickstack`), fully
+> scriptable. Both chart `sql/20_views.sql`, because no chart tool can read an `AggregateFunction`
+> column. The dataset ends **2026-07-26**: the default "last 15 minutes" window renders empty.
 
 ## Why ClickStack is the chart, not just the telemetry
 
@@ -26,6 +27,37 @@ open http://localhost:8080
 
 Then in HyperDX: pick source **Concurrency total (minute)**, set the time range to
 **2026-07-14 → 2026-07-26**, and chart `concurrent` over `minute`.
+
+## Option B — HyperDX built into ClickHouse Cloud (what we actually use)
+
+ClickHouse Cloud ships HyperDX inside the service. Confirm it by looking for the internal user it
+provisions:
+
+```bash
+tools/ch -c "SELECT name FROM system.users WHERE name LIKE 'hyperdx%'"   # -> hyperdx-alert-internal
+```
+
+This is the simpler path and needs **no credentials, no connection, and no IP allowlist change** —
+HyperDX is already inside the service, so it reads `sonyliv` as `default` with nothing to configure.
+The local `cs` container and `tools/clickstack-sources.sh` are only for Option A.
+
+The one thing it cannot do is be scripted: the built-in HyperDX authenticates off your ClickHouse
+Cloud console session, not an API key. So the source is created by hand, once:
+
+**ClickHouse Cloud console → HyperDX → Sources → New source**
+
+| Field | Value |
+|---|---|
+| Name | `Concurrency total (minute)` |
+| Database | `sonyliv` |
+| Table | `v_concurrency_minute_total` |
+| Timestamp column | `minute` (`DateTime`) |
+| Value column to chart | `concurrent` (`UInt64`) |
+
+Repeat with `v_concurrency_minute_stateless` for the per-platform/country/content breakdown; it has
+the same `minute` timestamp column plus the three dimensions.
+
+Then set the time range to **2026-07-14 → 2026-07-26** before concluding anything is broken.
 
 ## What the two scripts do
 
