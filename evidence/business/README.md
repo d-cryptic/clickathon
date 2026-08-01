@@ -1,3 +1,8 @@
+> ⚠ **The waterfall in the first paragraphs below was superseded and is kept only as a
+> record.** It gives +246.2 h tail and 382.8 h pause; the corrected figures, derived later
+> in this same file, are **+149.6 h tail and −286.2 h pause**. Codex audit 005 found the two
+> halves disagreeing. Trust the later ones.
+
 # evidence/business/ — every number in docs/BUSINESS_RULES.md, measured live
 
 > **Summary:** All figures behind [docs/BUSINESS_RULES.md](../../docs/BUSINESS_RULES.md), re-measured
