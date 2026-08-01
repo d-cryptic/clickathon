@@ -43,6 +43,13 @@ Defined in [.claude/](.claude/) — `agents/` (subagents with their own briefs),
 procedures), `commands/` (slash commands). Start with `/reconcile` and `/bench`; they are the two that
 decide whether we score.
 
+**Official ClickHouse skills are vendored** in [.claude/skills/vendor/](.claude/skills/vendor/) from
+[ClickHouse/agent-skills](https://github.com/ClickHouse/agent-skills) (Apache-2.0): the **31
+best-practice rules**, the architecture advisor, the ClickStack OTel collector guide, and the
+`clickhousectl` workflows. **Cite them** — "Per `schema-pk-cardinality-order`…" — when making a schema
+or query call. They already overturned one of our own choices; see
+[ADR 0002](docs/adr/0002-order-by-time-bucket-then-platform.md).
+
 ## Non-negotiables
 
 1. **Correctness before speed.** Every model change re-runs `/reconcile` against raw. A fast wrong answer

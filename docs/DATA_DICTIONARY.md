@@ -78,6 +78,19 @@ assume the unseen day has one too, possibly in the *event* stream where it would
 **4 · One country, ten platforms.** `country` has a single value here, so a bug in country filtering is
 invisible in testing and fatal on the unseen day. Always test filters against `platform` too.
 
+## Traffic is extremely concentrated — this is a live-event dataset
+
+```
+2026-07-26 10:00   425,108 events   ← 47% of the entire file in ONE hour
+2026-07-26 11:00   374,053 events   ← another 41%
+2026-07-26 09:00    17,806 events
+2026-07-14         152 events, then a GAP until 07-21
+```
+
+**88% of all events fall in two consecutive hours.** This is a live-sport concurrency spike, and it is
+the demo: the curve should climb steeply into 10:00 on 26 July. It also means any benchmark run on a
+random hour is measuring almost nothing — always state which window a number came from.
+
 ## Loading
 
 `tools/load.sh` handles the millisecond conversion and column typing. It expects the CSVs in `data/`
