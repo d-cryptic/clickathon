@@ -169,6 +169,36 @@ live, ADR 0014 agrees 98/98 hours with no bare live-view `argMax`.
 Isolation (check 1) must include the follow-up commits that make the ADR's claims true — grep the
 promoted tree for what the ADR *says* is gone, rather than trusting the ADR.
 
+## W3 refused at check 1 — the wave order is a real dependency, not a preference
+
+W3 (publication) cherry-picked ADR 0013+0016+0019 onto `main`, verified all three named risk checks
+against the **promoted tree rather than the ADR prose** — `mv_user_minute` has no surviving
+`CREATE MATERIALIZED VIEW`, `cc_user_minute` is `ReplacingMergeTree(computed_at)`, all 20 write
+statements in `publish-test.sh` are qualified — and then **refused at check 1** on three
+wave-1/wave-2 dependencies:
+
+| | dependency | consequence on `main` |
+|---|---|---|
+| **D1** | `publish-test.sh` calls `apply-sql.sh --database`; `main`'s copy has **no option parser** | the convergence claim cannot be re-derived, so check 3 never ran |
+| **D2** | `main`'s `apply-sql.sh` sources `.env` *after* the caller's environment | **there is no route on `main` that installs `sql/12_publish.sql` anywhere but the graded database.** Same Q33 family as the 2026-08-02 incident |
+| **D3** | ADR 0016's `build-model.sh` applies `sql/15_normalise.sql` (ADR 0011, wave 2), absent on `main` | `make model` is broken |
+
+**D2 is the one to sit with.** It is not a promotion problem — it is a property of `main` as it
+stands today: the only place the publisher can be installed is the database we are scored on. That is
+exactly the shape of the incident that already happened once.
+
+**It also corrected an attribution that two prior reviews had agreed on.** W1 and Codex both
+concluded "two characters (`>` → `>=`) account for all 177 mismatches". W3 re-verified rather than
+trusting either, and found `main`'s gate differs from `dev`'s in **three** places — the two resume
+predicates **plus a zero-length-window `arrayFilter`**. Patching only the two still takes the branch
+gate to 0/0/2,917, so the attribution's *conclusion* holds — but the third difference is real, and it
+is the zero-length-segment handling that queue item **Q35** is about (182 runs, peak 2,917 → 2,927).
+Two independent reviews had said "two" and the number was three.
+
+**The lesson, now a rule:** a promotion that *cannot run* a check is a check-1 failure, not a pass
+with a caveat. And an attribution agreed by two reviews is still worth re-deriving — "two characters"
+was very nearly right, and very nearly is how a third difference stays invisible.
+
 ## Ledger
 
 `—` not started · `WIP` in a promotion worktree · `GATE n` failed at check n · `✓` on `main`
