@@ -92,42 +92,84 @@ print(next((s.get("id","") for s in json.load(open("/tmp/cs-sources.json"))["res
   if [ -n "$existing" ]; then echo "  source '$name' exists"; return; fi
   api -X POST "$BASE/sources" -H 'Content-Type: application/json' \
     -d "{\"name\":\"$name\",\"kind\":\"log\",\"connection\":\"$CONN\",\"from\":{\"databaseName\":\"$DB\",\"tableName\":\"$table\"},\"timestampValueExpression\":\"minute\",\"defaultTableSelectExpression\":\"$select\"}" \
-    | py 'import json,sys; d=json.load(sys.stdin); print("  created" if not d.get("error") else "  FAILED: "+d["error"])'
+    | py 'import json,sys; d=json.load(sys.stdin); print("  created" if not d.get("error") else "  FAILED: "+d["error"]); sys.exit(1 if d.get("error") else 0)'
 }
 
 echo "sources:"
-add_source "Concurrency total (minute)" v_concurrency_minute_total     "minute, concurrent"
-add_source "Concurrency (minute)"       v_concurrency_minute_stateless "minute, platform, country, content_id, concurrent"
+# The ACCURATE pair (gap+pause model, ADR 0007) and the STATELESS baseline.
+# Both are charted: the statement asks for the comparison explicitly.
+add_source "Concurrency ACCURATE (minute)"      v_concurrency_minute_intervals     "minute, concurrent"
+add_source "Concurrency ACCURATE by dimension"  v_concurrency_minute_intervals_dim "minute, platform, country, content_id, concurrent"
+add_source "Concurrency total (minute)"         v_concurrency_minute_total         "minute, concurrent"
+add_source "Concurrency (minute)"               v_concurrency_minute_stateless     "minute, platform, country, content_id, concurrent"
 refresh_sources
 
 src_id() { SRC_NAME="$1" py '
 import json, os
 print(next((s.get("id","") for s in json.load(open("/tmp/cs-sources.json"))["result"] if s.get("name") == os.environ["SRC_NAME"]), ""))
 '; }
+ACC_ID=$(src_id "Concurrency ACCURATE (minute)")
+ACC_DIM_ID=$(src_id "Concurrency ACCURATE by dimension")
 TOTAL_ID=$(src_id "Concurrency total (minute)")
 DIM_ID=$(src_id "Concurrency (minute)")
-[ -n "$TOTAL_ID" ] && [ -n "$DIM_ID" ] || { echo "sources missing after create" >&2; exit 1; }
+for v in ACC_ID ACC_DIM_ID TOTAL_ID DIM_ID; do
+  eval "[ -n \"\$$v\" ]" || { echo "source id $v missing after create" >&2; exit 1; }
+done
 
 # -------------------------------------------------------------- dashboard ----
 # Built from the real schemas: ClickStackCreateDashboardRequest requires
 # {name,tiles}; each ClickStackTileInput requires {name,x,y,w,h}; a line tile's
 # ClickStackLineBuilderChartConfig requires {displayType,sourceId,select}.
 DASH_NAME="SonyLIV concurrency"
-DASH_JSON=$(TOTAL_ID="$TOTAL_ID" DIM_ID="$DIM_ID" DASH_NAME="$DASH_NAME" py '
+DASH_JSON=$(ACC_ID="$ACC_ID" ACC_DIM_ID="$ACC_DIM_ID" TOTAL_ID="$TOTAL_ID" DIM_ID="$DIM_ID" DASH_NAME="$DASH_NAME" py '
 import json, os
-total, dim, name = os.environ["TOTAL_ID"], os.environ["DIM_ID"], os.environ["DASH_NAME"]
-def line(n, src, x, y, w, h, group=None):
+acc, accdim = os.environ["ACC_ID"], os.environ["ACC_DIM_ID"]
+total, dim    = os.environ["TOTAL_ID"], os.environ["DIM_ID"]
+name          = os.environ["DASH_NAME"]
+
+def line(n, src, x, y, w, h, group=None, alias="concurrent"):
     cfg = {"displayType": "line", "sourceId": src,
-           "select": [{"aggFn": "max", "valueExpression": "concurrent", "alias": "concurrent"}],
+           "select": [{"aggFn": "max", "valueExpression": "concurrent", "alias": alias}],
            "where": "", "whereLanguage": "sql"}
     if group:
         cfg["groupBy"] = group
     return {"name": n, "x": x, "y": y, "w": w, "h": h, "config": cfg}
-print(json.dumps({"name": name, "tags": ["clickathon"], "tiles": [
-    line("Concurrency — all viewers", total, 0, 0, 12, 4),
-    line("Concurrency by platform",   dim,   0, 4, 6,  4, "platform"),
-    line("Concurrency by content",    dim,   6, 4, 6,  4, "content_id"),
-]}))
+
+# Dashboard-level filters. type QUERY_EXPRESSION with appliesToSourceIds so one
+# control drives every tile that carries the dimension. The two total-only
+# sources have no dimension columns, so they are deliberately NOT listed —
+# naming them would make the filter error rather than no-op.
+def filt(label, column):
+    return {"type": "QUERY_EXPRESSION", "name": label, "expression": column,
+            "sourceId": accdim, "appliesToSourceIds": [accdim, dim]}
+
+print(json.dumps({
+  "name": name,
+  "tags": ["clickathon"],
+  "filters": [filt("Platform", "platform"),
+              filt("Country", "country"),
+              filt("Content", "content_id")],
+  "tiles": [
+    # The headline: the real model, foreground-only.
+    line("Concurrency — ACCURATE (gap + pause excluded)", acc, 0, 0, 12, 4, alias="accurate"),
+    # The comparison the statement asks for, side by side underneath.
+    line("Baseline — stateless (no session reconstruction)", total, 0, 4, 6, 4, alias="stateless"),
+    line("ACCURATE by platform", accdim, 6, 4, 6, 4, "platform"),
+    line("ACCURATE by content",  accdim, 0, 8, 6, 4, "content_id"),
+    line("ACCURATE by country",  accdim, 6, 8, 6, 4, "country"),
+  ]}))
+')
+
+# PUT validates against ClickStackFilter (id REQUIRED); validate and POST use
+# ClickStackFilterInput (id FORBIDDEN — it rejects the key outright). Same
+# dashboard, two shapes. Stable ids derived from the label so a re-run updates
+# the same filter instead of duplicating it.
+DASH_JSON_PUT=$(DASH="$DASH_JSON" py '
+import hashlib, json, os
+d = json.loads(os.environ["DASH"])
+for f in d.get("filters", []):
+    f["id"] = hashlib.md5(("sonyliv-filter-" + f["name"]).encode()).hexdigest()[:24]
+print(json.dumps(d))
 ')
 
 echo "dashboard:"
@@ -143,10 +185,14 @@ import json, os, sys
 print(next((d.get("id","") for d in json.load(sys.stdin)["result"] if d.get("name") == os.environ["DASH_NAME"]), ""))
 ')
 if [ -n "$EXISTING_DASH" ]; then
-  echo "  '$DASH_NAME' exists ($EXISTING_DASH)"
+  # PUT, not skip: the dashboard definition lives in this script, so a re-run
+  # must converge the remote to it. Skipping would let a hand-edit in the UI
+  # silently outlive the code that is supposed to define it.
+  api -X PUT "$BASE/dashboards/$EXISTING_DASH" -H 'Content-Type: application/json' -d "$DASH_JSON_PUT" \
+    | py 'import json,sys; d=json.load(sys.stdin); print("  updated" if not d.get("error") else "  FAILED: "+d["error"]); sys.exit(1 if d.get("error") else 0)'
 else
   api -X POST "$BASE/dashboards" -H 'Content-Type: application/json' -d "$DASH_JSON" \
-    | py 'import json,sys; d=json.load(sys.stdin); print("  created" if not d.get("error") else "  FAILED: "+d["error"])'
+    | py 'import json,sys; d=json.load(sys.stdin); print("  created" if not d.get("error") else "  FAILED: "+d["error"]); sys.exit(1 if d.get("error") else 0)'
 fi
 
 # ---------------------------------------------------------- saved searches ----
@@ -159,12 +205,13 @@ print(next((x.get("id","") for x in json.load(sys.stdin)["result"] if x.get("nam
   if [ -n "$existing" ]; then echo "  '$name' exists"; return; fi
   api -X POST "$BASE/saved-searches" -H 'Content-Type: application/json' \
     -d "{\"name\":\"$name\",\"sourceId\":\"$sid\",\"select\":\"$select\",\"where\":\"\",\"whereLanguage\":\"sql\",\"orderBy\":\"$order\"}" \
-    | py 'import json,sys; d=json.load(sys.stdin); print("  created" if not d.get("error") else "  FAILED: "+d["error"])'
+    | py 'import json,sys; d=json.load(sys.stdin); print("  created" if not d.get("error") else "  FAILED: "+d["error"]); sys.exit(1 if d.get("error") else 0)'
 }
 
 echo "saved searches:"
-add_search "Peak minutes"      "$TOTAL_ID" "minute, concurrent"           "concurrent DESC"
-add_search "Busiest platforms" "$DIM_ID"   "minute, platform, concurrent" "concurrent DESC"
+add_search "Peak minutes (accurate)" "$ACC_ID"     "minute, concurrent"             "concurrent DESC"
+add_search "Busiest platforms"       "$ACC_DIM_ID" "minute, platform, concurrent"   "concurrent DESC"
+add_search "Busiest content"         "$ACC_DIM_ID" "minute, content_id, concurrent" "concurrent DESC"
 
 echo
 echo "Open HyperDX -> dashboard '$DASH_NAME'."

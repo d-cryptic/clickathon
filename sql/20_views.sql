@@ -47,3 +47,55 @@ SELECT
     uniqExactMerge(active_state) AS concurrent
 FROM cc_minute_stateless
 GROUP BY minute;
+
+-- ---------------------------------------------------------------------------
+-- THE ACCURATE MODEL. Minute-grain concurrency from session_intervals — the
+-- gap+pause hybrid built in 30_build_intervals.sql, not the stateless baseline.
+--
+-- This expands each active interval across the minutes it covers. That is the
+-- O(sessions x minutes) explosion the statement warns about, and it is NOT the
+-- serving path: cc_minute_delta (TODOS H3) is. At this size the expansion is
+-- ~140K rows and answers instantly, so it is a legitimate way to chart the real
+-- model today without waiting on H3. Swap the source to the delta table when it
+-- lands; the columns are identical on purpose.
+--
+-- A session spanning minutes M..N is counted in every one of them, and
+-- uniqExact dedupes a session whose intervals touch the same minute twice.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE VIEW v_concurrency_minute_intervals AS
+SELECT
+    toDateTime(m) AS minute,
+    uniqExact(video_session_id) AS concurrent
+FROM
+(
+    SELECT
+        video_session_id,
+        arrayJoin(range(
+            toUInt32(toStartOfMinute(interval_start)),
+            toUInt32(toStartOfMinute(interval_end)) + 1,
+            60
+        )) AS m
+    FROM session_intervals FINAL
+)
+GROUP BY minute;
+
+-- Same, split by the dimensions dashboards filter on.
+CREATE OR REPLACE VIEW v_concurrency_minute_intervals_dim AS
+SELECT
+    toDateTime(m) AS minute,
+    platform,
+    country,
+    content_id,
+    uniqExact(video_session_id) AS concurrent
+FROM
+(
+    SELECT
+        video_session_id, platform, country, content_id,
+        arrayJoin(range(
+            toUInt32(toStartOfMinute(interval_start)),
+            toUInt32(toStartOfMinute(interval_end)) + 1,
+            60
+        )) AS m
+    FROM session_intervals FINAL
+)
+GROUP BY minute, platform, country, content_id;

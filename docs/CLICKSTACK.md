@@ -95,18 +95,25 @@ Then set the time range to **2026-07-14 → 2026-07-26** before concluding anyth
 Both come from `sql/20_views.sql` and are registered with `timestampValueExpression = minute`, which
 is what makes `minute` the time axis.
 
-| Source | View | Grain |
-|---|---|---|
-| `Concurrency total (minute)` | `v_concurrency_minute_total` | one row per minute — the headline curve |
-| `Concurrency (minute)` | `v_concurrency_minute_stateless` | per (minute, platform, country, content_id) |
+| Source | View | Model | Grain |
+|---|---|---|---|
+| `Concurrency ACCURATE (minute)` | `v_concurrency_minute_intervals` | gap + pause | per minute — **the headline** |
+| `Concurrency ACCURATE by dimension` | `v_concurrency_minute_intervals_dim` | gap + pause | per (minute, platform, country, content_id) |
+| `Concurrency total (minute)` | `v_concurrency_minute_total` | stateless | per minute — the baseline |
+| `Concurrency (minute)` | `v_concurrency_minute_stateless` | stateless | per (minute, platform, country, content_id) |
 
 **Do not SUM `concurrent` across dimensions.** A session watching two content_ids appears under both;
 the total view re-merges the underlying states instead, which deduplicates. This is the same trap
 described in [ARCHITECTURE.md](ARCHITECTURE.md) — peak is not summable.
 
-These read the **stateless** model. When the gap-based model lands (TODOS H3), it gets its own view
-and its own source; the two are deliberately never merged behind one name, because comparing them is
-an explicit deliverable.
+Both models are charted side by side — the comparison is an explicit deliverable, so they are never
+merged behind one name. At the peak minute the accurate model reads **2,887** against the stateless
+**2,894**: the gap is backgrounded and paused time the accurate model excludes.
+
+The `_intervals` views expand each active interval across the minutes it covers. That is the
+O(sessions × minutes) explosion the statement warns about and is **not** the serving path —
+`cc_minute_delta` (TODOS H3) is. At 30,769 intervals it answers in ~60 ms, so it charts the real
+model today; swap the source to the delta table when H3 lands, the columns match on purpose.
 
 ## Verified
 
@@ -135,8 +142,14 @@ POST /clickhouse-proxy?query=... with header x-hyperdx-connection-id
 
 ## The dashboard
 
-`tools/clickstack-cloud.sh` creates **SonyLIV concurrency** with three line tiles: all viewers, by
-platform, by content. It runs the payload through `POST /clickstack/dashboards/validate` *before*
+`tools/clickstack-cloud.sh` creates **SonyLIV concurrency**: five line tiles — accurate headline,
+stateless baseline, then accurate split by platform / content / country — plus three dashboard
+**filters** (Platform, Country, Content) wired via `appliesToSourceIds` so one control drives every
+dimensional tile. The two total-only sources are deliberately excluded from `appliesToSourceIds`:
+they have no dimension columns, so naming them would make the filter error rather than no-op.
+
+A re-run **PUTs** the dashboard rather than skipping it, so the definition in the script is the
+source of truth and a hand-edit in the UI cannot silently outlive it. It runs the payload through `POST /clickstack/dashboards/validate` *before*
 creating, so a malformed tile fails with a JSON path rather than as a blank panel mid-demo.
 
 Schema notes, from the spec rather than guesswork: `ClickStackCreateDashboardRequest` requires
@@ -159,5 +172,8 @@ sqlTemplate, displayType}` if a tile ever outgrows the builder.
 - `-u "$ID:$SECRET"` must be **quoted at the call site**. zsh does not word-split an unquoted
   variable holding `-u id:secret`, so curl gets one argument and the API returns
   `401 "Key is not found"` — which reads exactly like a bad key and sends you debugging the wrong thing.
+- **Create and update validate against different schemas.** `filters[]` on POST/validate is
+  `ClickStackFilterInput`, which *forbids* `id`; on PUT it is `ClickStackFilter`, which *requires*
+  it. The script emits both shapes from one definition.
 - `/clickhouse-proxy` requires **POST** with the query in the URL. GET returns 405; a missing
   `x-hyperdx-connection-id` header returns a Zod validation error.
