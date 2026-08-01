@@ -23,13 +23,14 @@ touched ten files.
 |---|---|---|---|
 | Q2 | `fix/incremental-publisher-tiers` | `sql/12_publish.sql`, `tools/publish*.sh` | 0015 |
 | Q12 | `feat/benchmark-evidence-bundle` | `evidence/benchmark/`, `.claude/commands/bench.md` | — |
-| Q4 | `docs/scope-claims` | `TODOS.md`, `WALKTHROUGH.md`, `docs/ARCHITECTURE.md` | — |
+| ~~Q4·Q7~~ | ~~`docs/scope-claims`~~ | **MERGED** cf8f1f6 — also converged dev with main (6 commits) | — |
 | Q3·Q5 | `docs/validation-dossiers-grain` | `doubts/05-*.md`, `evidence/dedup.txt` | 0016 |
 | Q13 | `feat/clickstack-dashboards-sources` | `tools/clickstack-*.sh`, `docs/CLICKSTACK*.md`, `evidence/clickstack/` | — |
 | Q14 | `feat/demo-rehearsal` | `demo/`, `evidence/demo/` | — |
 | Q15 | `fix/ci-and-coverage` | `Makefile`, `.golangci.yml`, Go **test** files | — |
 | Q16 | `fix/target-resolution` | `internal/config/`, `tools/ch`, `.env.example` | **0018** |
 | Q18 | `chore/unseen-day-rehearsal` | `docs/RUNBOOK_UNSEEN.md`, `tools/unseen-*.sh`, `evidence/unseen/` | — |
+| Q19 | `docs/headline-assumption-audit` | `evidence/adversarial/`, `doubts/06+` — attack assumptions the gate shares with the model | — |
 | — | `feat/problem-space-research` | idle · 9 unmerged commits · **competing design, needs a human call** | — |
 
 **Held back deliberately.** Q8–Q11 (publisher crash window, concurrent publishers, `marked_at`
