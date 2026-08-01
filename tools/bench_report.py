@@ -60,7 +60,9 @@ def pk_granules(name: str) -> str:
     found: list[str] = []
     for i, line in enumerate(lines):
         if "PrimaryKey" in line:
-            for follow in lines[i + 1 : i + 8]:
+            # the Keys list under PrimaryKey can be several lines long (this
+            # schema has 4-column sort keys), so look far enough ahead
+            for follow in lines[i + 1 : i + 13]:
                 m = re.search(r"Granules:\s+(\d+/\d+)", follow)
                 if m:
                     found.append(m.group(1))
