@@ -39,7 +39,22 @@
       from `ev_raw` alone (window functions, not the model's arraySplit) and compares: peak 2,887,
       both boundaries, two arbitrary — all zero delta. Evidence in `evidence/reconcile.txt`.
       Negative-tested: injecting one bad delta row makes it exit 1.
-- [ ] **[H4]** Finalizer + watermark; truncation test proving open-session absorption.
+- [~] **[H4/H8]** Truncation test proving open-session absorption — **built and run**:
+      `tools/truncation-test.sh` + `sql/70_truncation_test.sql`, isolated in the `sonyliv_trunc`
+      database, evidence in `evidence/truncation.txt`. Cuts the stream at the peak (52.6% of
+      sessions open), absorbs 447,081 late events by ADR 0006 correction-by-diff, compares against
+      a from-scratch build on every minute. **It does NOT converge as shipped** — +37 on the peak
+      minute (2,924 vs 2,887). ADR 0006's arithmetic is exact; the fault is the version column.
+      **Remaining for H4: the finalizer + watermark itself.** Set `W = 2400s` (measured: the 2,081s
+      straggler tail binds, not truncation, which only damages the last 60s).
+- [ ] **[H4-fix]** `session_intervals` → `ReplacingMergeTree(build_version)` with a monotonic
+      `build_version UInt64`. `ReplacingMergeTree(interval_end)` keeps the LARGEST end, which assumes
+      re-derivation only extends; a provisional interval's `TAIL_S=60s` grace can overshoot the true
+      end, so the stale row wins forever (316 intervals, 315 stuck at `is_open=1`). Proven to fix it
+      in the truncation test. **Schema change — ask the operator before applying to `sonyliv`.**
+- [ ] **[H4-fix]** `cc_minute_delta.starts`/`ends` → `SimpleAggregateFunction(sum, Int64)`. As
+      `UInt64` they cannot carry ADR 0006's negative corrective row: ClickHouse wraps it to
+      `2^64-n` silently, so `max()` returns 1.8e19 and any pre-merge row read is garbage.
       ← **MVP LINE: sealed tier + stateless baseline is a complete submission from here**
 - [ ] **[H4]** `PROJECTION` on `ev_raw` ordered by `video_session_id` — the finalizer and the
       straggler path are point lookups by session, which ADR 0002's key no longer serves. ADR 0002
