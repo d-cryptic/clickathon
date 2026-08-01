@@ -38,3 +38,22 @@ ok  	github.com/d-cryptic/clickathon/internal/otelemit	1.574s
 ok  	github.com/d-cryptic/clickathon/internal/pipelinehealth	2.356s
 go build  -trimpath -ldflags '-s -w -X main.version=7551e1f-dirty' -o bin/sonyliv ./cmd/sonyliv
 exit: 0
+
+== CONFIRMATION RE-RUN at the final branch state ==
+commit: 0cd4199   tree: 1 modified files
+date: 2026-08-01T21:25:05Z
+(Commits since the run above are docs/evidence only — no Go, no SQL:
+ docs/PROMOTION.md docs/RUNBOOK_UNSEEN.md docs/adr/0018-one-target-one-database-no-cross-target-fallback.md evidence/promotion/w1/02b-make-ci-rerun.txt evidence/promotion/w1/04d-reconcile-after-rebuild-branch-gate-FAILED.txt evidence/promotion/w1/04e-reconcile-after-rebuild-dev-gate-PASS.txt evidence/promotion/w1/04f-spec-skew-diagnosis.txt evidence/promotion/w1/04g-spec-skew-PROVEN-by-isolation.txt evidence/promotion/w1/04g-variantA-gate-output-PASS.txt evidence/promotion/w1/06-docs-current.txt evidence/reconcile.txt )
+
+go mod tidy
+go vet ./...
+golangci-lint run ./...
+0 issues.
+CGO_ENABLED=1 go test -race -count=1 ./...
+?   	github.com/d-cryptic/clickathon/cmd/sonyliv	[no test files]
+?   	github.com/d-cryptic/clickathon/internal/chdb	[no test files]
+ok  	github.com/d-cryptic/clickathon/internal/config	1.620s
+ok  	github.com/d-cryptic/clickathon/internal/otelemit	2.014s
+ok  	github.com/d-cryptic/clickathon/internal/pipelinehealth	2.451s
+go build  -trimpath -ldflags '-s -w -X main.version=0cd4199-dirty' -o bin/sonyliv ./cmd/sonyliv
+exit: 0
