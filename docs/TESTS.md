@@ -51,7 +51,7 @@ Run by `tools/build-model.sh` on every rebuild; it fails loudly rather than prin
 
 | Test | What it catches |
 |---|---|
-| Delta serving layer vs interval expansion, **every minute** | any error in hour-clipping, merging or the running sum. Currently PASS on 3,725 minutes, peak 2,887 |
+| Delta serving layer vs interval expansion, **every minute** | any error in hour-clipping, merging or the running sum. Currently PASS on 3,732 minutes, peak 2,917 *(re-run 2026-08-02 on a post-ADR-0009 isolated build; pre-fix it read 3,725 / 2,887)* |
 | **Hour-clipping, interior hour** (ADR 0003) | an interval spanning >= 3 hours checked at a minute inside the MIDDLE hour. Worked case: `20:59:48 -> 22:04:49` must emit `+1 @20:59`, `+1 @21:00`, `+1 @22:00`, `-1 @22:05` and NO close in hours 20 or 21 |
 | Same-minute interval merge | a session that pauses and resumes inside one minute. 4,797 sessions (44%) hit this; without the merge the delta model double counts and 556 of 1,903 minutes were wrong |
 
@@ -75,7 +75,7 @@ than reimplemented, so the test cannot drift from the model it tests.
 
 | Sub-check | What it catches | Status |
 |---|---|---|
-| control build vs production, every minute | non-determinism in the derivation | PASS — 2,887 @10:56 and 2,450 @11:10, exact |
+| control build vs production, every minute | non-determinism in the derivation | PASS — 2,887 @10:56 and 2,450 @11:10, exact *(measured pre-ADR-0009; those minutes now read 2,917 / 2,483 — see `evidence/reconcile.txt`)* |
 | incremental absorption vs control, every minute | anything that makes incremental ≠ rebuild | **FAIL as shipped** — 3 of 1,578 minutes, **+37 at the peak** |
 | delta arithmetic isolated from interval state | whether ADR 0006's negate-and-re-emit is itself lossy | PASS — exact on all 1,578 minutes |
 | versioned `session_intervals` vs control | that the proposed fix actually fixes it | PASS — row for row identical, converges on all 1,578 minutes |

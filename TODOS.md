@@ -38,11 +38,14 @@
       events up to **2,081 s** after VideoSessionEnd. Watermark W >= ~2,100 s.
 - [x] **[H2]** `session_intervals` built — `sql/30_build_intervals.sql`. 30,769 intervals over all
       10,866 sessions, 0 invalid. Hand-verified against a raw timeline; reconcile at the peak minute
-      gives 2,886 active vs 3,708 naive session-overlap, with 0 unbacked sessions.
+      gives 2,886 active vs 3,708 naive session-overlap, with 0 unbacked sessions. *(Counts as at
+      completion; ADR 0009 later moved this to 30,323 intervals and peak 2,917.)*
 - [x] **[H2a]** **Unclosed-pause rule — RESOLVED into a switch.** `UNCLOSED_PAUSE_TO_RUN_END`
       (1 = conservative, shipped; 0 = permissive) in `sql/30_build_intervals.sql` AND
       `sql/90_reconcile.sql` — both, in lockstep. Measured: PEAK 2,887 vs 3,018, +4.5% on the graded
-      number (hours +5.09%). Gate verified in all three states. Still ask mentor Q2. Original:
+      number (hours +5.09%). *(Both arms measured at `cf80acc`, pre-ADR-0009; the conservative arm
+      is now 2,917 / 1,978.1 h and the permissive arm has not been re-run — spread is historical.)*
+      Gate verified in all three states. Still ask mentor Q2. Original:
 - [~] **[H2a]** ~~DECIDE~~ unclosed-pause rule. 23% of pauses never resume. Both rules now MEASURED
       end to end: conservative (shipped) 1,949.3 h vs permissive 2,048.6 h — **+99.3 h, 5.09%**.
       The earlier "~19,800 min" estimate was ~3x too high; that time is mostly already excluded by the
@@ -54,17 +57,20 @@
 - [x] **[H3]** `cc_minute_delta` hour-clipped (ADR 0003) + `v_concurrency_minute` — **done**.
       `sql/40_deltas.sql`; 24,958 delta rows from 30,769 intervals. Reconcile PASSES on all 3,725
       minutes against the interval expansion, peak 2,887 both ways. Serving reads 299 KB vs 2.55 MB
-      for the expansion — 8.5x less I/O, 23 ms. Rebuild: `tools/build-model.sh`.
+      for the expansion — 8.5x less I/O, 23 ms. Rebuild: `tools/build-model.sh`. *(As at completion;
+      post-ADR-0009 the same check reads 3,732 minutes, peak 2,917 both ways.)*
 - [x] **[H4]** `/reconcile` passing on 5 minutes — **PASSES**. `tools/reconcile.sh` recomputes truth
       from `ev_raw` alone (window functions, not the model's arraySplit) and compares: peak 2,887,
-      both boundaries, two arbitrary — all zero delta. Evidence in `evidence/reconcile.txt`.
+      both boundaries, two arbitrary — all zero delta *(as at completion; the gate now covers
+      17,028 minutes and reads peak 2,917 post-ADR-0009)*. Evidence in `evidence/reconcile.txt`.
       Negative-tested: injecting one bad delta row makes it exit 1.
 - [~] **[H4/H8]** Truncation test proving open-session absorption — **built and run**:
       `tools/truncation-test.sh` + `sql/70_truncation_test.sql`, isolated in the `sonyliv_trunc`
       database, evidence in `evidence/truncation.txt`. Cuts the stream at the peak (52.6% of
       sessions open), absorbs 447,081 late events by ADR 0006 correction-by-diff, compares against
       a from-scratch build on every minute. **It does NOT converge as shipped** — +37 on the peak
-      minute (2,924 vs 2,887). ADR 0006's arithmetic is exact; the fault is the version column.
+      minute (2,924 vs 2,887 — both as measured at `388a845`, before ADR 0009 moved the peak to
+      2,917). ADR 0006's arithmetic is exact; the fault is the version column.
       **Remaining for H4: the finalizer + watermark itself.** Set `W = 2400s` (measured: the 2,081s
       straggler tail binds, not truncation, which only damages the last 60s).
 - [x] **[H4-fix]** DONE (388a845) `session_intervals` → `ReplacingMergeTree(build_version)` with a monotonic

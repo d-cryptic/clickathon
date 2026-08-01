@@ -107,12 +107,13 @@ the total view re-merges the underlying states instead, which deduplicates. This
 described in [ARCHITECTURE.md](ARCHITECTURE.md) — peak is not summable.
 
 Both models are charted side by side — the comparison is an explicit deliverable, so they are never
-merged behind one name. At the peak minute the accurate model reads **2,887** against the stateless
-**2,894**: the gap is backgrounded and paused time the accurate model excludes.
+merged behind one name. At the peak minute the accurate model reads **2,917** against the stateless
+**2,894** (re-verified live 2026-08-02, post-ADR-0009; the two models miss different things, so the
+gap runs in both directions on other minutes).
 
 The `_intervals` views expand each active interval across the minutes it covers. That is the
 O(sessions × minutes) explosion the statement warns about and is **not** the serving path —
-`cc_minute_delta` (TODOS H3) is. At 30,769 intervals it answers in ~60 ms, so it charts the real
+`cc_minute_delta` (TODOS H3) is. At 30,323 intervals (post-ADR-0009) it answers in ~60 ms, so it charts the real
 model today; swap the source to the delta table when H3 lands, the columns match on purpose.
 
 ## Verified

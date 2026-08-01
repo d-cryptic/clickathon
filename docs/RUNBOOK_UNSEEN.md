@@ -10,7 +10,8 @@
 > this document. Evidence for every claim: [`evidence/unseen-rehearsal.txt`](../evidence/unseen-rehearsal.txt).
 
 **Rehearsed:** 2026-08-01, holdout day 2026-07-25 (204 sessions, 30,097 events, peak 13) and a
-full-size replay of 2026-07-26 (10,524 sessions, 849,888 events, peak 2,887). Both gates green.
+full-size replay of 2026-07-26 (10,524 sessions, 849,888 events, peak 2,887 — run on the pre-ADR-0009
+build; the same day now models 2,917). Both gates green.
 
 ---
 
@@ -189,12 +190,23 @@ outside the day (583 events dropped), and the day-file build differs from the fu
 events across 7 sessions. If the unseen day arrives as a standalone file, its first and last minutes
 are approximations, and saying so is better than being caught.
 
-### A8 — "the peak minute" is ambiguous under ties, and the tiers disagree
+### A8 — "the peak minute" is ambiguous under ties — RESOLVED, but the script still needs a patch
 
 On 2026-07-25 four minutes tie at 13 (15:51, 16:35, 16:55, 16:59). `v_concurrency_minute_delta_total`
-answers **16:59**; `cc_hour_agg` answers **16:35**. Same peak value, two different answers to *when*.
-2026-07-26's peak (2,887) is unique, so this never surfaced. Phase 7 now prints the tie count — if it
-is > 1, state the tie-breaking rule with the answer.
+answered **16:59**; `cc_hour_agg` answered **16:35**. Same peak value, two different answers to *when*.
+2026-07-26's peak (2,887 pre-ADR-0009, 2,917 after) is unique, so this never surfaced.
+
+[ADR 0014](adr/0014-peak-minute-ties-resolve-to-the-earliest-minute.md) settles it: **the peak minute
+is the EARLIEST minute at which the peak level is reached**, at every tier. The serving layer now
+applies that rule everywhere — the answer for 2026-07-25 is **15:51**. Ties are not rare: 5 of the 7
+days in the provided file have a tied headline day peak, and 49.0% of stored hour rows have two or
+more change points at the hour max.
+
+**Still outstanding:** the two display queries in `tools/unseen-run.sh` (phases 6 and 7) use a bare
+`argMax` and are the actual source of the disagreement — that file was owned by another workstream
+when ADR 0014 landed, so the ADR carries the diff sketch instead of the fix. **Apply it before the
+unseen day runs**, or phase 7 will keep printing an arbitrary minute as the submitted answer.
+Phase 7 also prints the tie count; if it is > 1, state the rule alongside the answer.
 
 ### A9 — content metadata is assumed to be re-delivered
 

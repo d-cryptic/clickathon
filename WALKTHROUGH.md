@@ -3,7 +3,7 @@
 > **Summary:** Click-a-thon India 2026 · SonyLIV **foreground-only concurrency**. Built end to end on
 > ClickHouse Cloud: session, user and content concurrency off a hour-clipped delta serving layer,
 > all 7 raw dimensions, rolling/tumbling windows, ClickStack both charting and self-observing. Peak
-> **2,887 @ 2026-07-26 10:56**; naive session-span would say 3,708. The correctness gate compares
+> **2,917 @ 2026-07-26 10:56**; naive session-span would say 3,708. The correctness gate compares
 > **every minute in the data — 17,028 of them, idle ones included** — against truth recomputed from
 > `ev_raw` alone, derives its own target minutes so it works on any day, and has been negative-tested
 > to prove it fails when it should. The remaining gap is architectural: aggregates are
@@ -26,8 +26,12 @@ in the final hours.
 Full statement: [`docs/upstream/PROBLEM_STATEMENT.md`](docs/upstream/PROBLEM_STATEMENT.md).
 
 **The headline result:** naive session-span overlap counts **2,976.9 hours** of watch time. The
-foreground-only model counts **1,949.3 hours** — **34.5% of apparent watch time is backgrounded or
-paused**. At the peak minute: 3,708 naive vs **2,887** actual, a 22.1% over-count eliminated.
+foreground-only model counts **1,978.1 hours** — **33.6% of apparent watch time is backgrounded or
+paused**. At the peak minute: 3,708 naive vs **2,917** actual, a 21.3% over-count eliminated.
+
+> Re-baselined 2026-08-01 after [ADR 0009](docs/adr/0009-same-second-resume-and-deterministic-attribution.md)
+> fixed a same-second tie in the pause rule. Previously 2,887 / 1,949.3 h / 34.5% / 22.1%.
+> Source of truth: `evidence/reconcile.txt`.
 
 ---
 
@@ -130,20 +134,20 @@ Everything here was run, not reasoned about.
 
 | Claim | Evidence |
 |---|---|
-| **The gate passes** — truth from `ev_raw` = serving layer | `evidence/reconcile.txt` · 5 minutes, all delta 0 |
+| **The gate passes** — truth from `ev_raw` = serving layer | `evidence/reconcile.txt` · **17,028 minutes**, 0 mismatched, `max_abs_diff` 0 |
 | Gate actually fails when it should | inject one bad delta row → exit 1; rebuild → exit 0 |
-| Delta layer = independent interval expansion | 3,725 minutes, **0** mismatches |
-| Hour tier = minute tier | 98 hours, **0** mismatches; day peak 2,887 |
+| Delta layer = independent interval expansion | **3,732** minutes, **0** mismatches *(re-run 2026-08-02, isolated scratch build — `evidence/promotion/w2/`)* |
+| Hour tier = minute tier | 98 hours, **0** mismatches; day peak 2,917 |
 | Hour-clipping is correct | interval `20:59:48→22:04:49` emits `+1@20:59`, `+1@21:00`, `+1@22:00`, `-1@22:05`, no close in hours 20/21 |
 | Serving is cheaper than expansion | 299 KB / 23 ms vs 2.55 MB / 56 ms — **8.5×** |
-| Charts render real data | HyperDX `clickstack_timeseries`: 61 → **2,887** → 7, 28 ms |
+| Charts render real data | HyperDX `clickstack_timeseries`: 61 → **2,887** → 7, 28 ms *(captured pre-ADR-0009; the post-fix peak the same chart now serves is 2,917)* |
 | Load is exact | `ev_raw` 905,558 = source rows; `content_dim` 33,464 |
 | From-scratch rebuild is deterministic | isolated DB reproduces production exactly |
-| User concurrency correct | peak 2,815 vs session 2,887; `uniqExactMerge` 9,517 = 9,517 distinct users |
-| Content concurrency correct | hour-peak reconcile, **0** mismatches over 6,764 rows |
-| Rolling/tumbling windows correct | vs brute-force self-join, **0** mismatches at 5/15/60 min |
-| Duplicates are inert | full derivation run raw vs deduped: identical intervals, **0** of 3,725 minutes differ |
-| Absorption converges (after the fix) | incremental = clean rebuild, row for row, all 1,578 minutes |
+| User concurrency correct | peak **2,844** vs session **2,917**; **9,531** distinct users *(re-measured 2026-08-02 direct from `session_intervals` on an isolated post-ADR-0009 build — `evidence/promotion/w2/`)* |
+| Content concurrency correct | hour-peak reconcile, **0** mismatches over 6,764 rows — ⚠️ recorded run predates ADR 0009 (model change); treat as *believed*, not verified, until re-run |
+| Rolling/tumbling windows correct | vs brute-force self-join, **0** mismatches at 5/15/60 min — ⚠️ recorded run predates ADR 0009 and ADR 0014 (which added `peak_*_minute` columns; their tie-break is verified in `evidence/tie-break-determinism.txt`); treat as *believed*, not verified |
+| Duplicates are inert | full derivation run raw vs deduped: identical intervals, **0** of 3,725 minutes differ *(measured at `4a89399`, pre-ADR-0009)* |
+| Absorption converges (after the fix) | incremental = clean rebuild, row for row, all 1,578 minutes *(pre-ADR-0009, not re-run)* |
 
 ---
 
@@ -151,7 +155,8 @@ Everything here was run, not reasoned about.
 
 ### Two defects — found by test, both now FIXED
 
-1. **Incremental absorption did not converge** — overcounted the peak minute by 37 (2,924 vs 2,887).
+1. **Incremental absorption did not converge** — overcounted the peak minute by 37 (2,924 vs 2,887,
+   both figures as measured at `388a845`, before ADR 0009 moved the peak to 2,917).
    `session_intervals` was `ReplacingMergeTree(interval_end)`, which assumes re-derivation only ever
    *extends* an interval. It doesn't: 316 intervals ran up to 60 s too long, 315 stuck at
    `is_open=1`. Now versioned on a monotonic `build_version` — incremental equals a clean rebuild on
@@ -188,8 +193,10 @@ replay — it differs in `subtitle_language` (`UNK` vs `OFF`). That is harmless 
 
 ### Decisions only a human can make
 
-- **Unclosed-pause rule** — 23% of pauses never resume. Conservative (shipped) 1,949.3 h vs permissive
-  2,048.6 h: **+99.3 h, 5.09%**. Unknowable from the file.
+- **Unclosed-pause rule** — 23% of pauses never resume. Conservative (shipped) vs permissive was
+  measured at `cf80acc` as 1,949.3 h vs 2,048.6 h: **+99.3 h, 5.09%**. ADR 0009 has since moved the
+  conservative arm to **1,978.1 h**; the permissive arm has not been re-run, so the spread is
+  historical. Unknowable from the file either way.
 - **Local container schema drift** — local `cc_minute_stateless` is `uniq`, Cloud is `uniqExact`.
   Fixing needs `docker compose down -v`, which destroys the local volume.
 - **Team Captain** — only they can submit.

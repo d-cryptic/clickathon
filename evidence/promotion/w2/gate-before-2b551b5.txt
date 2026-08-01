@@ -1,0 +1,33 @@
+GATE 'BEFORE' — main HEAD 2b551b5's sql/90_reconcile.sql (pre-ADR-0009, strict >) run read-only
+against the live sonyliv service, 2026-08-02. Command:
+  git show 2b551b5:sql/90_reconcile.sql > /tmp/90_before.sql
+  curl -sS "https://<CH_HOST>:<CH_PORT>/?database=sonyliv&default_format=PrettyCompact" --user ... --data-binary @/tmp/90_before.sql
+
+    ┌─ord─┬─scope────┬─c1─────────────────────┬─c2─────────────┬─c3──────────────┬─c4────────┬─verdict──┐
+ 1. │   0 │ SUMMARY  │ minutes_compared=17028 │ mismatched=177 │ max_abs_diff=39 │ peak=2887 │ MISMATCH │
+ 2. │   1 │ MISMATCH │ 2026-07-26 10:47:00    │ 2526           │ 2554            │ 28        │ MISMATCH │
+ 3. │   1 │ MISMATCH │ 2026-07-26 10:52:00    │ 2730           │ 2758            │ 28        │ MISMATCH │
+ 4. │   1 │ MISMATCH │ 2026-07-26 10:55:00    │ 2833           │ 2860            │ 27        │ MISMATCH │
+ 5. │   1 │ MISMATCH │ 2026-07-26 10:56:00    │ 2887           │ 2917            │ 30        │ MISMATCH │
+ 6. │   1 │ MISMATCH │ 2026-07-26 10:57:00    │ 2854           │ 2885            │ 31        │ MISMATCH │
+ 7. │   1 │ MISMATCH │ 2026-07-26 10:58:00    │ 2828           │ 2855            │ 27        │ MISMATCH │
+ 8. │   1 │ MISMATCH │ 2026-07-26 10:59:00    │ 2857           │ 2890            │ 33        │ MISMATCH │
+ 9. │   1 │ MISMATCH │ 2026-07-26 11:00:00    │ 2836           │ 2873            │ 37        │ MISMATCH │
+10. │   1 │ MISMATCH │ 2026-07-26 11:01:00    │ 2826           │ 2865            │ 39        │ MISMATCH │
+11. │   1 │ MISMATCH │ 2026-07-26 11:02:00    │ 2810           │ 2846            │ 36        │ MISMATCH │
+12. │   1 │ MISMATCH │ 2026-07-26 11:03:00    │ 2771           │ 2803            │ 32        │ MISMATCH │
+13. │   1 │ MISMATCH │ 2026-07-26 11:04:00    │ 2763           │ 2789            │ 26        │ MISMATCH │
+14. │   1 │ MISMATCH │ 2026-07-26 11:05:00    │ 2703           │ 2732            │ 29        │ MISMATCH │
+15. │   1 │ MISMATCH │ 2026-07-26 11:06:00    │ 2650           │ 2679            │ 29        │ MISMATCH │
+16. │   1 │ MISMATCH │ 2026-07-26 11:07:00    │ 2612           │ 2645            │ 33        │ MISMATCH │
+17. │   1 │ MISMATCH │ 2026-07-26 11:08:00    │ 2535           │ 2571            │ 36        │ MISMATCH │
+18. │   1 │ MISMATCH │ 2026-07-26 11:09:00    │ 2512           │ 2547            │ 35        │ MISMATCH │
+19. │   1 │ MISMATCH │ 2026-07-26 11:10:00    │ 2450           │ 2483            │ 33        │ MISMATCH │
+20. │   1 │ MISMATCH │ 2026-07-26 11:11:00    │ 2358           │ 2386            │ 28        │ MISMATCH │
+21. │   1 │ MISMATCH │ 2026-07-26 11:12:00    │ 2296           │ 2324            │ 28        │ MISMATCH │
+22. │   2 │ sample   │ 2026-07-14 15:43:00    │ 1              │ 1               │ 0         │ PASS     │
+23. │   2 │ sample   │ 2026-07-16 12:35:00    │ 0              │ 0               │ 0         │ PASS     │
+24. │   2 │ sample   │ 2026-07-17 08:56:00    │ 0              │ 0               │ 0         │ PASS     │
+25. │   2 │ sample   │ 2026-07-26 10:56:00    │ 2887           │ 2917            │ 30        │ MISMATCH │
+26. │   2 │ sample   │ 2026-07-26 11:30:00    │ 193            │ 197             │ 4         │ MISMATCH │
+    └─────┴──────────┴────────────────────────┴────────────────┴─────────────────┴───────────┴──────────┘

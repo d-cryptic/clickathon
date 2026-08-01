@@ -59,9 +59,10 @@ activity runs at 1.17 beats/min — a quarter of the active rate, so neither cle
 clearly gone.
 
 **Ask:** Does an unclosed pause stay paused to the end of its run, or end at the next event?
-**Why it matters:** run end to end over the real file, the two rules differ by **99.3 h — 5.09%** of
-counted watch time (conservative 1,949.3 h vs permissive 2,048.6 h). This is the single largest
-unresolved number in the model. *(An earlier draft of this line said ~19,800 minutes / 330 h, taken
+**Why it matters:** run end to end over the real file, the two rules differed by **99.3 h — 5.09%**
+of counted watch time (conservative 1,949.3 h vs permissive 2,048.6 h, both arms measured at
+`cf80acc`, before ADR 0009 moved the conservative arm to 1,978.1 h; the permissive arm has not been
+re-run, so the spread is historical). This is among the largest unresolved numbers in the model. *(An earlier draft of this line said ~19,800 minutes / 330 h, taken
 from the raw time following an unclosed pause; that overstated it ~3×, because most of that time is
 already excluded by the gap rule closing the run. Corrected per
 [ADR 0007](adr/0007-gate-answers-pause-needs-explicit-handling.md).)*
