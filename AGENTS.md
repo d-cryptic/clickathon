@@ -36,6 +36,9 @@ what is verified, what is broken, and what is still missing, in one page.
 | Record a design decision | [docs/adr/](docs/adr/) |
 | **Understand the model in depth, with diagrams** | [docs/artifacts/](docs/artifacts/) — open the newest `.html` in a browser |
 | Know what we must **ask a mentor** (and what we assumed meanwhile) | [docs/MENTOR_QUESTIONS.md](docs/MENTOR_QUESTIONS.md) ← **every unanswered one is a silent-failure risk** |
+| **What happened in the last session, and every bug it found** | [docs/SESSION-2026-08-01.md](docs/SESSION-2026-08-01.md) |
+| **Run the unseen day** | [docs/RUNBOOK_UNSEEN.md](docs/RUNBOOK_UNSEEN.md) — read BEFORE the data drops |
+| Observability / what we emit | [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) |
 | Leave feedback for the operator | [docs/AGENT_FEEDBACK.md](docs/AGENT_FEEDBACK.md) |
 
 ## Doc conventions

@@ -6,6 +6,17 @@
 
 ## Now
 
+- [ ] **[GATE]** **Fix `sql/90_reconcile.sql` — nothing matters more.** Target minutes are
+      2026-07-26 LITERALS: on another day it returns zero rows and `tools/reconcile.sh` prints
+      PASSED. It also never compares an IDLE minute (207 of 1,364 on the holdout) — proven by
+      fabricating 500 viewers at an idle minute and watching the gate pass. Derive the minutes from
+      the data, assert the row count, add a spine. See docs/SESSION-2026-08-01.md §4.
+- [ ] **[H*]** Continuously updated aggregates. We batch-rebuild; only `mv_stateless` and
+      `mv_user_minute` are real MVs. This is the statement's "only works at hackathon size" line.
+- [ ] **[FIX]** Re-loading the same CSV DOUBLES the data — `non_replicated_deduplication_window`
+      is for non-replicated MergeTree and Cloud is SharedMergeTree.
+- [ ] **[FIX]** `CH_DATABASE` in the environment is silently ignored by every tool.
+
 - [x] **[H0]** Provision ClickHouse Cloud service; fill `.env`; verify against Cloud
       Cloud is live: db `sonyliv`, schema applied, `sonyliv verify -target cloud` green.
 - [x] **[H0]** Datasets into `data/` (`tools/fetch_data.sh`, sha256-pinned); `tools/load.sh`

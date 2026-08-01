@@ -1,15 +1,18 @@
 # WALKTHROUGH — where this project actually stands
 
-> **Summary:** Click-a-thon India 2026 · SonyLIV **foreground-only concurrency**. The pipeline is
-> built end to end on ClickHouse Cloud (`sonyliv`) and the correctness gate **passes**: concurrency
-> recomputed from `ev_raw` matches the serving layer exactly on five sampled minutes, peak **2,887 @
-> 2026-07-26 10:56**. Charts are live in HyperDX. Session, **user** and **content** concurrency all
-> serve off the delta layer, with rolling and tumbling windows. The absorption bug is **fixed**. What
-> remains is one architectural gap — aggregates are **batch-rebuilt, not continuously updated** — plus
-> 7 of 10 filter dimensions dropped at derivation. Read [What is NOT done](#what-is-not-done) before
-> believing anything is finished. Rebuild with `make model`; prove it with `make reconcile`.
+> **Summary:** Click-a-thon India 2026 · SonyLIV **foreground-only concurrency**. Built end to end on
+> ClickHouse Cloud: session, user and content concurrency off a hour-clipped delta serving layer,
+> all 7 raw dimensions, rolling/tumbling windows, ClickStack both charting and self-observing. Peak
+> **2,887 @ 2026-07-26 10:56**; naive session-span would say 3,708. **Read this before the numbers:
+> the correctness gate is dataset-specific** — its five target minutes are 2026-07-26 literals, so on
+> any other day it returns zero rows and still reports PASSED, and it never compares an idle minute.
+> It is green here and that is genuine, but it does not generalise, so fix it before trusting any
+> "verified" claim below. The other open gap is architectural: aggregates are **batch-rebuilt, not
+> continuously updated**. Rebuild `make model`; prove it `make reconcile`.
 
-**Last verified:** 2026-08-01 · commits through `4a89399` · ClickHouse Cloud 26.2.1.525
+**Last verified:** 2026-08-01 · commits through `1dee090` · ClickHouse Cloud 26.2.1.525
+
+Full session record, including every bug found and every claim corrected: [`docs/SESSION-2026-08-01.md`](docs/SESSION-2026-08-01.md).
 
 ---
 
@@ -171,9 +174,12 @@ Found late — `tools/fetch_data.sh` originally pulled only the CSVs, so
 | Time-window trend | core aggregation | **done** |
 | Dedup of repeated events | README step 3 | **proven unnecessary** — see below |
 | **"Publish continuously updated aggregates"** | README step 4 | **STILL MISSING — the biggest gap.** We batch-rebuild via `make model`; only `mv_stateless` and `mv_user_minute` are real MVs |
-| Only **3 of 10** filter dimensions survive derivation | dataset_details ("should work even if dimensions increase") | **still missing** — `app_version`, `audio_language`, `subtitle_language`, `player_version` are dropped in `30_build_intervals.sql` |
-| H7 OTLP self-instrumentation | ClickStack "meaningful integration" bar | nothing of ours emits OTLP; ClickStack is read-only charting |
-| Unseen-day dry run + evidence packaging | "no pipeline evidence, no credit" | not rehearsed |
+| All 10 filter dimensions | dataset_details ("should work even if dimensions increase") | **done** — 7 raw carried, 3 via `dict_content`. Row count is hard-bounded at 36,930 regardless of dimension count |
+| H7 OTLP self-instrumentation | ClickStack "meaningful integration" bar | **done** — `sonyliv observe` |
+| Unseen-day dry run + evidence packaging | "no pipeline evidence, no credit" | **done** — `tools/unseen-run.sh`, ~2.5 min for a 1 GB day |
+| **THE GATE IS DATASET-SPECIFIC** | correctness is scoring criterion #1 | **BROKEN** — literal target minutes, zero rows on another day still reports PASSED; idle minutes never compared |
+| **Re-loading a CSV doubles the data** | — | **BROKEN** — the claimed idempotency setting is for non-replicated MergeTree; Cloud is SharedMergeTree |
+| `CH_DATABASE` env var silently ignored | — | **BROKEN** — a retarget appears to work and writes to production |
 
 **On dedup:** the 4,210 duplicate rows are *provably inert* — the full derivation run raw vs
 deduplicated gives identical intervals and 0 of 3,725 minutes differ, because the model reads a
