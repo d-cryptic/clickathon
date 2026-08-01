@@ -13,6 +13,17 @@
 26.2.1.525) after the rebuild that closed the promotion incident. Headline reproduces exactly:
 **1,978.1 h counted against 2,976.9 h naive (33.6% excluded); peak 2,917 against a naive 3,708.**
 
+> **Second pass, same day (Codex 005 §5.1).** Every figure in this document was then re-measured
+> line by line rather than re-read. **The headline, the CPM arithmetic, the waterfall, the ledger
+> counts, the grain split and the serving latencies all held.** Six statements did not and are
+> corrected in place: the share of `VideoSessionEnd` runs that actually collect tail (**7,454 of
+> 10,758**, not all of them), the peak cost of that tail (**−3.9%**, not −4.8%), the count of runs
+> forfeiting tail (**5,794 / 39.2%**, not 5,699 / 38.6%), the sessions emitting events after their
+> own end (**111 / 1.0%**, not 239 / 2.2%), the raw pause-window total (**834.1 h**, not 816.1 h),
+> and `VideoError`'s effect on liveness (**1 run**, not 2 gaps). Part 3's decline-alerting row was
+> stale — that consumer is now built. Workings:
+> [evidence/business/](../evidence/business/README.md).
+
 > ⚠️ Do **not** quote `evidence/reconcile.txt` for headline numbers. That file is the *failing* gate
 > run committed as the record of the 2026-08-02 corruption (`1760.2` hours, 970 minutes mismatched)
 > and has not been regenerated since the rebuild. The live database is correct; that file is not.
@@ -32,8 +43,8 @@ marked **policy** are choices we made, not facts the data settled — each point
 | **Backgrounded** (heartbeats stop) | **no** | The app is not on screen. Detected by the 150 s gap — beats drop 100× when backgrounded (4.72/min → 0.047/min), so the silence is unambiguous. **862.2 h**, the largest single exclusion. ⚠️ *policy*: the run still earns 60 s of tail before closing, and 3,634 runs' final second contains an `AppBackgrounded`, so roughly a minute of known-background time is booked per such run — [doubts/11](../doubts/11-liveness-allow-list-unknown-events.md), [doubts/12](../doubts/12-explicit-background-events.md). |
 | **Buffering / seeking** | **yes** | Buffering is the platform failing the viewer, not the viewer leaving. Excluding it would let a CDN incident *reduce* reported audience — the dashboard would go quiet exactly when it should be screaming. ⚠️ *policy*: the fail-closed reading excludes it and costs −10.7% of peak — [doubts/10](../doubts/10-fail-closed-state-gates.md). |
 | **Ad break playing** | **yes** | The break *is* the inventory being consumed; a model that stopped the clock during ads could not measure ad delivery at all. Correct — but correct by **exact lowercase string match** on `pause`/`resume`, so `AdPause` (45) and `AdResume` (27) are deliberately not matched. A vocabulary change on the unseen day breaks this silently. |
-| **Errored** (`VideoError`) | **yes**, while events keep arriving | A viewer sitting through an error is still present and still owed a working stream. One who abandons goes silent, and the 150 s gap closes them within a minute. Self-correcting and cheap — `VideoError` bridges exactly 2 gaps in the whole file. |
-| **Ended, later events arrive** | run closes, later events open a **new** interval | "Ended" is a client's claim, not a fact — **239 sessions (2.2%)** emit events after their own `VideoSessionEnd`, up to 2,081 s later. Treating the claim as final would discard real watch time. ⚠️ *policy*: **10,758 runs (71.9%)** end at a `VideoSessionEnd`, and **7,454 of them collect** 60 s of tail we know was not watched — **3,304 do not** (Codex audit 005). An earlier version of this line said all 10,758 collected it, which contradicted this same document's own figure of **8,978** intervals taking tail across *every* ending class — 10,758 cannot be a subset of 8,978. Corrected — [doubts/07](../doubts/07-tail-credit-at-explicit-stops.md), worth −4.8% of peak. |
+| **Errored** (`VideoError`) | **yes**, while events keep arriving | A viewer sitting through an error is still present and still owed a working stream. One who abandons goes silent, and the 150 s gap closes them within a minute. Self-correcting and cheap — deleting **every** `VideoError` row from the file changes the run count by exactly **one** (14,954 → 14,955), so it is very nearly inert for liveness. |
+| **Ended, later events arrive** | run closes, later events open a **new** interval | "Ended" is a client's claim, not a fact — **111 sessions (1.0%)** emit **740** events after their own `VideoSessionEnd`, up to 2,081 s later. Treating the claim as final would discard real watch time. ⚠️ *policy*: **71.9% of runs (10,758)** end at a `VideoSessionEnd`, and **7,454 of them (69.3%) collect 60 s of tail** we know was not watched; the other **3,304 collect none**, because their final segment closes at an unresumed pause rather than at the run end — [doubts/07](../doubts/07-tail-credit-at-explicit-stops.md), worth **−3.9%** of peak (2,917 → 2,804). |
 | **Open at file end** | **would count**, `is_open = 1` | Live dashboards are mostly made of these — a model that waits for a session to close under-reports the present minute, which is the only minute an operations team cares about. ⚠️ **Zero of 10,866 sessions are open on the graded file**; every one carries a `VideoSessionEnd`. The path that matters most for a live dashboard is exercised by **no row of the graded data**. |
 | **Single lone event / zero-span run** | **no — counts zero** | A viewer who demonstrably acted is billed as nothing. **182 runs across 175 sessions** collapse to a single truncated second and are dropped by `arrayFilter(x -> x.2 > x.1, …)`; 75 are literally one event, the other 107 are several events inside one second. Keeping them moves peak **2,917 → 2,927** and adds 5.0 h ([evidence/property](../evidence/property/README.md)). A small, real under-count — ours to fix or defend, not a mentor question. |
 | **Unknown / new event type** | **yes — fails OPEN** | Any `(event_type, event)` pair we have never seen renews liveness and can earn tail credit. **This is the one row where our default is the risky one**: a chatty non-playback event on the unseen day would inflate the number, and no gate would notice, because `90_reconcile.sql` shares the model's vocabulary. Bounded at −1.3% on *this* file, unbounded on the next — [doubts/11](../doubts/11-liveness-allow-list-unknown-events.md). |
@@ -50,12 +61,20 @@ events, which reproduces the live total to the decimal:
 ```
 
 Three things a commercial reader should take from that. **7.6% of what we count is tail credit** —
-grace after the last observed event, not observed watching. **38.6% of runs forfeit even that**:
-5,699 of 14,772 end inside a pause that never resumed, and the tail is only ever paid to a segment
+grace after the last observed event, not observed watching. **39.2% of runs forfeit even that**:
+**5,794 of 14,772** end inside a pause that never resumed, and the tail is only ever paid to a segment
 that runs to the end of its run, so those get nothing. And the pause rule's *net* contribution is
-286.2 h, not the 816.1 h of raw pause windows, because most paused time overlaps silence the gap rule
-had already removed — we are not double-counting the exclusions. That 286.2 h independently matches a
-figure already recorded in `sql/30_build_intervals.sql`'s own comments.
+286.2 h, not the **834.1 h** of raw pause windows (21,068 closed `pause`→`resume` pairs), because most
+paused time overlaps silence the gap rule had already removed — we are not double-counting the
+exclusions. That 286.2 h independently matches a figure already recorded in
+`sql/30_build_intervals.sql`'s own comments, and the 834.1 h matches
+[ADR 0007](adr/0007-gate-answers-pause-needs-explicit-handling.md)'s paused-time total to the decimal.
+
+> The 834.1 h figure supersedes the **816.1 h** this document previously carried.
+> [doubts/02](../doubts/02-resume-semantics.md) measured 816.1 h over 21,216 windows against the
+> `csv_audit.raw_str` staging table; re-run against the graded `ev_raw` the same Rule A returns
+> **834.1 h over 21,068 windows**. Both are "Rule A"; they differ because the source tables do. The
+> graded-database figure is the one a reader can reproduce, so it is the one quoted here.
 
 ---
 
@@ -125,7 +144,7 @@ convention per decision rather than picking one global safety margin.
 | **Ad load / yield** | `cc_minute_delta` (all 7 raw dimensions) | minute | **7.0–7.5 ms** (`b06`, `b07`) | **Average.** Inventory is time-integrated — how many impressions exist over a break, not the single highest instant. Peak matters only for guaranteed-delivery roadblocks, where you are selling a moment. |
 | **Capacity / CDN** | `cc_hour_agg` (`peak` and `integral`) | hour → day | **12.2–44.5 ms** (`b05`, `b01`) | **Both, for different things.** Provision on **peak** — that is the moment that breaks. Bill and forecast egress cost on the **average** (the integral). Getting these backwards is the classic and expensive mistake: peak is **2.67× the average within the very hour it occurs**, so provisioning on the average under-provisions by 63% at peak, and billing on the peak over-bills by 2.67×. |
 | **Content calls** (commissioning, licensing) | `cc_hour_agg` content cube + `dict_content` | title, hour | **14.3 ms** (`b13`) | **Average**, weighted by duration — a title that holds 500 viewers for two hours is worth more than one that spikes to 2,000 for four minutes. Peak is a launch-spike diagnostic, not a value measure. |
-| **Anomaly response** (decline alerting) | `v_cc_rolling_*` / `v_cc_tumbling_*` | 5 / 15 / 60 min | not benchmarked | **Neither.** A decline alert reads the **derivative** — the rate of change against the same window yesterday — not the level. A drop from 2,900 to 2,400 is catastrophic mid-match and completely normal at the final whistle; only the shape distinguishes "the asset ended" from "something broke". Proposed as `v2.todo.md` **C1**, and it is the one consumer here that is **not yet built**. |
+| **Anomaly response** (decline alerting) | `v_cc_minute_series_total` + `v_cc_watermark` | 1 min, 15-min trailing window | not benchmarked; the 120-min lookback reads ~6.3 MiB / ~21 ms | **Neither.** A decline alert reads the **shape**, not the level: concurrent against a **15-minute trailing median, lagged 3 minutes**, floored at 100 concurrent and 50 sessions. A drop from 2,900 to 2,400 is catastrophic mid-match and completely normal at the final whistle. **Built and live** — 3 HyperDX alerts over 7 tiles, 28 firing minutes on the delivered file where a naive rate-of-change detector fires 962: [DECLINE_ALERTING.md](DECLINE_ALERTING.md). Note it explicitly **rejects** same-time-yesterday as a baseline — the delivered file is one live event, not a repeating daily pattern. Its classifier thresholds are **fitted, not semantically anchored** (§3.1 there), and its DISENGAGEMENT class is shipped **unvalidated**. |
 
 **Two caveats a buyer of this data should hear.** First, **freshness**: incremental publication is
 proven byte-identical to a rebuild in a scratch database (ADR 0013/0016), but on the **graded**

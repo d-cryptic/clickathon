@@ -9,10 +9,14 @@
 > **read-only against the graded `sonyliv` database on 2026-08-02** after the rebuild that closed the
 > promotion incident. Confirms the headline (1,978.1 h / 2,976.9 h / 33.6%; peak 2,917 vs naive 3,708,
 > gap 791) and adds three things nobody had measured: a **waterfall** decomposing the 998.8 excluded
-> hours into 862.2 h of silence and 382.8 h of pause against +246.2 h of tail credit; the fact that
-> **0 of 10,866 sessions are still open**, so the live-dashboard path is unexercised by the graded file;
-> and an **18.2% grain split** — the pipeline reports 1,978.1 h at second grain and 2,338.4 h at the
-> minute grain its own serving layer uses for "average concurrency".
+> hours into 862.2 h of silence and 286.2 h of **net** pause against **+149.6 h** of tail credit; the
+> fact that **0 of 10,866 sessions are still open**, so the live-dashboard path is unexercised by the
+> graded file; and an **18.2% grain split** — the pipeline reports 1,978.1 h at second grain and
+> 2,338.4 h at the minute grain its own serving layer uses for "average concurrency".
+> **Re-audited 2026-08-02, second pass (§8):** this summary previously carried the *discarded first
+> attempt* at the waterfall (382.8 h pause, +246.2 h tail) while §2 below carried the corrected one —
+> fixed. Two further figures were wrong and are corrected: runs forfeiting tail (**5,794**, not 5,699)
+> and sessions emitting events after their own end (**111**, not 239).
 
 **Measured:** 2026-08-02 · ClickHouse Cloud 26.2.1.525 · database `sonyliv` · **reads only** — no
 INSERT/ALTER/TRUNCATE/OPTIMIZE was issued, `REBUILD_GRADED` and `APPLY_GRADED_DESTRUCTIVE` never set.
@@ -101,8 +105,9 @@ Nobody had decomposed the gap. This does, and it reconciles to the live total **
 
 **The tail row required care and a first attempt got it wrong.** Not every run pays a tail: tail is
 credited only to a segment that ends *at the run's end*, and a run whose last pause never resumes has
-its final segment end at that **pause**, not at the run end. Measured, **5,699 of the 14,772
-non-zero-span runs end inside an unclosed pause and receive no tail at all** — so a naive
+its final segment end at that **pause**, not at the run end. Measured, **5,794 of the 14,772
+non-zero-span runs (39.2%) end inside an unclosed pause and receive no tail at all** — 14,772 − 8,978
+tail-paying runs, and re-measured directly in §8 — so a naive
 `60 s × 14,772` over-states tail credit by 96.6 h (246.2 h against a true 149.6 h) and pushes the
 error into the pause row.
 
@@ -156,7 +161,7 @@ total. Two independent confirmations fall out of it:
   gap rule had already removed, exactly as ADR 0007 predicted for the unclosed-pause question.
 
 Commercially, the number to carry away: **7.6% of everything we count (149.6 h) is tail credit** —
-grace after the last observed event, not observed watching — and **38.6% of runs forfeit even that**
+grace after the last observed event, not observed watching — and **39.2% of runs forfeit even that**
 because they end inside a pause that never resumed.
 
 ---
@@ -192,7 +197,7 @@ final second contains AppBackgrounded      3,634
 zero-span runs (dropped entirely)            182   (175 sessions)
   … of which literally one event              75
 sessions with NO VideoSessionEnd               0   ← the is_open population is EMPTY
-sessions emitting events after their end     239   (2.2%)
+sessions emitting events after their end     111   (1.0%)   ← was 239; see §8
 ```
 
 **The 182 is a zero-*span* count, not a lone-*event* count.** A first pass measuring
@@ -341,3 +346,95 @@ read-only measurement pass. Each is carried with its source.
 | Allow-list liveness (heartbeat + play only) | 2,917 → 2,880 (−1.3%) | [doubts/11](../../doubts/11-liveness-allow-list-unknown-events.md) |
 | Keep point activity (the 182 zero-span runs) | 2,917 → **2,927** (+0.34%), +5.0 h | [evidence/property](../property/README.md) |
 | Permissive unclosed-pause rule | +4.5% peak, +99.3 h | ADR 0007 — ⚠️ measured pre-ADR-0009, **stale** |
+
+---
+
+## 8 · Second pass, 2026-08-02 — every figure re-measured, not re-read
+
+Prompted by Codex 005 §5.1 ("the CPM arithmetic is sound but other statements are stale or do not add
+up"). Read-only against graded `sonyliv`, same session as §1. **Codex found three; this pass confirms
+all three and finds three more.**
+
+### 8.1 · What was wrong
+
+**(a) Not every `VideoSessionEnd` run collects tail.** `docs/BUSINESS_RULES.md` said all 10,758 runs
+ending at a `VideoSessionEnd` "still collect 60 s of tail". They do not — tail is paid only to a
+segment that reaches the run's end, and a run whose last pause never resumed ends at the pause:
+
+```
+total runs                                    14,954
+non-zero-span runs                            14,772
+runs ending on a VideoSessionEnd              10,758
+runs paying tail (all classes)                 8,978
+  … of those, ending on a VideoSessionEnd      7,454   ← the ones that DO collect tail
+  … ending on a VideoSessionEnd, NO tail       3,304   ← the claim's counter-example
+non-zero-span runs forfeiting tail             5,794   = 14,772 − 8,978
+```
+
+**(b) The peak cost was the wrong one of doubts/07's three figures.** The document attributed
+**−4.8%** to the `VideoSessionEnd` row alone. In `doubts/07`, −4.8% (2,917 → 2,776) is the *both
+explicit stops* variant. `VideoSessionEnd` alone is 2,917 → **2,804, −3.9%**.
+
+**(c) 5,699 was wrong — it is 5,794.** §2 above carried 5,699 / 38.6%; the direct measurement is
+**5,794 / 39.2%**, and it is forced by arithmetic already on this page (14,772 − 8,978).
+
+**(d) Sessions emitting events after their own end: 111, not 239.** Three readings measured; none is
+239, and the "last tuple is not the end" artifact this page warns about gives 8,531, so that is not
+the provenance either. **The origin of 239 could not be reconstructed.**
+
+```
+events after the FIRST VideoSessionEnd          740 events across  111 sessions  (1.0%)
+sessions where max(ts) > first end                                 111
+sessions where max(ts) > last  end                                 108
+max seconds after the end                                        2,081            ← this held
+```
+
+**(e) Raw pause windows: 834.1 h, not 816.1 h.** `doubts/02`'s Rule A returns 816.1 h over 21,216
+windows against the `csv_audit.raw_str` staging table. The same rule against graded `ev_raw` returns
+**834.1 h over 21,068 windows** — which matches ADR 0007's paused-time total (3,002,604 s = 834.06 h,
+21,068 closed pairs) exactly. Both are "Rule A"; the source tables differ.
+
+**(f) `VideoError` does not "bridge exactly 2 gaps".** Measured two ways:
+
+```
+runs with all events                        14,954
+runs with every VideoError row deleted      14,955      → net effect: ONE run
+VideoError events sitting alone across a >150 s span         20
+```
+
+The net effect is **1 run**, not 2 gaps — deleting a `VideoError` can also *close* a gap when it sits
+at a run's edge, which is why the 20 individual bridge positions net down to one. The document's
+point (self-correcting and cheap) survives; its number did not.
+
+**(g) Part 3's decline-alerting row was stale.** It described that consumer as "not yet built" and
+reading "against the same window yesterday". Decline alerting is built, live, and explicitly
+**rejects** same-time-yesterday — see [docs/DECLINE_ALERTING.md](../../docs/DECLINE_ALERTING.md) §2.
+
+### 8.2 · What was checked and holds
+
+Everything else. Re-measured live, not cited:
+
+```
+headline           1,978.1 h / 2,976.9 h / 33.6%              ✓
+serving state      ev_raw 905,558 · intervals 30,323 · 10,866 sessions   ✓
+peak               2,917 @ 2026-07-26 10:56                   ✓
+naive at that minute (any-overlap)  3,708 · gap 791 · 21.3%   ✓
+waterfall          2,976.9 − 862.2 + 149.6 − 286.2 = 1,978.1  ✓  (run span 2,114.7 ✓)
+tail share         149.6 / 1,978.1 = 7.6%                     ✓
+run terminators    10,758 end · 2,898 pause · 3,634 AppBackgrounded      ✓
+zero-span runs     182 across 175 sessions, 75 lone events    ✓
+open sessions      0 of 10,866 · 0 open intervals             ✓
+ad vocabulary      AdPause 45/27 · AdResume 27/19 · pause 27,340 · resume 31,780   ✓
+pause rates        0.756/min paused · 0.047/min backgrounded (ADR 0007)  ✓
+unresumed pauses   22.9% ("23%")                              ✓
+grain split        1,978.1 h vs 2,338.4 h = 18.2% apart       ✓
+peak-to-average    2.67× within the peak hour (1,091 avg)     ✓
+reconcile spine    17,028 minutes                             ✓
+serving latency    b06 7.5 · b07 7.0 · b05 12.2 · b01 44.5 · b13 14.3 ms ✓
+CPM arithmetic     791/3,708 = 21.3% · 213×8 = 1,704 · ₹340.8/1k · ₹3.408 lakh at 1M   ✓
+cited forks        −14.1% (doubts/09) · −10.7% (doubts/10) · −1.3% (doubts/11) · +4.5%/99.3 h (ADR 0007)  ✓
+```
+
+**The commercial argument did not move.** Every correction above is a count or an attribution; the
+headline, the over-count rate, the CPM illustration and the peak-versus-average guidance are all
+unchanged. What changed is that a reader who checks one of them now gets the same answer we do.
