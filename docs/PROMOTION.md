@@ -85,8 +85,8 @@ shape goes last, because it is the hardest to reverse.
 
 | Wave | Feature | Status | Evidence |
 |---|---|---|---|
-| 1 | ADR 0018 target resolution + `tools/ch` | — | |
-| 1 | write guards on the graded database | — | |
+| 1 | ADR 0018 target resolution + `tools/ch` | GATE 4 | [evidence/promotion/w1/](../evidence/promotion/w1/) — checks 1–3 ✓ (code is on `chore/promotion-w1-foundations`, `fb1f98a`); check 4 FAILED: the graded db reconciles under NO available spec (dev gate: 970/17,028 mismatched, max diff 193) after an unguarded 19:17 UTC TRUNCATE+rebuild left it on two write generations again. See `04-reconcile-GATE-FAILED.txt`. |
+| 1 | write guards on the graded database | GATE 4 | same bundle — checks 1–3 ✓ (`2c4ff9f`, refusals proven without ever setting an override against the service); stopped by the same check-4 finding. |
 | 2 | ADR 0009 interval-delta determinism | — | |
 | 2 | ADR 0011 query-time normalisation | — | |
 | 2 | ADR 0014 peak-minute tie-break | — | |

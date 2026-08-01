@@ -1,0 +1,34 @@
+W1 PROMOTION — CHECK 1: ISOLATION
+Date: 2026-08-02 · Branch: chore/promotion-w1-foundations (off origin/main c10e97d)
+Verified off main, not dev:
+  $ git merge-base --is-ancestor origin/dev HEAD ; echo $?    # 1 (dev NOT an ancestor)
+  $ git merge-base --is-ancestor origin/main HEAD ; echo $?   # 0 (main IS an ancestor)
+
+Feature group (promoted together — the guards' pass condition is proven through
+tools/ch, and both close the same incident class):
+
+  1. ADR 0018 target resolution + tools/ch reads TARGET from the environment
+     dev commits: 49a40da (merged as 6638d8b) + f5467e3
+     landed as:   fb1f98a  (one squashed commit, per "one feature, one commit")
+  2. Write guards on tools/build-model.sh / tools/apply-sql.sh
+     dev commit:  f2499ea
+     landed as:   2c4ff9f  (ported by hand — see below)
+
+Also landed: c729d9c = cherry-pick of dev 4ea9bed (docs/PROMOTION.md + v2.todo.md),
+because the ledger this promotion must update lives in that file and it did not
+exist on main. v2.todo.md rides along solely because PROMOTION.md's rules
+reference it (§A3); a dangling reference would fail check 6.
+
+Deliberate deviations from the dev commits, all disclosed:
+  - docs/worksheets/2026-08-01-target-resolution.md (in 49a40da) NOT promoted —
+    outside this promotion's ownership list.
+  - docs/WORKTREE_QUEUE.md (in f2499ea) NOT promoted — same reason.
+  - The guard blocks were PORTED, not cherry-picked: on dev they sit inside
+    script versions rewritten by later waves (ADR 0016 four-tier build; the
+    --database flag from dev 6355048). main's build-model.sh is the 3-step
+    build and its apply-sql.sh selects the cloud database only via CH_DATABASE.
+    Guard logic, gating conditions (DROP/TRUNCATE only, comment-stripped,
+    CREATE ungated), override names, and placement rationale are unchanged;
+    the refusal text was adjusted to name only what main's scripts actually
+    touch (session_intervals, cc_minute_delta) and to drop the --database
+    advice main's script cannot honour. Diff basis: git show f2499ea.

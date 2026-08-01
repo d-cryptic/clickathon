@@ -1,0 +1,57 @@
+W1 PROMOTION — CHECK 3: RUN IT FOR REAL (read-only, live services)
+Date: 2026-08-02 · at commit 2c4ff9f · .env copied from the main checkout
+(fresh worktrees have none; ADR 0018 makes a missing CH_DATABASE_LOCAL die
+loudly, which is correct behaviour, not a bug — not hit here).
+
+── The four resolution paths ────────────────────────────────────────────────
+$ TARGET=cloud tools/ch "SELECT currentDatabase(), version()"
+sonyliv	26.2.1.525          # Cloud — exit 0
+$ tools/ch -c "SELECT currentDatabase(), version()"
+sonyliv	26.2.1.525          # Cloud — exit 0
+$ tools/ch "SELECT currentDatabase(), version()"
+default	26.7.1.1315         # LOCAL (different server version proves different server) — exit 0
+$ TARGET=Cloud tools/ch "SELECT currentDatabase(), version()"
+tools/ch: TARGET='Cloud' is not a target. Use 'local' or 'cloud' (or the -c flag). Refusing to guess — see ADR 0018.
+# exit 1 — dies, does NOT fall through to local
+
+── Guard refusals (refusal is the pass condition; no override was ever set
+   against the real service) ────────────────────────────────────────────────
+
+Stage 1 — BELT: .env parked, credentials pointed at an unreachable fake host
+(invalid.example), so even a guard bug could not have reached the service.
+  $ TARGET=cloud CH_DATABASE=sonyliv CH_HOST=invalid.example ... tools/build-model.sh
+  tools/build-model.sh: REFUSING to rebuild the graded database 'sonyliv'.   # exit 1, no network I/O
+  $ TARGET=cloud CH_DATABASE=sonyliv CH_HOST=invalid.example ... tools/apply-sql.sh <probe_truncate.sql>
+  tools/apply-sql.sh: ...contains DROP or TRUNCATE and 'sonyliv' is the GRADED database.  # exit 1, no network I/O
+  probe_truncate.sql = "TRUNCATE TABLE guard_probe_nonexistent;" — even the
+  double-failure case (guard bug AND network reachable) could not have damaged
+  anything, the table does not exist.
+
+  Negative case (comment stripping): a file whose only DROP is inside a `--`
+  comment passed the guard and proceeded to the connection attempt, which then
+  died at the fake host (DNS_ERROR) — proving it was NOT gated:
+  $ ... tools/apply-sql.sh <probe_comment_only.sql>
+  applying to CLOUD: invalid.example/sonyliv
+  ... Cannot resolve host (invalid.example) ... FAILED                        # failure point is the network, not the guard
+
+  Override propagation was verified ONLY against the fake host:
+  APPLY_GRADED_DESTRUCTIVE=yes passed the guard and died at the connection
+  attempt. Neither REBUILD_GRADED nor APPLY_GRADED_DESTRUCTIVE was ever set
+  in an invocation that could reach the graded service.
+
+Stage 2 — REAL environment (the exact careless invocations; the guard exits
+before any query is composed or sent):
+  $ TARGET=cloud tools/build-model.sh
+  tools/build-model.sh: REFUSING to rebuild the graded database 'sonyliv'. [...]   # exit 1
+  $ TARGET=cloud tools/apply-sql.sh <probe_truncate.sql>
+  tools/apply-sql.sh: ...contains DROP or TRUNCATE and 'sonyliv' is the GRADED database. [...]  # exit 1
+
+Note for the verifier: no committed sql/*.sql currently contains a live
+DROP/TRUNCATE (checked: comment-stripped grep over sql/*.sql matches nothing),
+so the probe file is the honest way to exercise the destructive path — the
+dangerous TRUNCATEs live in build-model.sh's own q() calls, which the first
+guard gates.
+
+ClickHouse Cloud is the primary datastore per the problem statement; both
+guards and all four paths above ran against the live service (or provably
+short of it, where refusal is the point).

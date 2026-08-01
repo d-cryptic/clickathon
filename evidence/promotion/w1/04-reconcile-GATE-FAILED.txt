@@ -1,0 +1,84 @@
+W1 PROMOTION — CHECK 4: THE CORRECTNESS GATE — FAILED. PROMOTION STOPPED HERE.
+Date: 2026-08-02 · all queries below are read-only (SELECT / system tables).
+
+Expected by docs/PROMOTION.md check 4: 17,028 minutes · 0 mismatched · peak 2,917.
+
+── Run 1: this branch (main + W1 features, commit 2c4ff9f) ─────────────────
+$ TARGET=cloud tools/reconcile.sh          # exit 1
+SUMMARY  minutes_compared=17028  mismatched=976  max_abs_diff=189  peak=2887  MISMATCH
+(full output: 04a-reconcile-branch.txt)
+
+── Run 2: pristine origin/main (c10e97d) — is this caused by the promotion? ─
+origin/main's exact tools/reconcile.sh + tools/ch + sql/90_reconcile.sql were
+extracted with `git show origin/main:<path>` into a scratch directory and run
+unmodified. Identical failure signature:
+SUMMARY  minutes_compared=17028  mismatched=976  max_abs_diff=189  peak=2887  MISMATCH
+=> NOT caused by this branch. main's gate fails against today's graded state
+regardless of W1. (full output: 04b-reconcile-pristine-main.txt)
+
+── Run 3: origin/dev HEAD (4ea9bed) — the spec whose numbers check 4 quotes ─
+Same extraction, dev's reconcile stack, run unmodified:
+SUMMARY  minutes_compared=17028  mismatched=970  max_abs_diff=193  peak=2917  MISMATCH
+=> The graded database does NOT reconcile under dev's own gate either. The
+truth-side peak (2,917) matches the expected number, but the SERVING layer
+disagrees at 970 of 17,028 minutes, by up to 193 concurrent viewers.
+(full output: 04c-reconcile-dev.txt)
+
+Mismatch shape (dev gate): serving OVER-counts the 10:40–10:59 ramp by ~60–90
+and UNDER-counts the 11:05–11:30 drain by 60–193; at 11:30 truth=197, serving=4.
+
+── Why: the graded database was rebuilt AFTER the check-4 numbers were written ─
+system.parts (active parts, database='sonyliv'), server time UTC:
+  cc_minute_delta      last_write 2026-08-01 19:18:28   rows 42,396
+  cc_user_minute       last_write 2026-08-01 19:18:27   rows 176,647
+  session_intervals    last_write 2026-08-01 19:18:26   rows 33,900
+  cc_hour_agg          last_write 2026-08-01 16:39:21   rows 26,254   <-- NOT rebuilt with the others
+  ev_raw               last_write 2026-08-01 10:12:15   rows 905,558
+
+system.query_log (user 'default', database sonyliv), the write sequence:
+  19:16:50  ALTER  ev_raw ADD COLUMN IF NOT EXISTS ingested_at ...
+  19:17:41  TRUNCATE TABLE sonyliv.session_intervals
+  19:17:42  TRUNCATE TABLE sonyliv.cc_minute_delta
+  19:18:27  INSERT (session_intervals rebuild, header "-- Stateful...")
+  19:18:28  INSERT INTO cc_minute_delta WITH clipped AS (...)
+  19:20:04+ CREATE IF NOT EXISTS session_intervals / cc_minute_delta /
+            finalizer_run_log / session_delta_base /
+            session_delta_correction_stage   (the ADR 0013 finalizer schema)
+  19:22–25  CREATE TEMPORARY TABLE reconcile_minutes ... WITH published_runs AS
+            (a publisher-aware reconcile variant, NOT dev HEAD's 90_reconcile.sql)
+
+docs/PROMOTION.md was committed on dev at 2026-08-02 00:44:22 +0530
+= 2026-08-01 19:14:22 UTC — i.e. the graded serving tables were truncated and
+rebuilt ~3 minutes AFTER the check-4 expectation was written down.
+
+No writes of any kind have hit sonyliv since 19:25 UTC; the database was static
+throughout this promotion, and nothing this promotion ran wrote to it (every
+invocation was a SELECT, a system-table read, or a guard refusal that exited
+before composing a query).
+
+── The finding, plainly ────────────────────────────────────────────────────
+1. The graded database currently fails its own correctness gate: 970 of
+   17,028 minutes disagree with truth recomputed from ev_raw under dev HEAD's
+   spec. If the benchmark is scored against ground truth in this state, these
+   970 minutes are wrong by up to 193.
+2. It is again serving two write generations — session_intervals /
+   cc_user_minute / cc_minute_delta from 19:18 UTC, cc_hour_agg from 16:39 UTC
+   — the exact signature of the 2026-08-01 incident that the guards in this
+   very promotion exist to prevent. The 19:17 TRUNCATEs went through without
+   any authorisation ceremony because the guarded scripts are not what wrote
+   them (or the guard was not yet on the writer's branch).
+3. Whether the 19:18 generation is the intended post-ADR state or another
+   stale-base rebuild is NOT decidable from here read-only; the 19:22–25
+   temporary-table reconcile suggests whoever rebuilt it validated with a
+   publisher-aware variant that is not the committed gate.
+
+Per docs/PROMOTION.md ("a failed check is a finding, not a blocker to route
+around") and the W1 brief ("if a check fails, stop and report it"): promotion
+of both W1 features STOPS at check 4. Checks 1–3 passed and their evidence
+stands; checks 5–6 were not run. Ledger rows set to GATE 4.
+
+What would unblock: an operator decision on the 19:18 rebuild — either it is
+the blessed state (then the committed gate SQL must be brought to agree with
+it and check 4's numbers restated), or it is not (then the graded database
+needs an authorised rebuild from a blessed commit). Both are operator calls;
+both are exactly what REBUILD_GRADED=yes exists to make deliberate.

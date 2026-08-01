@@ -1,0 +1,23 @@
+W1 PROMOTION — CHECK 2: BUILD AND TEST
+Date: 2026-08-02 · at commit 2c4ff9f (both features on the branch)
+Toolchain: devbox via direnv (go 1.26.4, golangci-lint 2.12.2 — the pinned v2;
+a stray host golangci-lint v1.64.8 was rejected by the pre-commit hook until
+direnv was allowed, which is docs/GO.md behaving as written).
+
+$ make ci
+go mod tidy
+go vet ./...
+golangci-lint run ./...
+0 issues.
+CGO_ENABLED=1 go test -race -count=1 ./...
+?    github.com/d-cryptic/clickathon/cmd/sonyliv    [no test files]
+?    github.com/d-cryptic/clickathon/internal/chdb  [no test files]
+ok   github.com/d-cryptic/clickathon/internal/config         1.526s
+ok   github.com/d-cryptic/clickathon/internal/otelemit       2.383s
+ok   github.com/d-cryptic/clickathon/internal/pipelinehealth 1.948s
+go build  -trimpath -ldflags '-s -w -X main.version=2c4ff9f' -o bin/sonyliv ./cmd/sonyliv
+
+git status --porcelain afterwards: clean (tidy changed nothing).
+
+SQL: this feature group touches no sql/*.sql file, so the "applies cleanly to a
+scratch database" clause is vacuous here; nothing was applied anywhere.
