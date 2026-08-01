@@ -1,0 +1,45 @@
+# Self-test of tools/validate-source-contract.sh — the gate seen FIRING (ADR 0026).
+# Scratch DB sonyliv_contract_selftest on cloud, 2026-08-02; dropped after capture. Every probe was
+# fed a designed violation; both phases must FAIL with exit 1. The 16
+# future-dated rows are the designed 2026-08-15 day itself — the documented
+# synthetic-day behaviour of that WARN (today is 2026-08-02).
+#
+=== PHASE A — ev_raw missing player_version (shape pre-probe catches it before the report query can die) ===
+source-contract gate (ADR 0026, read-only) — target=cloud database=sonyliv_contract_selftest
+  FAIL  expected columns missing from ev_raw: player_version
+
+VERDICT: FAIL — ev_raw does not have the 13-column shape (or does not exist here). This file/database is not what we think it is; STOP.
+exit code: 1 (expected 1)
+
+=== PHASE B — 13-column ev_raw, 17 hostile rows (one designed violation per probe), content_dim absent ===
+source-contract gate (ADR 0026, read-only) — target=cloud database=sonyliv_contract_selftest vocabulary=47 pairs
+  note: content_dim is ABSENT here — every event content_id counts as unresolved (A9/R10)
+  sev   probe                                                       count  note
+  FAIL  ev_raw is empty                                                  0  nothing to validate — wrong file, wrong database, or a failed load
+  FAIL  timestamp outside 2020..2035                                     1  epoch-zero or millis-not-divided; raw span 1970-01-01 00:00:00.000 -> 2027-09-01 10:00:00.000
+  FAIL  epoch-zero session_start_epoch                                   1  
+  FAIL  empty identity (session or user id)                              1  rows the session/user tiers cannot attribute
+  FAIL  unknown event_type (outside the 7)                               1  new: WidgetPing
+  FAIL  expected columns missing from ev_raw                             0  
+  WARN  columns beyond the 13-column contract                            0  
+  WARN  vocabulary drift: unknown event values                           1  1 new pair(s), top: VideoHeartbeat/SystemSleepx1 — unknown events FAIL OPEN and extend activity (doubts/11)
+  WARN  reused video_session_id (>1 session_start_epoch)                 2  two lifecycles under one id merge into one session
+  WARN  events before declared session start                             1  sessions; the model derives starts from event timestamps, not this column
+  WARN  future-dated events (> now + 5 min)                             16  wall-clock skew; synthetic rehearsal days trip this by design
+  WARN  VideoSessionEnd before VideoSessionStart                         1  sessions; out-of-order lifecycle markers
+  WARN  multiple VideoSessionEnd in one session                          1  sessions; the end marker is an idempotent hard stop in the model
+  WARN  tied dimensions at one (session, timestamp)                      1  6.6667% of groups disagree on platform/country/content — ADR 0009 vote assumes this is rare
+  WARN  exact duplicate rows (retry copies)                              1  dedup proven inert for totals/peak but NOT at filter grain (doubts/06)
+  WARN  sentinel collision: content_id = -1 events                       1  cube rows are safe (cube_level, ADR 0022) but the p_* = -1 query API stays ambiguous (R9)
+  WARN  literal * in platform or country                                 1  collides with the all-rollup sentinel of the query API (sql/85_windows.sql)
+  WARN  event content_id absent from content_dim                         6  distinct ids; they serve (unknown) titles, joins do not error (R10)
+  WARN  conflicting content_dim definitions                              0  ReplacingMergeTree picks arbitrarily between conflicting rows
+  WARN  dimension column entirely empty                                  1  subtitle_language — a CSV column missing at load silently becomes empty strings (T1 owns the loader)
+  INFO  rows                                                            17  
+  INFO  sessions / users                                                 4  5 distinct users
+  INFO  span (minutes)                                            30329880  1970-01-01 00:00:00.000 -> 2027-09-01 10:00:00.000
+  INFO  event_type histogram                                             4  VideoHeartbeat:10 VideoSessionStart:4 VideoSessionEnd:2 WidgetPing:1
+  INFO  distinct content ids                                             6  platforms 4 - countries 1
+
+VERDICT: FAIL — 4 contract violation(s). This file is not what we think it is; STOP before the load costs an hour.
+exit code: 1 (expected 1)
