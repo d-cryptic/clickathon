@@ -3,12 +3,11 @@
 > **Summary:** Click-a-thon India 2026 · SonyLIV **foreground-only concurrency**. Built end to end on
 > ClickHouse Cloud: session, user and content concurrency off a hour-clipped delta serving layer,
 > all 7 raw dimensions, rolling/tumbling windows, ClickStack both charting and self-observing. Peak
-> **2,887 @ 2026-07-26 10:56**; naive session-span would say 3,708. **Read this before the numbers:
-> the correctness gate is dataset-specific** — its five target minutes are 2026-07-26 literals, so on
-> any other day it returns zero rows and still reports PASSED, and it never compares an idle minute.
-> It is green here and that is genuine, but it does not generalise, so fix it before trusting any
-> "verified" claim below. The other open gap is architectural: aggregates are **batch-rebuilt, not
-> continuously updated**. Rebuild `make model`; prove it `make reconcile`.
+> **2,887 @ 2026-07-26 10:56**; naive session-span would say 3,708. The correctness gate compares
+> **every minute in the data — 17,028 of them, idle ones included** — against truth recomputed from
+> `ev_raw` alone, derives its own target minutes so it works on any day, and has been negative-tested
+> to prove it fails when it should. The remaining gap is architectural: aggregates are
+> **batch-rebuilt, not continuously updated**. Rebuild `make model`; prove it `make reconcile`.
 
 **Last verified:** 2026-08-01 · commits through `1dee090` · ClickHouse Cloud 26.2.1.525
 
@@ -177,7 +176,7 @@ Found late — `tools/fetch_data.sh` originally pulled only the CSVs, so
 | All 10 filter dimensions | dataset_details ("should work even if dimensions increase") | **done** — 7 raw carried, 3 via `dict_content`. Row count is hard-bounded at 36,930 regardless of dimension count |
 | H7 OTLP self-instrumentation | ClickStack "meaningful integration" bar | **done** — `sonyliv observe` |
 | Unseen-day dry run + evidence packaging | "no pipeline evidence, no credit" | **done** — `tools/unseen-run.sh`, ~2.5 min for a 1 GB day |
-| **THE GATE IS DATASET-SPECIFIC** | correctness is scoring criterion #1 | **BROKEN** — literal target minutes, zero rows on another day still reports PASSED; idle minutes never compared |
+| The gate | correctness is scoring criterion #1 | **FIXED** — 17,028 minutes incl. idle, self-targeting, negative-tested |
 | **Re-loading a CSV doubles the data** | — | **BROKEN** — the claimed idempotency setting is for non-replicated MergeTree; Cloud is SharedMergeTree |
 | `CH_DATABASE` env var silently ignored | — | **BROKEN** — a retarget appears to work and writes to production |
 

@@ -83,10 +83,26 @@ qf() {  # qf <file>  — run a multi-line file
 
 cat "$OUT"
 
+# Two independent failure conditions. The second one exists because the gate
+# used to target hard-coded 2026-07-26 minutes: on any other day it returned
+# ZERO rows, this grep found no mismatch token, and it printed PASSED. A gate
+# that cannot see the data must FAIL, not succeed by silence.
 if grep -q MISMATCH "$OUT"; then
   echo
-  echo "RECONCILE FAILED — see $OUT" >&2
+  echo "RECONCILE FAILED — a minute disagrees. See $OUT" >&2
+  exit 1
+fi
+
+COMPARED=$(grep -oE 'minutes_compared=[0-9]+' "$OUT" | head -1 | cut -d= -f2)
+if [ -z "$COMPARED" ]; then
+  echo
+  echo "RECONCILE FAILED — no SUMMARY row. The gate did not run; do not read this as a pass." >&2
+  exit 1
+fi
+if [ "$COMPARED" -lt 1 ]; then
+  echo
+  echo "RECONCILE FAILED — 0 minutes compared. The gate saw no data." >&2
   exit 1
 fi
 echo
-echo "reconcile PASSED · evidence written to $OUT"
+echo "reconcile PASSED · ${COMPARED} minutes compared · evidence written to $OUT"

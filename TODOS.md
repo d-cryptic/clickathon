@@ -6,7 +6,12 @@
 
 ## Now
 
-- [ ] **[GATE]** **Fix `sql/90_reconcile.sql` — nothing matters more.** Target minutes are
+- [x] **[GATE]** **FIXED.** Minutes now DERIVED from ev_raw, dense spine so idle minutes are
+      compared, and `minutes_compared` asserted by reconcile.sh. 5 -> **17,028 minutes** on
+      production; runs unchanged on the holdout day (1,364 minutes, peak 13). Negative-tested:
+      500 fabricated viewers at an IDLE minute now FAILS the gate (25 minutes, max_abs_diff 500)
+      where it previously passed. Original text:
+- [~] **[GATE]** ~~Fix `sql/90_reconcile.sql`~~ Target minutes were
       2026-07-26 LITERALS: on another day it returns zero rows and `tools/reconcile.sh` prints
       PASSED. It also never compares an IDLE minute (207 of 1,364 on the holdout) — proven by
       fabricating 500 viewers at an idle minute and watching the gate pass. Derive the minutes from

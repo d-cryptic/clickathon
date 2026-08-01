@@ -1,16 +1,17 @@
 RECONCILE — serving layer vs ev_raw
-target: cloud   commit: 5433183
+target: cloud   commit: 7f2af17
 
 == 1. THE GATE — truth recomputed from ev_raw, five minutes
    (peak, both data boundaries, two arbitrary; any non-zero delta is a failure)
 
-   ┌──────────────minute─┬─truth_from_ev_raw─┬─served_from_delta─┬─delta─┬─verdict─┐
-1. │ 2026-07-14 15:43:00 │                 1 │                 1 │     0 │ PASS    │
-2. │ 2026-07-26 06:09:00 │                16 │                16 │     0 │ PASS    │
-3. │ 2026-07-26 10:56:00 │              2887 │              2887 │     0 │ PASS    │
-4. │ 2026-07-26 11:10:00 │              2450 │              2450 │     0 │ PASS    │
-5. │ 2026-07-26 11:31:00 │                 5 │                 5 │     0 │ PASS    │
-   └─────────────────────┴───────────────────┴───────────────────┴───────┴─────────┘
+   ┌─ord─┬─scope───┬─c1─────────────────────┬─c2───────────┬─c3─────────────┬─c4────────┬─verdict─┐
+1. │   0 │ SUMMARY │ minutes_compared=17028 │ mismatched=0 │ max_abs_diff=0 │ peak=2887 │ PASS    │
+2. │   2 │ sample  │ 2026-07-14 15:43:00    │ 1            │ 1              │ 0         │ PASS    │
+3. │   2 │ sample  │ 2026-07-16 12:35:00    │ 0            │ 0              │ 0         │ PASS    │
+4. │   2 │ sample  │ 2026-07-17 08:56:00    │ 0            │ 0              │ 0         │ PASS    │
+5. │   2 │ sample  │ 2026-07-26 10:56:00    │ 2887         │ 2887           │ 0         │ PASS    │
+6. │   2 │ sample  │ 2026-07-26 11:30:00    │ 193          │ 193            │ 0         │ PASS    │
+   └─────┴─────────┴────────────────────────┴──────────────┴────────────────┴───────────┴─────────┘
 
 == 2. MODEL COMPARISON — the same minutes under three definitions
 
