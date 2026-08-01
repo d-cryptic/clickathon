@@ -42,6 +42,7 @@ TARGET=cloud tools/reconcile.sh
 | `verify-model.sh` | checks hard-stop exclusion and sampled interval-to-delta reconstruction |
 | `reconcile.sh` | rebuilds raw truth in temporary tables and compares five global minutes to the delta layer |
 | `query-concurrency.sh --from … --to … [--summary] [--as-of-run N]` | serves a zero-filled minute curve or exact peak/average, with optional dimension filters and forensic correction time travel |
+| `verify-query-summary.sh` | proves the summary’s peak/average/integral agrees with its minute curve for unfiltered, platform, content, and video-type shapes |
 | `audit-data.sh [cutoff]` | measures duplicate identity, dimension drift, timestamp ties, terminal leakage, and synthetic open sessions |
 | `validate-source-contract.sh` | fails before materialization on ambiguous lifecycle identity, invalid timestamps, unknown event types, dimension ties, or missing content references |
 | `truncation-test.sh [cutoff]` | replays the model over a temporary event-time cut and proves open sessions appear in the staged exact tail without durable writes |

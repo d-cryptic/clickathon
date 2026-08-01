@@ -15,6 +15,7 @@
 | `/reconcile` | the serving layer equals the truth recomputed from raw | after **every** model change |
 | `tools/verify-model.sh` | state stops cut intervals and sampled delta reconstruction matches direct interval overlap | after every batch materialization |
 | `tools/query-concurrency.sh` | minute-grid serving query produces exact peak/average, including zero minutes | before benchmark / API changes |
+| `tools/verify-query-summary.sh` | summary peak, integral, and minute-weighted average equal the independently reduced returned curve across representative filters | before benchmark / API changes |
 | query-range input guard | invalid or inverted UTC minute ranges fail before building a minute grid | after CLI changes |
 | half-open minute-boundary regression | an interval ending exactly at `HH:MM:00` does not count that minute, while a fractional close does | after any delta-emission change |
 | `/bench` | benchmark latency and, more importantly, **bytes read** | before demo / unseen run |
