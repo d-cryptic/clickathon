@@ -13,6 +13,26 @@
 
 ---
 
+## 🔴 PAUSED — 2026-08-02 — the graded database is being rebuilt
+
+**Do not promote anything to `main` until this notice is removed.**
+
+The correctness gate on `sonyliv` is **FAILING**: 17,028 minutes compared, **970 mismatched**,
+`max_abs_diff` 193, with served concurrency inflated above truth. Check 4 of the gate below cannot
+pass, and checks 3 and 5 measure against a database that is currently wrong — so any promotion
+verdict reached right now is meaningless.
+
+**Cause:** `tools/publish-test.sh` cuts SQL extracts and runs them against a scratch database, but
+many extracted statements are **unqualified**, so they resolved against the connection's default
+database — `sonyliv`. **811 unqualified writes** landed there after 19:00 on 2026-08-01. It is the
+same database-resolution defect as queue item **Q33**, in a third location.
+
+**`ev_raw` is byte-intact** (905,558 rows, 10,866 sessions, unchanged max timestamp), so a rebuild
+restores correctness fully. Operator authorised it on 2026-08-02.
+
+If you are a promotion agent and your check 4 fails, **that is this, not your feature.** Stop, say so,
+and wait.
+
 ## Why not just merge `dev`
 
 `dev` contains all of `main`, so a fast-forward is *mechanically* clean and would take one command.
