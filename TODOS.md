@@ -131,7 +131,8 @@
       docs/OBSERVABILITY.md.
 - [ ] ADRs for: the `video_session_id` projection, `video_type` materialisation
       (0001–0006 are written; 0001 is **conditional on GATE ①**; 0002 is main's, accepted + measured)
-- [ ] Deck: 15 slides mapped to the five scoring criteria
+- [x] Deck: 15 slides mapped to the five scoring criteria — `deck/deck.pdf`, source `deck/deck.html`,
+      regenerate with `deck/build.sh` (verifies the PDF-only / ≤15 slides / ≤20 MB limits)
 - [ ] Rehearse the demo twice
 
 ## Blocked / needs a human
