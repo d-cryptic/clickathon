@@ -58,20 +58,23 @@
       minute (2,924 vs 2,887). ADR 0006's arithmetic is exact; the fault is the version column.
       **Remaining for H4: the finalizer + watermark itself.** Set `W = 2400s` (measured: the 2,081s
       straggler tail binds, not truncation, which only damages the last 60s).
-- [ ] **[H4-fix]** `session_intervals` → `ReplacingMergeTree(build_version)` with a monotonic
+- [x] **[H4-fix]** DONE (388a845) `session_intervals` → `ReplacingMergeTree(build_version)` with a monotonic
       `build_version UInt64`. `ReplacingMergeTree(interval_end)` keeps the LARGEST end, which assumes
       re-derivation only extends; a provisional interval's `TAIL_S=60s` grace can overshoot the true
       end, so the stale row wins forever (316 intervals, 315 stuck at `is_open=1`). Proven to fix it
       in the truncation test. **Schema change — ask the operator before applying to `sonyliv`.**
-- [ ] **[H4-fix]** `cc_minute_delta.starts`/`ends` → `SimpleAggregateFunction(sum, Int64)`. As
+- [x] **[H4-fix]** DONE (388a845) `cc_minute_delta.starts`/`ends` → `SimpleAggregateFunction(sum, Int64)`. As
       `UInt64` they cannot carry ADR 0006's negative corrective row: ClickHouse wraps it to
       `2^64-n` silently, so `max()` returns 1.8e19 and any pre-merge row read is garbage.
       ← **MVP LINE: sealed tier + stateless baseline is a complete submission from here**
-- [ ] **[H4]** `PROJECTION` on `ev_raw` ordered by `video_session_id` — the finalizer and the
+- [x] **[H4]** DONE and MEASURED — verdict: do NOT ship. 27.7x on single-session lookups but the
+      real straggler path is `IN (subquery)` which full-scans, so 1.00x for +94% storage.
+      `sql/60_projection.sql` kept, deliberately NOT in the build path. Original text:
+- [~] **[H4]** `PROJECTION` on `ev_raw` ordered by `video_session_id` — the finalizer and the
       straggler path are point lookups by session, which ADR 0002's key no longer serves. ADR 0002
       names this remedy explicitly. **Measure it; do NOT revert ADR 0002.**
 - [ ] **[H5]** Hot tier: `mv_lease` → `cc_minute_hot` (`uniqExact`) + the stitched serving view (ADR 0004/0005)
-- [ ] **[H6]** `cc_hour_agg` (max + integral); peak/average at minute/hour/day grain with dimension filters
+- [x] **[H6]** DONE — `cc_hour_agg` 26,162 rows, 8-level cube, 98 hours reconciled 0 mismatches
 - [x] **[H7]** ClickStack up **and** observing us — `make stack-up && make clickstack` charts our
       concurrency views off Cloud (docs/CLICKSTACK.md); `sonyliv observe -target cloud` emits
       watermark lag, build-stage timing and the reconcile gate outcome over OTLP, verified by reading

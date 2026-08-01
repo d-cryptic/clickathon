@@ -1,8 +1,9 @@
 TRUNCATION / OPEN-SESSION ABSORPTION TEST   (TODOS H4 + H8)
-generated 2026-08-01T10:21:56Z
+generated 2026-08-01T11:51:36Z
 cut 2026-07-26 10:56:00  ·  isolated database sonyliv_trunc  ·  sonyliv read-only
 --------------------------------------------------------------------------
 PHASE 0 — reset the test database (never touches sonyliv)
+  sonyliv_trunc dropped, recreated and schema reapplied from sql/70_truncation_test.sql
 
 PHASE 1 — load the truncated slice: event_timestamp < 2026-07-26 10:56:00
   458477 events · 6659 sessions · last event 2026-07-26 10:55:59.999
@@ -97,8 +98,11 @@ SECOND FINDING — starts/ends cannot carry the ADR 0006 negative correction
   step 3 says to append 'the NEGATION of the deltas for the old derivation'. For
   delta (Int64) that is exact — proven above. For an unsigned column it is not
   representable, and ClickHouse does not reject it; it wraps, silently:
-
-
+   ┌───────────stored_row─┐
+1. │                  100 │
+2. │ 18446744073709551516 │
+   └──────────────────────┘
+  sum() = 0  (correct, but only because UInt64 sum wraps modulo 2^64)   max() = 18446744073709551516  <- nonsense
 
   This run sidesteps it by zeroing starts/ends on the corrective row, which
   leaves the counters permanently inflated:
