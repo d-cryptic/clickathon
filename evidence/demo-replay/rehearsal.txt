@@ -1,0 +1,61 @@
+──────────────────────────────────────────────────────────────────────────────
+REPLAY — a live-event day, ingested in event-time order
+  target        local   ·   scratch database   sonyliv_t7replay
+  source        default.ev_raw   (READ-ONLY — loaded from the provided CSV)
+  window        2026-07-26 09:00:00  ->  2026-07-26 11:31:00
+  compression   60x  (1 wall-clock second = 60 event-seconds)
+
+  WHAT THIS IS NOT: a scratch database, not the graded service. The graded
+  database sonyliv is BATCH-REBUILT and its publisher has committed ZERO
+  runs. Nothing here is running in the graded service. See demo/REPLAY.md.
+──────────────────────────────────────────────────────────────────────────────
+
+▶ SETUP  (one-time; --resume skips this)
+  created database sonyliv_t7replay
+  applied sql/00, 10, 12, 20, 45, 50 (canonical, unmodified)
+  staged 905,558 events · 10,866 sessions from default.ev_raw
+  withheld 37 sessions (5,097 events) — they arrive late, mid-replay
+  preloaded 88,591 events of history (everything before 2026-07-26 09:00:00)
+  bootstrapping the serving layer through tools/publish.sh …
+    == run 1785621388854  ·  601 session(s) claimed  ·  cursor 1970-01-01 00:00:00.000 -> 2026-08-01 21:56:24.077
+       negated   0 corrective delta rows   254 ms
+       derived   2012 intervals   1820 ms   (window 2026-07-14 15:43:58.144 .. 2026-07-26 08:59:59.675)
+       pruned    superseded intervals   488 ms
+       emitted   2498 delta rows   1252 ms
+       hours     3962 hour-cube rows re-derived   446 ms
+       users     12646 user-minute buckets re-derived   242 ms
+       committed cursor now 2026-08-01 21:56:24.077
+  setup took 39s
+
+──────────────────────────────────────────────────────────────────────────────
+▶ REPLAY RUNNING  ·  expect ~151s of wall clock  ·  ctrl-c to stop
+  tools/publish.sh --loop 1 is now running against sonyliv_t7replay (pid 98671).
+  The curve below moves ONLY because that finalizer is running. Nothing is
+  rebuilt: every update is -deltas(old) + deltas(new) for the sessions that
+  received events since the publisher's cursor (ADR 0013).
+
+  legend   replay-clock→absorbed-through │curve│ cc=concurrent at the
+           absorbed edge · lag=publish lag (wall) · q=queue depth (sessions)
+           '·' not yet reached   '~' sample landed mid-publish (ADR 0023)
+           The curve is LOG-SCALED (this day spans 30x); cc and the peak are
+           printed as numbers. The two clocks differ by the publisher's lag —
+           that gap is the honest freshness number, shown, not smoothed away.
+──────────────────────────────────────────────────────────────────────────────
+09:00→09:00  │▄···············································│ cc 24     pk 24     lag 0s   q 0    
+09:03→09:00  │▄···············································│ cc 24     pk 24     lag 21s  q 32   
+09:07→09:00  │▄···············································│ cc 24     pk 24     lag 25s  q 42   
+09:11→09:00~ │▄···············································│ cc 24     pk 24     lag 29s  q 47   
+09:14→09:00  │▄···············································│ cc 29     pk 29     lag 33s  q 49   
+09:18→09:00  │▄···············································│ cc 29     pk 29     lag 15s  q 61   
+09:22→09:00~ │▄···············································│ cc 29     pk 29     lag 19s  q 52   
+09:25→09:00  │▄···············································│ cc 29     pk 29     lag 23s  q 58   
+09:30→09:08~ │▄···············································│ cc 29     pk 29     lag 15s  q 54   
+09:33→09:08~ │▄···············································│ cc 29     pk 29     lag 20s  q 57   
+09:38→09:08  │▁▆█·············································│ cc 32     pk 34     lag 24s  q 64   
+09:43→09:16  │▁▄█▇▆▇··········································│ cc 38     pk 39     lag 22s  q 71   
+09:48→09:16~ │▁▄█▇▆▇··········································│ cc 38     pk 39     lag 26s  q 59   
+09:52→09:16~ │▁▄█▇▆▇··········································│ cc 38     pk 39     lag 31s  q 66   
+09:57→09:16  │▁▄█▇▆▇··········································│ cc 38     pk 39     lag 36s  q 71   
+10:02→09:32  │▁▃▅▅▄▆▅▆▆█▇·····································│ cc 43     pk 45     lag 24s  q 50   
+10:07→09:32~ │▁▃▅▅▄▆▅▆▆█▇·····································│ cc 43     pk 45     lag 29s  q 65   
+10:12→09:32  │▁▃▅▅▄▆▅▆▆█▇·····································│ cc 43     pk 45     lag 16s  q 89   
