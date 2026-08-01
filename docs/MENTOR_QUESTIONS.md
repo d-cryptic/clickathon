@@ -227,6 +227,23 @@ it is the same shape of trap as pause.
 **Our assumption:** both count as active.
 **Answer:** _unrecorded_
 
+### Q18 · Is Hindi one audio language or four?
+`audio_language` has 41 distinct values and Hindi is four of them — `hin` 610,889, `HIN` 69,033,
+`hin-hindi` 23,095, `hin-Hindi` 507. English is another four, Japanese four.
+
+**Ask:** In your ground truth, does a Hindi-audio filter count all four spellings as one language, or
+is each string its own filter value? (And: do `UNK` and `UND` mean different things in
+`subtitle_language`, which is 91.5% sentinel?)
+**Why it matters:** measured, peak Hindi concurrency is **1,768** un-normalised and **2,180**
+normalised — **23.3%** on any per-language answer. The unfiltered peak is 2,887 either way, so only
+filtered queries are exposed — but `/reconcile` cannot catch this, because it recomputes truth from
+the same strings and agrees with itself by construction.
+**Our assumption:** store raw, normalise on read, and report the normalised figure. See
+[ADR 0009](adr/0009-normalise-filter-dimensions-at-query-time.md) and the dossier at
+[doubts/04](../doubts/04-dimension-normalisation.md) — switching readings is a `WHERE` clause, not a
+rebuild.
+**Answer:** _unrecorded_
+
 ---
 
 ## Tier 3 — logistics that shape the build

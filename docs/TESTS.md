@@ -19,6 +19,8 @@
 | stitch-boundary probe | a query spanning the watermark neither double-counts nor drops the boundary minute | after any change to `W` or the serving view |
 | straggler probe | a heartbeat dated inside an already-sealed window moves the served value to match a brute-force recomputation from `ev_raw` | before the unseen run |
 | tail-sensitivity sweep | peak/avg across `HEARTBEAT_GAP_S` ∈ {120,150,180} × `TAIL_GRACE_S` ∈ {0,60,150} — proves robustness, or names the point we knowingly chose | before submission |
+| **normalisation self-test** | the dimension-normalisation rule behaves — 24 `throwIf` assertions over **literals only**, so it needs no tables and fails at apply time (Code: 395) rather than as a wrong dashboard number. Includes negative assertions: `jap` must **not** merge with `jpn`, `norm_version` must **not** strip a subtag from `v-0.0.117.12.05.1_adNE`, `9.0.0` must **not** fold to `9` | runs automatically whenever `sql/15_normalise.sql` is applied |
+| **dimension drift audit** | every normalisation group carrying more than one raw spelling is listed from `ev_raw` — so an unseen day's new value family is *seen* rather than silently splitting a bucket. On the provided file: audio 14 groups / 903,857 rows, subtitle 4 / 897,227, app_version 1 / 872, and **zero** for platform/player_version/country | `SELECT * FROM v_dimension_drift_summary` — **before** trusting any filtered number from the unseen day |
 
 ## How to write a correctness test here
 

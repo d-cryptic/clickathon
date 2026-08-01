@@ -93,6 +93,19 @@
       it more accurately than a client span could.
 - [ ] **[H8]** Straggler correction-by-diff path (ADR 0006) + the live late-arrival demo
 - [ ] **[H8]** Tail-sensitivity sweep (gap × tail grid) — the ground truth is private and unfittable
+- [~] **[DIMS]** Filter-dimension value normalisation — **decided and built, NOT wired**.
+      `sql/15_normalise.sql` (UDFs + `v_cc_minute_delta_norm`, `v_concurrency_minute_audio_norm`,
+      `v_dimension_drift`) and [ADR 0009](docs/adr/0009-normalise-filter-dimensions-at-query-time.md).
+      Measured: peak Hindi **1,768 → 2,180 (+23.3%)**; total peak **2,887 unchanged**; query cost
+      **zero** (both filters read the same 28,101 rows / 137 KiB). Normalising inside the derivation
+      was built and measured as **worse** — 202 intervals degraded onto a sentinel — so
+      `30_build_intervals.sql` needs no change. **Remaining, for the derivation owner:**
+      (a) add `apply sql/15_normalise.sql` to `tools/build-model.sh` between `10` and `20`;
+      (b) decide whether per-language benchmark queries read the raw column or the normalised view —
+      that is [doubts/04](doubts/04-dimension-normalisation.md) / Q18, and it is the only part that
+      needs a mentor;
+      (c) run `v_dimension_drift` against the unseen day before trusting any filtered number from it
+      (belongs in `docs/RUNBOOK_UNSEEN.md`).
 
 ## Then
 

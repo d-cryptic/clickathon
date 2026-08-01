@@ -14,6 +14,7 @@
 | [01](01-heartbeat-cadence.md) | The heartbeat ticks at **40s**, the spec says 60s | every interval boundary in the model | `TAIL_S`, `GAP_S` |
 | [02](02-resume-semantics.md) | `resume` fires for four different reasons | **189.2 h — 9.7%** of counted watch time | the pause-exclusion rule |
 | [03](03-content-catalog.md) | Empty `video_type`, colliding titles, a poison id | how content-level answers are labelled | `sql/80_content.sql` views |
+| [04](04-dimension-normalisation.md) | Hindi is **four** strings — one language or four? | **23.3%** on any per-language answer (peak 1,768 vs 2,180) | which figure a filtered benchmark query submits |
 
 ## How these differ from `docs/MENTOR_QUESTIONS.md`
 
@@ -28,6 +29,10 @@ supersede the version in `MENTOR_QUESTIONS.md`:
   shrug.
 - **02 deepens Q3.** Q3 asks "why are there more resumes than pauses?" and assumes unpaired resumes are
   noise to ignore. They are not noise; they are load-bearing, and the assumption is worth 9.7%.
+- **04 is Q18**, and it exists only because measuring created it: ADR 0008 settled the *keys* of the
+  four new filter dimensions without examining the *values* in them. It is the one doubt here whose
+  machinery is already built either way ([ADR 0009](../docs/adr/0009-normalise-filter-dimensions-at-query-time.md)),
+  so the answer changes a `WHERE` clause rather than a model.
 
 ## Rules for this folder
 
