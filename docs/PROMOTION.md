@@ -13,25 +13,39 @@
 
 ---
 
-## 🔴 PAUSED — 2026-08-02 — the graded database is being rebuilt
+## Incident 2026-08-02 — paused, rebuilt, resumed. Read this before trusting a green gate.
 
-**Do not promote anything to `main` until this notice is removed.**
+**Resolved.** Promotion is live again. Kept as a record because the failure mode is subtle and will
+recur if the cause is forgotten.
 
-The correctness gate on `sonyliv` is **FAILING**: 17,028 minutes compared, **970 mismatched**,
-`max_abs_diff` 193, with served concurrency inflated above truth. Check 4 of the gate below cannot
-pass, and checks 3 and 5 measure against a database that is currently wrong — so any promotion
-verdict reached right now is meaningless.
+**What happened.** The gate on `sonyliv` failed: 17,028 minutes compared, **970 mismatched**,
+`max_abs_diff` 193, served concurrency inflated above truth. `session_intervals` read 33,900 against
+a true 30,323 and `cc_minute_delta` 42,396 against 28,073.
 
-**Cause:** `tools/publish-test.sh` cuts SQL extracts and runs them against a scratch database, but
-many extracted statements are **unqualified**, so they resolved against the connection's default
-database — `sonyliv`. **811 unqualified writes** landed there after 19:00 on 2026-08-01. It is the
-same database-resolution defect as queue item **Q33**, in a third location.
+**Cause.** `tools/publish-test.sh` cuts SQL extracts and runs them against a scratch database, but
+many extracted statements are **unqualified**, so they resolved against the *connection's* default
+database — `sonyliv`. **811 unqualified writes** landed there after 19:00 on 2026-08-01. The query
+log shows the two forms side by side in the same run: `INSERT INTO sonyliv_pub.cc_publish_lease …`
+next to a bare `INSERT INTO cc_publish_lease …`. Same database-resolution family as queue item
+**Q33**, third location.
 
-**`ev_raw` is byte-intact** (905,558 rows, 10,866 sessions, unchanged max timestamp), so a rebuild
-restores correctness fully. Operator authorised it on 2026-08-02.
+**Why it hid for a day.** `ev_raw` was untouched and the **peak still read 2,917**, so every
+spot-check of the headline number passed. Only the full gate — which compares *every* minute rather
+than the peak — could see it. Repeated identical count queries also appear to have been served from
+cache, so re-checking the same number several times gave false reassurance.
 
-If you are a promotion agent and your check 4 fails, **that is this, not your feature.** Stop, say so,
-and wait.
+**The lesson, and it is a gate rule now:** *the headline being right is not evidence that the model
+is right.* A spot-check of peak, or of a row count, is not a substitute for the gate. Check 4 exists
+precisely because it compares all 17,028 minutes.
+
+**Recovery.** `ev_raw` was byte-intact (905,558 rows, 10,866 sessions, unchanged max timestamp), so an
+operator-authorised `REBUILD_GRADED=yes` restored every tier exactly: 30,323 / 28,073 / 26,254 /
+91,692, peak 2,917, gate **17,028 · 0 mismatched · max_abs_diff 0**. The same rebuild cleared the
+ADR 0016 and ADR 0022 migration debt, so `v2.todo.md` §A3 is closed.
+
+**Also found by it:** ADR 0022 added `cube_level` to `cc_hour_agg` but never added the migration step,
+so the first authorised rebuild after it died at stage 4/6. `build-model.sh` now migrates that table
+the same way it already migrated `cc_user_minute`.
 
 ## Why not just merge `dev`
 
