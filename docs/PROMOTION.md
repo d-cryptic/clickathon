@@ -224,6 +224,36 @@ Two independent reviews had said "two" and the number was three.
 with a caveat. And an attribution agreed by two reviews is still worth re-deriving — "two characters"
 was very nearly right, and very nearly is how a third difference stays invisible.
 
+## 🔴 Three rejections, three incomplete cherry-picks — this is now THE failure mode
+
+W2's **second** rejection has the same root cause as its first, and W3's was a variant. That makes it
+a pattern rather than an accident, and check 1 must change to catch it.
+
+| attempt | what was picked | what was NOT, and the consequence |
+|---|---|---|
+| W2 #1 | ADR 0009's derivation fix | `df6e7a2`'s `sql/40_deltas.sql` — so the ADR's own `any()` claim was false on its branch |
+| W2 #2 | ADR 0014's `50_hour_agg.sql` tie-break | `tools/unseen-run.sh` — **230 lines** different from `dev`. Codex ran it: the unseen-day submission path returns **16:59 and 16:35 instead of 15:51** |
+| W2 #2 | ADR 0011's `sql/15_normalise.sql` | the `build-model.sh` step that applies it — `make model` never runs it, so the promoted ADR "did nothing" |
+| W3 | ADR 0013+0016 | wave-1 tooling — check 3 could not run at all |
+
+**W2 #2 is the most serious defect any review has found**, because `tools/unseen-run.sh` is *the
+unseen-day submission path*. A promoted W2 would have shipped a `main` that answers the peak-minute
+question **wrongly on the day it counts most**, while every gate stayed green — the gate compares
+concurrency, not peak-minute attribution.
+
+Codex also caught the docs half: ADR 0011 says both three and four views; the unseen runbook calls
+**both 16:59 and 15:51** the expected good answer; ADR 0014 is marked Accepted while its submitted
+answer path is explicitly open.
+
+### The rule check 1 now carries
+
+**A feature is the ADR plus every commit that makes the ADR's claims true.** Before promoting:
+
+1. `git log --oneline --all -S'<the thing the ADR says is gone>' -- <file>` for each claim.
+2. Diff **every file the ADR names** between the branch and `dev` — not just the one the ADR
+   headlines. `unseen-run.sh` differed by 230 lines and nobody looked.
+3. **Run the path the ADR governs**, not just the gate. Three green gates hid all three of these.
+
 ## Ledger
 
 `—` not started · `WIP` in a promotion worktree · `GATE n` failed at check n · `✓` on `main`
