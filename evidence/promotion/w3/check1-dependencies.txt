@@ -1,0 +1,55 @@
+CHECK 1 — ISOLATION: the blocking dependency findings
+branch: chore/promotion-w3-publication   commit: 6b2c46e
+base:   origin/main 2b551b5
+date:   2026-08-02
+
+==========================================================================
+D1 · tools/publish-test.sh cannot run: apply-sql.sh has no --database on main
+==========================================================================
+
+$ grep -n 'apply-sql.sh --database' tools/publish-test.sh
+250:env -u CH_DATABASE TARGET=cloud tools/apply-sql.sh --database "$LIVE" \
+253:env -u CH_DATABASE TARGET=cloud tools/apply-sql.sh --database "$CTL" \
+709:env -u CH_DATABASE TARGET=cloud tools/apply-sql.sh --database "$CTL" sql/12_publish.sql >/dev/null
+911:env -u CH_DATABASE TARGET=cloud tools/apply-sql.sh --database "$LIVE" sql/12_publish.sql >/dev/null
+
+$ TARGET=local tools/apply-sql.sh --database sonyliv_pub sql/12_publish.sql
+applying to LOCAL: docker exec ch
+no such file: --database
+exit=1
+
+  main's apply-sql.sh treats every argument as a FILE (line 27-31); there is
+  no option parser. The --database flag lands in wave 1 (commit 6355048).
+
+==========================================================================
+D2 · the SAME script resolves a scratch CH_DATABASE to the GRADED database
+==========================================================================
+
+  main's tools/apply-sql.sh line 17:  [ -f .env ] && set -a && . ./.env && set +a
+  That sources .env AFTER the caller's environment, so an exported
+  CH_DATABASE is overwritten by .env's CH_DATABASE=sonyliv.
+
+$ ( export CH_DATABASE=scratch_probe; set -a; . ./.env; set +a; echo "$CH_DATABASE" )
+sonyliv
+
+  => On this tree there is NO way to apply sql/12_publish.sql to a scratch
+     database. Both routes reach 'sonyliv'. Wave 1 (f2499ea, 06a720d) adds
+     the precedence rules and the graded-database write guards.
+
+==========================================================================
+D3 · make model is broken: build-model.sh calls a file wave 2 has not landed
+==========================================================================
+
+$ for f in $(grep -oE 'sql/[0-9]+_[a-z_]+\.sql' tools/build-model.sh | sort -u); do ... done
+  MISSING sql/15_normalise.sql   <-- build-model.sh applies it
+  OK      sql/20_views.sql
+  OK      sql/30_build_intervals.sql
+  OK      sql/40_deltas.sql
+  OK      sql/45_user_concurrency.sql
+  OK      sql/50_hour_agg.sql
+
+$ grep -n '15_normalise' tools/build-model.sh
+107:TARGET="$TARGET" tools/apply-sql.sh sql/15_normalise.sql >/dev/null
+
+  sql/15_normalise.sql is ADR 0011 — promotion wave 2. ADR 0016's
+  build-model.sh is a 6-stage script whose stage 6/6 applies it.

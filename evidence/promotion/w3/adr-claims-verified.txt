@@ -1,0 +1,119 @@
+W2 LESSON — grep the promoted tree for what each ADR SAYS is gone or changed
+branch commit: 6b2c46e
+
+==========================================================================
+PASS 1 · ADR 0016: 'mv_user_minute is retired outright, not adapted'
+==========================================================================
+$ grep -rn 'CREATE MATERIALIZED VIEW.*mv_user_minute' --include='*.sql' .
+  (no match — the MV is not created anywhere)
+
+$ grep -rn 'mv_user_minute' --include='*.sql' --include='*.sh' . | grep -v ^./evidence/
+tools/publish.sh:702:  # the thing the retired mv_user_minute's set union could never do. Buckets
+tools/build-model.sh:76:    q "DROP VIEW IF EXISTS mv_user_minute" >/dev/null
+sql/45_user_concurrency.sql:55:DROP VIEW IF EXISTS mv_user_minute;
+
+  VERDICT: every surviving reference is a DROP or a comment. Retired. ✓
+
+==========================================================================
+PASS 2 · ADR 0016: 'cc_user_minute becomes ReplacingMergeTree(computed_at)'
+==========================================================================
+$ grep -nE 'CREATE TABLE|ENGINE =|computed_at' sql/45_user_concurrency.sql | head
+73:CREATE TABLE IF NOT EXISTS cc_user_minute
+80:    computed_at  DateTime64(3) DEFAULT now64(3)
+82:ENGINE = ReplacingMergeTree(computed_at)
+
+$ grep -n 'AggregatingMergeTree' sql/45_user_concurrency.sql
+24:-- WHY ReplacingMergeTree AND NOT AggregatingMergeTree + MV (ADR 0016).
+25:-- The previous shape — AggregatingMergeTree fed by an incremental MV on
+  (both hits are prose in the WHY comment, not DDL)
+
+  VERDICT: ENGINE = ReplacingMergeTree(computed_at). ✓
+
+==========================================================================
+PASS 3 · tools/publish-test.sh contains NO unqualified SQL
+         (the mechanism that put 811 writes into sonyliv on 2026-08-02)
+==========================================================================
+$ grep -nEo '(INSERT INTO|CREATE TABLE...|TRUNCATE TABLE...|DROP...|ALTER TABLE|OPTIMIZE TABLE|DELETE FROM)[[:space:]]+<target>' tools/publish-test.sh
+117:TRUNCATE TABLE ${CTL}.session_intervals
+119:TRUNCATE TABLE ${CTL}.cc_user_minute
+121:TRUNCATE TABLE ${CTL}.cc_minute_delta
+123:TRUNCATE TABLE ${CTL}.cc_hour_agg
+244:DROP DATABASE IF EXISTS ${db}
+245:CREATE DATABASE ${db}
+264:INSERT INTO ${db}.ev_raw
+306:INSERT INTO ${db}.ev_raw
+339:INSERT INTO ${db}.ev_raw
+379:INSERT INTO ${db}.ev_raw
+419:OPTIMIZE TABLE ${LIVE}.ev_raw
+514:INSERT INTO ${db}.ev_raw
+578:INSERT INTO ${db}.ev_raw
+659:ALTER TABLE ${LIVE}.ev_raw
+661:ALTER TABLE ${LIVE}.ev_raw
+747:INSERT INTO ${db}.ev_raw
+897:INSERT INTO ${LIVE}.session_dirty
+909:DROP TABLE ${LIVE}.mv_session_dirty
+912:INSERT INTO ${LIVE}.session_dirty
+943:INSERT INTO ${LIVE}.session_dirty
+953:DELETE FROM ${LIVE}.session_dirty
+
+  Every write target is ${LIVE}. / ${CTL}. / ${db}. — explicitly qualified.
+  LIVE/CTL/PROD are pinned at the top of the script:
+53:LIVE=sonyliv_pub
+54:CTL=sonyliv_pub_ctl
+55:PROD=sonyliv                      # READ-ONLY. Never a write target.
+
+  The SQL that IS unqualified — the statements CUT from sql/45 and sql/50
+  between PUBLISH_EXTRACT markers — is executed over HTTP with an explicit
+  ?database= URL parameter, so it cannot resolve against the connection's
+  default database:
+84:  curl -sS --fail-with-body "https://$(ch_host):${CH_PORT}/?database=$1&query_id=$3" \
+428:  curl -sS --fail-with-body "https://$(ch_host):${CH_PORT}/?database=${LIVE}&query_id=$1" \
+658:                  WHERE database='${LIVE}' AND table='ev_raw' AND active")"
+664:           WHERE database='${LIVE}' AND table='ev_raw' AND NOT is_done")" = "0" ] && break
+686:      WHERE database='${LIVE}' AND table='ev_raw' AND active") (projection itself $(qr "SELECT formatReadableSize(sum(bytes_on_disk)) FROM system.projection_parts
+687:      WHERE database='${LIVE}' AND table='ev_raw' AND active AND name='proj_by_session'"))"
+
+  VERDICT: no unqualified SQL. The 2026-08-02 mechanism is closed. ✓
+           (This fix arrives with ADR 0019 / commit 3ceec7d — it is NOT in
+            0f89d9d or 147fd67, which is why 0019 must travel with them.)
+
+==========================================================================
+FAIL 4 · the retired '3.4 s straggler' figure survives as a CURRENT claim
+==========================================================================
+$ grep -rn '3\.4 s' --include='*.md' . | grep -v ^./evidence/
+TODOS.md:23:      straggler 46 min behind the watermark corrected in **3.4 s** reading 11.6% of `ev_raw`.
+docs/ARCHITECTURE.md:90:| **Straggler, older than `W`** | *the same path.* Correction-by-diff does not care how old the event is | 1 session in **3.4 s**, 0 of 1,579 minutes wrong |
+docs/ARCHITECTURE.md:111:| Correction by diff | `ALTER … UPDATE` / partition rebuild | exactly as correct as a rebuild, of one session; cost scales with stragglers, not history — **measured 3.4 s and 11.6% of `ev_raw` for a 46-minute-late straggler** |
+docs/adr/0013-continuous-publication-by-incremental-finalizer.md:12:> every stage; a one-session straggler correction costs 3.4 s and reads 11.6% of `ev_raw`.
+docs/adr/0013-continuous-publication-by-incremental-finalizer.md:113:| **one straggler, 46 min behind** | **1** | **3.4 s** | **10** | **0 differing of 1,579 minutes** |
+docs/adr/0013-continuous-publication-by-incremental-finalizer.md:114:| 200 unchanged, forced | 200 | 3.4 s | 1,354 | 0 differing of 1,579 minutes |
+docs/worksheets/2026-08-01-continuously-updated-aggregates.md:35:- straggler 46 min behind the watermark: corrected in **3.4 s**, reading **11.6%** of `ev_raw`,
+docs/adr/0006-late-arrival-correction-by-diff.md:22:> Measured live: one straggler 46 minutes behind the watermark, corrected in **3.4 s**, reading
+
+  TODOS.md:23 and docs/ARCHITECTURE.md:90,111 assert it as CURRENT.
+  dev fixed exactly those in commit 5baeaa9, which was NOT cherry-picked
+  because its replacement wording cites ADR 0020 — promotion wave 4, and
+  its tools/scale-test.sh base does not exist on main.
+  ADR 0006:22 and ADR 0013:12,113,114 keep the figure DELIBERATELY (dated
+  records; 5baeaa9's own message says ADR 0020 supersedes rather than
+  rewrites them) — those are correct as-is.
+
+==========================================================================
+N/A 5 · ADR 0020 and ADR 0023 are not in this tree
+==========================================================================
+$ ls docs/adr/
+0001-heartbeat-gaps-over-background-events.md
+0002-order-by-time-bucket-then-platform.md
+0003-hour-clipped-interval-splitting.md
+0004-two-tier-lambda-serving.md
+0005-heartbeat-lease-semantics.md
+0006-late-arrival-correction-by-diff.md
+0007-gate-answers-pause-needs-explicit-handling.md
+0008-all-seven-raw-dimensions-carried.md
+0013-continuous-publication-by-incremental-finalizer.md
+0016-publisher-owns-the-user-and-hour-tiers.md
+0019-publisher-state-machine-crash-and-concurrency-safety.md
+
+  ADR 0023 (publish-visibility contract, -87.8% for up to 13.6 s) is NOT
+  in the promoted tree, so there is no claim here to match against code.
+  ADR 0020 likewise — see FAIL 4 for the consequence.

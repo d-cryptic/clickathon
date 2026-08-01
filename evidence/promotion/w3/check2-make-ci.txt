@@ -1,0 +1,21 @@
+CHECK 2 — BUILD AND TEST
+branch commit: 6b2c46e
+
+The pinned toolchain comes from devbox (see .envrc). A bare 'make ci' with a
+globally-installed golangci-lint v1.64.8 fails on the v2 config — environment,
+not code. Run it through devbox:
+
+$ devbox run -- make ci
+Info: Running script "make" on /Users/barun/.superconductor/worktrees/clickathon-project/sc-coupled-cryostat-bef2
+go mod tidy
+go vet ./...
+golangci-lint run ./...
+0 issues.
+CGO_ENABLED=1 go test -race -count=1 ./...
+?   	github.com/d-cryptic/clickathon/cmd/sonyliv	[no test files]
+?   	github.com/d-cryptic/clickathon/internal/chdb	[no test files]
+ok  	github.com/d-cryptic/clickathon/internal/config	1.263s
+ok  	github.com/d-cryptic/clickathon/internal/otelemit	1.251s
+ok  	github.com/d-cryptic/clickathon/internal/pipelinehealth	1.285s
+go build  -trimpath -ldflags '-s -w -X main.version=6b2c46e' -o bin/sonyliv ./cmd/sonyliv
+exit=0
