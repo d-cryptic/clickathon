@@ -3,7 +3,7 @@
 > **Summary:** Click-a-thon India 2026 · SonyLIV **foreground-only concurrency**. Built end to end on
 > ClickHouse Cloud: session, user and content concurrency off a hour-clipped delta serving layer,
 > all 7 raw dimensions, rolling/tumbling windows, ClickStack both charting and self-observing. Peak
-> **2,887 @ 2026-07-26 10:56**; naive session-span would say 3,708. The correctness gate compares
+> **2,917 @ 2026-07-26 10:56**; naive session-span would say 3,708. The correctness gate compares
 > **every minute in the data — 17,028 of them, idle ones included** — against truth recomputed from
 > `ev_raw` alone, derives its own target minutes so it works on any day, and has been negative-tested
 > to prove it fails when it should. The remaining gap is architectural: aggregates are
@@ -26,8 +26,12 @@ in the final hours.
 Full statement: [`docs/upstream/PROBLEM_STATEMENT.md`](docs/upstream/PROBLEM_STATEMENT.md).
 
 **The headline result:** naive session-span overlap counts **2,976.9 hours** of watch time. The
-foreground-only model counts **1,949.3 hours** — **34.5% of apparent watch time is backgrounded or
-paused**. At the peak minute: 3,708 naive vs **2,887** actual, a 22.1% over-count eliminated.
+foreground-only model counts **1,978.1 hours** — **33.6% of apparent watch time is backgrounded or
+paused**. At the peak minute: 3,708 naive vs **2,917** actual, a 21.3% over-count eliminated.
+
+> Re-baselined 2026-08-01 after [ADR 0009](docs/adr/0009-same-second-resume-and-deterministic-attribution.md)
+> fixed a same-second tie in the pause rule. Previously 2,887 / 1,949.3 h / 34.5% / 22.1%.
+> Source of truth: `evidence/reconcile.txt`.
 
 ---
 
@@ -81,11 +85,11 @@ make clickstack-cloud              # provision HyperDX sources, dashboard, saved
 ```
 ev_raw  905,558 events · 10,866 sessions · 2026-07-14 15:43 -> 2026-07-26 11:31 UTC
   │
-  ├─▶ session_intervals  30,769 rows   ACTIVE ranges per session
+  ├─▶ session_intervals  30,323 rows   ACTIVE ranges per session
   │      gaps > 150s close an interval        (backgrounding — heartbeats stop, 0.047/min)
   │      MINUS explicit pause/resume windows  (pause — heartbeats SURVIVE, 0.756/min)
   │
-  ├─▶ cc_minute_delta  24,951 rows     +1 open / -1 close, HOUR-CLIPPED
+  ├─▶ cc_minute_delta  28,074 rows     +1 open / -1 close, HOUR-CLIPPED
   │      concurrency(M) = running sum WITHIN M's hour  <- partition by hour or you get
   │      each hour is absolute -> no scan from t=0        plausible wrong numbers
   │
@@ -130,20 +134,20 @@ Everything here was run, not reasoned about.
 
 | Claim | Evidence |
 |---|---|
-| **The gate passes** — truth from `ev_raw` = serving layer | `evidence/reconcile.txt` · 5 minutes, all delta 0 |
+| **The gate passes** — truth from `ev_raw` = serving layer | `evidence/reconcile.txt` · **17,028 minutes**, 0 mismatched, `max_abs_diff` 0 |
 | Gate actually fails when it should | inject one bad delta row → exit 1; rebuild → exit 0 |
-| Delta layer = independent interval expansion | 3,725 minutes, **0** mismatches |
-| Hour tier = minute tier | 98 hours, **0** mismatches; day peak 2,887 |
+| Delta layer = independent interval expansion | **3,732** minutes, **0** mismatches *(re-run 2026-08-01)* |
+| Hour tier = minute tier | 98 hours, **0** mismatches; day peak 2,917 |
 | Hour-clipping is correct | interval `20:59:48→22:04:49` emits `+1@20:59`, `+1@21:00`, `+1@22:00`, `-1@22:05`, no close in hours 20/21 |
 | Serving is cheaper than expansion | 299 KB / 23 ms vs 2.55 MB / 56 ms — **8.5×** |
-| Charts render real data | HyperDX `clickstack_timeseries`: 61 → **2,887** → 7, 28 ms |
+| Charts render real data | HyperDX `clickstack_timeseries`, peak day in 1 h buckets: 3 → **2,917** → 2,873; **14 ms**, 28,074 rows *(re-taken 2026-08-01)* |
 | Load is exact | `ev_raw` 905,558 = source rows; `content_dim` 33,464 |
 | From-scratch rebuild is deterministic | isolated DB reproduces production exactly |
-| User concurrency correct | peak 2,815 vs session 2,887; `uniqExactMerge` 9,517 = 9,517 distinct users |
+| User concurrency correct | peak **2,844** vs session **2,917**; `uniqExactMerge` 9,531 = 9,531 distinct users *(re-measured 2026-08-01, direct from `session_intervals` — `cc_user_minute` itself drifts up on repeated rebuilds, see ADR 0009)* |
 | Content concurrency correct | hour-peak reconcile, **0** mismatches over 6,764 rows |
 | Rolling/tumbling windows correct | vs brute-force self-join, **0** mismatches at 5/15/60 min |
-| Duplicates are inert | full derivation run raw vs deduped: identical intervals, **0** of 3,725 minutes differ |
-| Absorption converges (after the fix) | incremental = clean rebuild, row for row, all 1,578 minutes |
+| Duplicates are inert | full derivation run raw vs deduped: identical intervals, **0** of 3,725 minutes differ *(counts as measured at `4a89399`, pre-ADR-0009; conclusion unaffected — both arms share the pause rule)* |
+| Absorption converges (after the fix) | incremental = clean rebuild, row for row, all 1,578 minutes *(pre-ADR-0009, not re-run)* |
 
 ---
 
@@ -151,7 +155,8 @@ Everything here was run, not reasoned about.
 
 ### Two defects — found by test, both now FIXED
 
-1. **Incremental absorption did not converge** — overcounted the peak minute by 37 (2,924 vs 2,887).
+1. **Incremental absorption did not converge** — overcounted the peak minute by 37 (2,924 vs 2,887,
+   both figures as measured at `388a845`, before ADR 0009 moved the peak to 2,917).
    `session_intervals` was `ReplacingMergeTree(interval_end)`, which assumes re-derivation only ever
    *extends* an interval. It doesn't: 316 intervals ran up to 60 s too long, 315 stuck at
    `is_open=1`. Now versioned on a monotonic `build_version` — incremental equals a clean rebuild on
@@ -177,19 +182,24 @@ Found late — `tools/fetch_data.sh` originally pulled only the CSVs, so
 | H7 OTLP self-instrumentation | ClickStack "meaningful integration" bar | **done** — `sonyliv observe` |
 | Unseen-day dry run + evidence packaging | "no pipeline evidence, no credit" | **done** — `tools/unseen-run.sh`, ~2.5 min for a 1 GB day |
 | The gate | correctness is scoring criterion #1 | **FIXED** — 17,028 minutes incl. idle, self-targeting, negative-tested |
-| **Re-loading a CSV doubles the data** | — | **BROKEN** — the claimed idempotency setting is for non-replicated MergeTree; Cloud is SharedMergeTree |
-| `CH_DATABASE` env var silently ignored | — | **BROKEN** — a retarget appears to work and writes to production |
+| ~~**Re-loading a CSV doubles the data**~~ | — | **FIXED** `6355048` — the loader refuses to double the day; evidence in `evidence/load-guard.txt` |
+| ~~`CH_DATABASE` env var silently ignored~~ | — | **FIXED** `6355048` — explicit precedence, the environment now wins over `.env` |
 
 **On dedup:** the 4,210 duplicate rows are *provably inert* — the full derivation run raw vs
-deduplicated gives identical intervals and 0 of 3,725 minutes differ, because the model reads a
-session's events as a set of instants. One caveat: exactly one duplicate group is not a byte-identical
+deduplicated gives identical intervals and 0 of 3,725 minutes differ (counts as measured at
+`4a89399`; the current model spans 3,732 minutes, and the experiment has not been re-run — but both
+arms share whatever pause rule is in force, so ADR 0009 moves them together), because the model reads
+a session's events as a set of instants. One caveat: exactly one duplicate group is not a byte-identical
 replay — it differs in `subtitle_language` (`UNK` vs `OFF`). That is harmless only while
 `subtitle_language` is not a dimension, and `dataset_details` names it as one.
 
 ### Decisions only a human can make
 
 - **Unclosed-pause rule** — 23% of pauses never resume. Conservative (shipped) 1,949.3 h vs permissive
-  2,048.6 h: **+99.3 h, 5.09%**. Unknowable from the file.
+  2,048.6 h: **+99.3 h, 5.09%**. Unknowable from the file. ⚠️ **Both arms were measured at `cf80acc`,
+  before the ADR 0009 tie fix.** The conservative arm is now 1,978.1 h; the permissive arm has not
+  been re-run, so the spread is stale and is deliberately *not* rescaled here — pairing a new
+  conservative number with an old permissive one would invent a delta across two derivations.
 - **Local container schema drift** — local `cc_minute_stateless` is `uniq`, Cloud is `uniqExact`.
   Fixing needs `docker compose down -v`, which destroys the local volume.
 - **Team Captain** — only they can submit.
