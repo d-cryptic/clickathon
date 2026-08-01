@@ -11,7 +11,7 @@
 | `ch [-c] "SQL"` | run a query — local by default, `-c` for Cloud |
 | `stats "SQL"` | run a query and print `X-ClickHouse-Summary` (rows/bytes/ms) — no `FLUSH LOGS` |
 | `load.sh [--database N] [--replace\|--append] [raw.csv] [content.csv]` | load the datasets, converting epoch **millis** → `DateTime64(3)`. **REFUSES if the tables already hold rows** — a re-load appends and doubles `ev_raw` silently |
-| `build-model.sh` | rebuild the model in order: intervals -> deltas -> views, then reconcile. TRUNCATEs first — deltas double if you do not |
+| `build-model.sh` | rebuild the model in order: intervals + user tier -> deltas -> hour tier -> views, then reconcile all three tiers. TRUNCATEs first — deltas double if you do not, and the user tier drifts silently upward (ADR 0012) |
 | `reconcile.sh` | **THE GATE** — recompute concurrency from `ev_raw` and compare. Exits 1 on any mismatch; writes `evidence/reconcile.txt` |
 | `apply-sql.sh [--database N] [file...]` | apply `sql/*.sql` to local or `TARGET=cloud`. initdb only runs on first boot; Cloud has no mount at all |
 | `load-guard-test.sh` | negative tests for the two above: makes them refuse a double load and proves a load lands in the database that was asked for. Own scratch databases, dropped on exit; never writes `sonyliv` |
