@@ -23,6 +23,7 @@ what is verified, what is broken, and what is still missing, in one page.
 |---|---|
 | Understand how work flows here (gates, reviews, worksheets) | [AGENT_WORKFLOW.md](AGENT_WORKFLOW.md) |
 | **Understand the whole problem from scratch, in plain English** | [docs/EXPLAINER.md](docs/EXPLAINER.md) — the ask, what is really in the data, and why the obvious approach is wrong |
+| **Answer "which sessions count, and what does it cost me when you are wrong?"** | [docs/BUSINESS_RULES.md](docs/BUSINESS_RULES.md) — the inclusion ledger, the cost of error in both directions, decision→tier mapping, and a straight answer on billing |
 | Understand the concurrency model and why | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | Know the field names / event types / data shape | [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) |
 | Write SQL the way this repo writes SQL | [docs/CONVENTIONS.md](docs/CONVENTIONS.md) |
