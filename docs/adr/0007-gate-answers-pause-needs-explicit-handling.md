@@ -85,12 +85,26 @@ resumes, 4,440 more resumes than pauses. 6,272 pauses (23%) have no following re
 After an unclosed pause, activity runs at **1.17 beats/min** — a quarter of the active rate, so not
 obviously "still watching" and not obviously "gone". Two defensible rules:
 
-- **Conservative** (excludes 1,187,790 s ≈ 19,800 min): an unclosed pause stays paused to the end of
-  its run. Never credits time we cannot prove was active.
-- **Permissive**: an unclosed pause ends at the next event, treating the pause as a blip.
+- **Conservative** (shipped): an unclosed pause stays paused to the end of its run. Never credits time
+  we cannot prove was active.
+- **Permissive**: an unclosed pause ends at the next event of any kind, treating the pause as a blip.
 
-These differ by ~19,800 minutes of counted watch time, so the choice is material and it is a
-judgment call about what the private ground truth did. **Open — needs an operator decision.**
+**Measured, both rules run end to end over the real file:**
+
+| rule | counted watch time |
+|---|---|
+| conservative (shipped) | **1,949.3 h** |
+| permissive | **2,048.6 h** |
+| difference | **+99.3 h — 5.09%** |
+
+Note the correction: an earlier estimate put this at ~19,800 minutes (330 h), taken from the raw time
+following an unclosed pause. That overstated it roughly 3×, because most of that time is *already*
+excluded by the gap rule closing the run — the two exclusions overlap. The real exposure is 99.3 h.
+
+5.09% of counted watch time still moves every number we report, and the answer depends on what the
+private ground truth did, which is unknowable from the file. **Open — needs an operator decision.**
+Conservative is the safer default against an exact ground truth: it under-counts rather than inventing
+viewers, and under-counting is visible in the comparison against the stateless baseline.
 
 ## Consequences
 
