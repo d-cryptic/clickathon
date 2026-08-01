@@ -39,7 +39,11 @@
 - [x] **[H2]** `session_intervals` built — `sql/30_build_intervals.sql`. 30,769 intervals over all
       10,866 sessions, 0 invalid. Hand-verified against a raw timeline; reconcile at the peak minute
       gives 2,886 active vs 3,708 naive session-overlap, with 0 unbacked sessions.
-- [ ] **[H2a]** **DECIDE: unclosed-pause rule.** 23% of pauses never resume. Both rules now MEASURED
+- [x] **[H2a]** **Unclosed-pause rule — RESOLVED into a switch.** `UNCLOSED_PAUSE_TO_RUN_END`
+      (1 = conservative, shipped; 0 = permissive) in `sql/30_build_intervals.sql` AND
+      `sql/90_reconcile.sql` — both, in lockstep. Measured: PEAK 2,887 vs 3,018, +4.5% on the graded
+      number (hours +5.09%). Gate verified in all three states. Still ask mentor Q2. Original:
+- [~] **[H2a]** ~~DECIDE~~ unclosed-pause rule. 23% of pauses never resume. Both rules now MEASURED
       end to end: conservative (shipped) 1,949.3 h vs permissive 2,048.6 h — **+99.3 h, 5.09%**.
       The earlier "~19,800 min" estimate was ~3x too high; that time is mostly already excluded by the
       gap rule, the two overlap. Conservative is the safer default against an exact ground truth.

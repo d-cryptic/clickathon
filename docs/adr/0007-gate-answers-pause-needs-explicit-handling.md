@@ -101,10 +101,26 @@ Note the correction: an earlier estimate put this at ~19,800 minutes (330 h), ta
 following an unclosed pause. That overstated it roughly 3×, because most of that time is *already*
 excluded by the gap rule closing the run — the two exclusions overlap. The real exposure is 99.3 h.
 
-5.09% of counted watch time still moves every number we report, and the answer depends on what the
-private ground truth did, which is unknowable from the file. **Open — needs an operator decision.**
-Conservative is the safer default against an exact ground truth: it under-counts rather than inventing
-viewers, and under-counting is visible in the comparison against the stateless baseline.
+**It moves the PEAK, which is the graded number** — measured after this ADR was first written, and
+the more important figure:
+
+| rule | counted hours | **PEAK** | peak minute |
+|---|---|---|---|
+| conservative (shipped) | 1,949.3 h | **2,887** | 2026-07-26 10:56 |
+| permissive | 2,048.6 h | **3,018** | same minute |
+| difference | +5.09% | **+131, +4.5%** | — |
+
+**Resolved into a one-constant switch rather than left open.**
+`UNCLOSED_PAUSE_TO_RUN_END` at the top of `sql/30_build_intervals.sql` — `1` conservative (default),
+`0` permissive. **It must be flipped in `sql/90_reconcile.sql` too**, and that is deliberate: the gate
+derives truth from `ev_raw` with a different implementation, so it shares the SPEC but not the CODE.
+Verified both ways: model-only flip → gate catches it (240 mismatched minutes, max_abs_diff 156);
+both flipped → gate green at peak 3,018; restored → green at 2,887.
+
+**Default stays conservative** because against an EXACT private ground truth, under-counting is a
+visible, explainable error, while over-counting invents viewers that demonstrably were not receiving
+playback events. Still worth asking (mentor Q2) — but it is now a two-line change plus a rebuild and
+a gate run, not a redesign.
 
 ## Consequences
 

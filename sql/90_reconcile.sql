@@ -38,6 +38,14 @@
 WITH
     150 AS GAP_S,
     60  AS TAIL_S,
+    -- MUST MATCH sql/30_build_intervals.sql. Changing one without the other is
+    -- a spec divergence, and this gate WILL catch it — verified: flipping the
+    -- model to permissive while leaving this at 1 produces 240 mismatched
+    -- minutes, max_abs_diff 156. That is the gate working as intended, not a
+    -- bug, but it means the unclosed-pause rule is a TWO-FILE change.
+    -- Sharing the CONSTANT is correct; sharing the IMPLEMENTATION would not be
+    -- — truth is still derived from ev_raw with different code.
+    1 AS UNCLOSED_PAUSE_TO_RUN_END,
 
     -- ---------------------------------------------------------------- truth --
     -- DISTINCT first: the file contains duplicate events at identical
@@ -61,7 +69,8 @@ WITH
     ),
     runs AS
     (
-        SELECT video_session_id, run_id, min(ts) AS r_start, max(ts) AS r_end
+        SELECT video_session_id, run_id, min(ts) AS r_start, max(ts) AS r_end,
+               arraySort(groupArray(ts)) AS run_ts
         FROM
         (
             SELECT
@@ -89,8 +98,15 @@ WITH
             r.video_session_id AS video_session_id,
             r.r_start AS r_start,
             r.r_end   AS r_end,
+            r.run_ts  AS run_ts,
             arraySort(arrayMap(
-                p -> (p, least(if(arrayFirst(x -> x > p, p2.rs) = 0, r.r_end, arrayFirst(x -> x > p, p2.rs)), r.r_end)),
+                p -> (p, least(
+                        if(arrayFirst(x -> x > p, p2.rs) = 0,
+                           if(UNCLOSED_PAUSE_TO_RUN_END = 1,
+                              r.r_end,
+                              if(arrayFirst(x -> x > p, r.run_ts) = 0, r.r_end, arrayFirst(x -> x > p, r.run_ts))),
+                           arrayFirst(x -> x > p, p2.rs)),
+                        r.r_end)),
                 arrayFilter(p -> (p >= r.r_start) AND (p < r.r_end), p2.ps)
             )) AS wins
         FROM runs AS r

@@ -71,6 +71,16 @@ WITH
     -- Credit after the last event of a run. One cadence, not a full gap: the
     -- viewer was watching until at least the next expected event.
     60  AS TAIL_S,
+    -- THE UNCLOSED-PAUSE RULE. 23% of pauses never resume, and the two readings
+    -- are not close: MEASURED end to end on the real file,
+    --   conservative  1,949.3 h counted, PEAK 2,887
+    --   permissive    2,048.6 h counted, PEAK 3,018   (+5.09% hours, +4.5% PEAK)
+    -- Both at the same minute, 2026-07-26 10:56. The peak is the graded number,
+    -- so this constant moves the headline by 131 viewers.
+    -- Default CONSERVATIVE: against an EXACT private ground truth, under-counting
+    -- is a visible, explainable error while over-counting invents viewers that
+    -- were demonstrably not receiving playback events. See ADR 0007; mentor Q2.
+    1 AS UNCLOSED_PAUSE_TO_RUN_END,
 
     per_session AS (
         SELECT
@@ -124,9 +134,22 @@ WITH
             dim_events,
             run[1]              AS run_start,
             run[length(run)]    AS run_end,
+            -- A pause window closes at the next `resume`. 23% of pauses never
+            -- get one, and what happens then is UNCLOSED_PAUSE_TO_RUN_END:
+            --   1 = CONSERVATIVE (default) — paused until the run ends. Never
+            --       credits time we cannot prove was active.
+            --   0 = PERMISSIVE — paused only until the next event of any kind,
+            --       treating the unresolved pause as a blip.
+            -- Flipping the constant at the top of this file is the whole change.
             arraySort(arrayMap(
-                p -> (p, least(if(arrayFirst(x -> x > p, resumes) = 0, run[length(run)], arrayFirst(x -> x > p, resumes)),
-                               run[length(run)])),
+                p -> (p, least(
+                        if(arrayFirst(x -> x > p, resumes) = 0,
+                           if(UNCLOSED_PAUSE_TO_RUN_END = 1,
+                              run[length(run)],
+                              -- next event inside this run; run end if it is the last
+                              if(arrayFirst(x -> x > p, run) = 0, run[length(run)], arrayFirst(x -> x > p, run))),
+                           arrayFirst(x -> x > p, resumes)),
+                        run[length(run)])),
                 arrayFilter(p -> (p >= run[1]) AND (p < run[length(run)]), pauses)
             )) AS pause_windows
         FROM runs
