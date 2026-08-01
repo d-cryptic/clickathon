@@ -187,6 +187,43 @@ tail credit at explicit stops.
 changing one without the other makes the gate agree with a bug. That is a wave-2-style promotion, not
 a patch.
 
+## 🔴 Q36–Q39 · Open from the two Codex audits (005 dev-audit, 006 unseen rehearsal)
+
+### Q36 · Two more graded-write paths, both unguarded — **P0**
+
+The `REBUILD_GRADED` / `APPLY_GRADED_DESTRUCTIVE` guards cover `build-model.sh` and `apply-sql.sh`'s
+DROP/TRUNCATE. Codex 005 found they do **not** cover:
+
+- **`load.sh --replace`** against the graded database.
+- **Direct `apply-sql.sh` on a file whose statements are INSERT/CREATE** — deliberately ungated so
+  views and UDFs can be applied, which also means a file that *writes rows* passes freely.
+
+Same family as the two incidents. The guard was never meant to be the only line, and here it is not
+even present.
+
+### Q37 · The contract load and the real runner disagree about a valid file — **unseen-day risk**
+
+Codex 006: a valid CSV with an **embedded newline**, and a valid **new filter column**, are both
+accepted by the contract-gate load and then **rejected by the real runner**. So a file can pass the
+check that says "this file is fine" and fail the run. On a day with one attempt, a green pre-flight
+followed by a failed run is close to the worst sequence available.
+
+### Q38 · The runbook's timings understate by ~1.5× — **fix the number, not the code**
+
+Measured fresh: **70/67/71 s** for 6.9k/30k/850k builds, and **90/79/97 s** for the actual
+contract-first paths. The runbook quotes 47/54/58 s, which predates the contract step. Codex 006's
+verdict is the sentence to keep: *"At 3am, a correct submission is not guaranteed."*
+
+### Q39 · Two claims that do not hold, from Codex 005
+
+- **The decline-alert classifier's "semantic anchors" do not hold.** The merge message asserted
+  `hb_per_session < 1.0` sits below ADR 0007's measured 0.756/min paused rate and therefore cannot be
+  viewer behaviour. Codex checked and disagrees. **I repeated that claim in a merge message without
+  verifying it** — the pattern this repo keeps re-learning.
+- **`docs/BUSINESS_RULES.md` contains stale and arithmetically false statements**, despite its CPM
+  calculation being correct. A commercial reader checking one figure is exactly the audience that
+  will find them.
+
 ## 🔴 Q33 · `build-model.sh` and `reconcile.sh` still carry bug 11 — found INDEPENDENTLY by two agents
 
 Two agents in different lanes hit the same defect within an hour, which is why this is a queue item
