@@ -52,19 +52,31 @@ echo "org $ORG · service $SVC"
 refresh_sources() { api "$BASE/sources" > /tmp/cs-sources.json; }
 refresh_sources
 
-CONN=$(py '
+# Connection discovery is a chicken-and-egg: the REST API returns connections
+# ONLY nested inside sources, and has no /clickstack/connections endpoint (404s
+# on GET and POST). So on a service with zero sources there is nothing to read
+# it from — which is exactly the state a fresh service is in.
+# Prefer the explicit id from .env; fall back to reading it off any source.
+CONN="${CLICKSTACK_CONNECTION_ID:-}"
+if [ -z "$CONN" ]; then
+  CONN=$(py '
 import json
 print(next((s.get("connection","") for s in json.load(open("/tmp/cs-sources.json"))["result"] if s.get("connection")), ""))
 ')
+fi
 
 if [ -z "$CONN" ]; then
   cat >&2 <<'EOF'
-No ClickStack connection exists on this service yet, and the Cloud API exposes no
-way to create one (/clickstack/connections 404s on GET and POST).
+No ClickStack connection id available.
 
-Do this ONCE, then re-run:
-  ClickHouse Cloud console -> HyperDX -> open it
-That provisions the default connection. Everything after is automatic.
+The Cloud REST API cannot supply one on a service with no sources: connections
+are only ever returned nested inside a source, and /clickstack/connections 404s
+on GET and POST.
+
+Get it once, then put it in .env as CLICKSTACK_CONNECTION_ID:
+  - the clickstack MCP: clickstack_list_sources returns a top-level
+    `connections` array even when `sources` is empty, or
+  - open HyperDX in the console once, which provisions and reveals it.
 EOF
   exit 2
 fi

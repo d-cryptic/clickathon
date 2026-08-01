@@ -47,11 +47,22 @@ The local `cs` container and `tools/clickstack-sources.sh` are only for Option A
 HTTP basic with a Cloud API key (`CH_API_KEY_ID` / `CH_API_KEY_SECRET` in `.env`). Run
 `tools/clickstack-cloud.sh`, which provisions sources, the demo dashboard and saved searches.
 
-**One manual prerequisite, once.** A source needs a `connection` id, and the API exposes no way to
-list or create connections — `/clickstack/connections` 404s; only sources, dashboards, alerts,
-roles, webhooks and saved-searches exist. The connection is provisioned the first time HyperDX is
-opened in the console. So open it once; the script then discovers the id from any existing source
-and never needs clicking again.
+**The connection id, once.** A source needs a `connection` id and the REST API returns connections
+only *nested inside sources* — with no `/clickstack/connections` endpoint (404s on GET and POST).
+On a fresh service with zero sources there is therefore nothing to read it from. Resolve it once and
+put it in `.env` as `CLICKSTACK_CONNECTION_ID`; after that the script is fully autonomous.
+
+The cleanest way to get it is the **clickstack MCP**, whose `clickstack_list_sources` returns a
+top-level `connections` array even when `sources` is empty:
+
+```
+claude mcp add clickstack --transport http https://mcp.clickhouse.cloud/clickstack \
+  --header "x-service-id: <serviceId>"
+```
+
+The MCP can also create sources, dashboards and saved searches directly (`clickstack_save_source`,
+`clickstack_save_dashboard`, `clickstack_save_saved_search`) and query them
+(`clickstack_timeseries`, `clickstack_sql`) — which is how the numbers below were verified.
 
 If you would rather do the first source by hand:
 
@@ -98,7 +109,21 @@ an explicit deliverable.
 
 ## Verified
 
-End-to-end through HyperDX's own proxy, not by querying ClickHouse directly:
+Through HyperDX itself, not by querying ClickHouse directly.
+
+**Hosted**, via the MCP's `clickstack_timeseries` against the provisioned source — the live-event
+curve renders end to end:
+
+```
+2026-07-26 10:00 →  61      ramp
+             10:30 → 1048
+             10:55 → 2894   ← peak, matches the ClickHouse-side figure exactly
+             11:25 →  889
+             11:30 →    7   decay
+28 ms · 83,648 rows read
+```
+
+**Self-hosted**, through its proxy:
 
 ```
 POST /clickhouse-proxy?query=... with header x-hyperdx-connection-id
