@@ -1,0 +1,8 @@
+CRUEL VERIFY · knob skew · database cruel_scratch · 2026-08-01T19:23:22Z
+minutes compared 180 · TRUTH mismatches 0 · SPEC_ONLY divergences 0
+VERDICT: PASS — every TRUTH minute matches
+
+vocabulary probe (pairs in ev_raw missing from evidence/liveness/vocabulary.tsv):
+  none — every pair is inside the committed vocabulary
+
+verify verdict: PASS · full detail above · evidence/cruel/skew.verify.txt

@@ -1,91 +1,147 @@
 # Foreground-only concurrency at streaming scale
 
-> Click-a-thon India 2026 · **SonyLIV track** · ClickHouse as the primary datastore, ClickStack as the
-> observability integration.
+> Click-a-thon India 2026 · **SonyLIV track** · ClickHouse Cloud is the primary datastore and
+> analytical engine; ClickStack is the observability integration. **Judges: start here, then
+> [SUBMISSION.md](SUBMISSION.md)** — every claim there is mapped to the evidence file that proves it.
 
-**The question:** how many people are *actually watching* right now? An open app is not a watching
-viewer. This system counts only truly active playback — excluding backgrounded, paused and
-heartbeat-missing periods — and answers minute-grain, filtered concurrency queries from a serving
-layer, not by rescanning session history.
+**The question:** how many people are *actually watching* at each minute? An open app is not a
+watching viewer. Sessions sit backgrounded, paused, or silent with no heartbeat, and counting that
+time overstates the audience. This system reconstructs the truly-active ranges inside each session
+from start/end events plus player telemetry, and answers minute-grain, filtered peak/average
+concurrency from a pre-aggregated serving layer — never by rescanning session history.
 
-## Run it
+## The result, in four numbers
 
-```bash
-cp .env.example .env          # fill in CH_PASSWORD_LOCAL and AGENT_PASSWORD
-docker compose up -d
-tools/fetch_data.sh           # downloads the 223 MB of CSVs, checksum-verified
-tools/load.sh
-```
-The datasets are **not in this repo** — they are 223 MB of organiser-provided data. `fetch_data.sh`
-pulls them from the [organiser repo](https://github.com/sidagarwal04/click-a-thon-2026/tree/main/SonyLiv/data)
-and verifies each against a pinned sha256, so a truncated download fails there rather than surfacing
-as wrong concurrency numbers later. Already have the files? `tools/fetch_data.sh --verify` checks them
-without re-downloading.
-Then verify before trusting anything — a failed init script leaves a container that looks healthy:
-```bash
-tools/ch "SELECT name FROM system.tables WHERE database='default'"
-```
+All re-verified live against the graded ClickHouse Cloud service on **2026-08-01** (read-only;
+regeneration commands in [SUBMISSION.md](SUBMISSION.md)):
 
-## Develop it
+| | naive session-span | **this model** | |
+|---|---|---|---|
+| Peak concurrency (2026-07-26 10:56 UTC) | 3,708 | **2,917** | 21.3% overcount eliminated |
+| Total counted watch time (12 days) | 2,976.9 h | **1,978.1 h** | **33.6% of apparent watch time was backgrounded or paused** |
+| Peak concurrent *users* (vs sessions) | — | **2,844** | 72 users hold >1 concurrent session at the peak |
+| The correctness gate | — | **17,028/17,028 minutes match, 0 mismatches** | truth recomputed from raw events by an independent implementation |
 
-Go 1.26 pinned by devbox, entered by direnv, driven by make. Full detail in [docs/GO.md](docs/GO.md).
+The 33.6% is the whole point of the problem: a dashboard built on session spans would report an
+audience one-third larger than the one actually watching.
 
-```bash
-direnv allow                  # once — pinned toolchain + .env, no manual PATH
-make hooks                    # fixing pre-commit hook
-make ci                       # tidy, vet, lint, test, build — same as GitHub Actions
-make verify                   # run the CLI against the Cloud service
-```
+## See it work (10 minutes)
 
-## See the curve
-
-The concurrency visualization is ClickStack, not a hand-rolled frontend — it doubles as the OSS
-integration. Detail in [docs/CLICKSTACK.md](docs/CLICKSTACK.md).
+Three commands, in increasing order of proof:
 
 ```bash
-make stack-up && make clickstack   # ClickHouse + HyperDX, team, and our sources
-open http://localhost:8080         # source "Concurrency total (minute)"
+make ci               # Go toolchain: vet, lint, race-tested unit suite, build — green
+demo/run.sh --offline # the full 5-minute demo from committed evidence — no credentials needed
+tools/reconcile.sh    # THE GATE: recompute truth from raw events, compare every minute, exit 1 on any mismatch
 ```
-Set the time range to **2026-07-14 → 2026-07-26**. The dataset is not "now", and HyperDX's default
-last-15-minutes window renders an empty chart that looks like a broken pipeline.
+
+`demo/run.sh` (without `--offline`) runs the same demo live against ClickHouse Cloud — rehearsed
+end-to-end on 2026-08-01, 11 s of machine time, every beat with a committed fallback
+(`evidence/demo/rehearsal.txt`). The gate needs a loaded database (setup below); `TARGET=cloud
+tools/reconcile.sh` runs it read-only against the graded service.
 
 ## The model, in one picture
 
 ```
- ev_raw (MergeTree, ORDER BY (video_session_id, event_timestamp))
-   │   raw events: session start/end, 60s heartbeats, background/foreground
-   │
-   ├─▶ session_intervals (ReplacingMergeTree)      ← ACTIVE ranges per session,
-   │      derived from HEARTBEAT GAPS                 closed by gap > threshold.
-   │      bg/fg corroborate, never decide             Late heartbeats EXTEND, not duplicate.
-   │
-   ├─▶ cc_minute_delta (AggregatingMergeTree)      ← +1 on open, −1 on close, per minute
-   │      ORDER BY (platform, country, content_id, minute)   per dimension combination
-   │         concurrency(M) = running sum of deltas ≤ M
-   │         peak(range)    = max of that running sum  ← NOT summable across dimensions
-   │
-   └─▶ cc_minute_stateless (AggregatingMergeTree)  ← session-INDEPENDENT baseline,
-          uniqState of sessions seen active           always fresh, less accurate.
-          The gap between the two IS the headline: it is the backgrounded time we exclude.
+ev_raw   905,558 events · 10,866 sessions · 2026-07-14 15:43 → 2026-07-26 11:30 UTC
+  │        ORDER BY (video_session_id, event_timestamp) — one session's events are adjacent
+  │
+  ├─▶ session_intervals   30,323 rows      ACTIVE ranges per session
+  │     · a heartbeat gap > 150 s closes a range   (backgrounding: heartbeats STOP)
+  │     · explicit pause→resume windows subtracted (pause: heartbeats SURVIVE — see below)
+  │     · versioned ReplacingMergeTree: a re-derivation REPLACES, so corrections can shrink a range
+  │
+  ├─▶ cc_minute_delta     28,073 rows      +1 at open, −1 at close, HOUR-CLIPPED, 7 raw dimensions
+  │     concurrency(M) = running sum of deltas within M's hour — each hour absolute,
+  │     so no query ever scans from t=0. O(intervals) rows, NOT O(sessions × minutes).
+  │
+  ├─▶ cc_hour_agg         26,254 rows      peak + integral per hour, 8-level dimension cube
+  │     peak is maxable over time but NOT summable across dimensions — stored per level
+  │
+  ├─▶ cc_user_minute                       USER concurrency — uniqExact states, not deltas
+  │     (one user can hold several sessions; summing session deltas would double-count them)
+  │
+  ├─▶ windows + content   rolling / tumbling / range views; title/type/category via dictionary
+  │
+  └─▶ cc_minute_stateless 91,292 rows      session-INDEPENDENT baseline for comparison
+        (uniqExact of sessions seen active; peak 2,894 vs the session-aware 2,917)
 ```
 
-Why deltas and not per-minute explosion: exploding each session into one row per active minute is
-O(sessions × minutes) and collapses at scale. Deltas are O(intervals).
+### The one insight that decides correctness
 
-Why heartbeat gaps and not background events: the data dictionary says those events are **not
-guaranteed**, and the provided file proves it — 14,700 backgrounds vs 14,321 foregrounds, and 418
-sessions that background and never return. See [ADR 0001](docs/adr/0001-heartbeat-gaps-over-background-events.md).
+Backgrounding and pausing look identical on a dashboard but are opposite in the data
+([ADR 0007](docs/adr/0007-gate-answers-pause-needs-explicit-handling.md), measured):
+
+| State | Heartbeat rate | Detectable by gaps? |
+|---|---|---|
+| Actively watching | 4.72 /min | — |
+| Backgrounded | 0.047 /min (100× drop) | yes — the gap closes the range |
+| **Paused** | **0.756 /min — heartbeats keep flowing** | **no** — must be excluded explicitly |
+
+A gap-only model silently counts paused time as watching. Ours subtracts explicit pause→resume
+windows *and* closes on gaps; the two mechanisms are independent and both necessary.
+
+## Performance and updates, in one paragraph each
+
+**Queries.** 13 benchmark-shaped queries (peak + average at minute/hour/day grain, with dimension
+filters) run at **7–45 ms server-side median**, reading **≤ 814 KiB** each — from the serving
+tiers, never raw history. Every run's `query_id` is committed so the numbers are auditable in
+`system.query_log`: [`evidence/bench.txt`](evidence/bench.txt), raw pack
+[`evidence/benchmark/`](evidence/benchmark/).
+
+**Updates.** Late arrivals and still-open sessions are absorbed by an incremental publisher
+([ADR 0013](docs/adr/0013-continuous-publication-by-incremental-finalizer.md) +
+[ADR 0016](docs/adr/0016-publisher-owns-the-user-and-hour-tiers.md)): an MV records which sessions
+each insert touched; the publisher re-derives only those and corrects the serving tiers by
+appending diffs — no truncate, no rebuild. Proven equal to a from-scratch rebuild across all four
+tiers, including a 46-minute straggler and 200 forced republications
+([`evidence/publish.txt`](evidence/publish.txt)). Honesty note: this is proven in a scratch
+database; the graded database has the layer installed but its numbers were produced by batch
+rebuilds — details in [SUBMISSION.md](SUBMISSION.md).
+
+## What we know is still wrong
+
+We keep a live list of open problems rather than hiding them — the model is only as good as its
+assumptions, and some are unverifiable without the organisers' ground truth:
+
+- **`resume` semantics are worth 9.7% of the headline** — the largest measured fork
+  ([doubts/02](doubts/02-resume-semantics.md)). Six evidence-backed questions live in
+  [doubts/](doubts/), each with a decision table per possible answer.
+- **The benchmark query set is our reconstruction** — the official set was never released.
+- **The graded database is batch-rebuilt**, not publisher-maintained (above).
+- The full list, with evidence: [SUBMISSION.md § known limitations](SUBMISSION.md) and
+  [docs/MENTOR_QUESTIONS.md](docs/MENTOR_QUESTIONS.md).
+
+## Run it yourself
+
+```bash
+cp .env.example .env          # fill in CH_PASSWORD_LOCAL and AGENT_PASSWORD
+docker compose up -d
+tools/fetch_data.sh           # 223 MB of organiser CSVs, sha256-verified — data is NOT in the repo
+tools/load.sh                 # exact-count-checked load (re-running cannot double the day)
+make model                    # intervals → deltas → hour cube → user tier → views
+tools/reconcile.sh            # the gate — exits 1 on any mismatch
+```
+
+Go toolchain (`make ci`) is pinned by devbox and entered by direnv: `direnv allow`, detail in
+[docs/GO.md](docs/GO.md). The concurrency chart is ClickStack/HyperDX, which doubles as the OSS
+integration — `make stack-up && make clickstack`, then set the time range to **2026-07-14 →
+2026-07-26** (the dataset is not "now"); detail in [docs/CLICKSTACK.md](docs/CLICKSTACK.md).
 
 ## Where things are
 
 | | |
 |---|---|
-| Router for agents | [AGENTS.md](AGENTS.md) |
-| How work flows / the gates | [AGENT_WORKFLOW.md](AGENT_WORKFLOW.md) |
-| Data shape and **the four traps** | [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) |
-| Verified ClickHouse facts | [docs/VERIFIED.md](docs/VERIFIED.md) |
-| Scripts | [tools/README.md](tools/README.md) |
-| Task queue | [TODOS.md](TODOS.md) |
+| **The submission, mapped to judging criteria** | [SUBMISSION.md](SUBMISSION.md) |
+| Plain-English explainer of the whole problem | [docs/EXPLAINER.md](docs/EXPLAINER.md) |
+| The model and why | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| Honest project state, verified vs assumed | [WALKTHROUGH.md](WALKTHROUGH.md) · [docs/VERIFIED.md](docs/VERIFIED.md) |
+| Design decisions with trade-offs (16 ADRs) | [docs/adr/](docs/adr/) |
+| Every number's provenance | [evidence/](evidence/) — regenerated by scripts, never hand-computed |
+| Data shape and its traps | [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) |
+| Behaviour at 100× | [evidence/scale.txt](evidence/scale.txt) |
+| The unseen-day runbook | [docs/RUNBOOK_UNSEEN.md](docs/RUNBOOK_UNSEEN.md) |
+| Scripts | [tools/README.md](tools/README.md) · agent router: [AGENTS.md](AGENTS.md) |
 
 ## Licence
 
