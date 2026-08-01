@@ -50,6 +50,11 @@ if ! [[ "$from" =~ $minute_pattern ]] || ! [[ "$to" =~ $minute_pattern ]]; then
   exit 2
 fi
 
+if [[ "$to" < "$from" ]]; then
+  echo "to must be greater than or equal to from" >&2
+  exit 2
+fi
+
 if ! [[ "$as_of_run_sequence" =~ ^[0-9]+$ ]]; then
   echo "as-of-run must be an unsigned integer" >&2
   exit 2
