@@ -126,7 +126,7 @@
     </p>
   </div>
   <div class="stats" style="margin-top:56px">
-    <div class="stat"><div class="v accent">2,917</div><div class="l">actually watching at the peak<br>2026-07-26 10:56</div></div>
+    <div class="stat"><div class="v accent">2,917</div><div class="l">actually watching at the peak<br>2026-07-26 10:56 · any-overlap minute rule → s14</div></div>
     <div class="stat"><div class="v warn">3,708</div><div class="l">what naive session-span counting says<br>a 21.3% over-count</div></div>
     <div class="stat"><div class="v">17,028</div><div class="l">minutes reconciled against raw<br>0 mismatched</div></div>
     <div class="stat"><div class="v">7 ms</div><div class="l">headline curve, 329 KiB read<br>from system.query_log</div></div>
@@ -167,7 +167,7 @@
       </table>
       <div class="rulebox">
         <div class="t">measured on the provided file</div>
-        <p style="font-size:14px"><b class="accent">34%</b> of apparent watch time is backgrounded or paused.
+        <p style="font-size:14px"><b class="accent">33.6%</b> of apparent watch time is backgrounded or paused.
         Foreground-only total: <b>1,978.1&nbsp;h</b>. The whole problem exists to kill that over-count.</p>
       </div>
     </div>
@@ -223,17 +223,17 @@
       <div class="box" style="flex:1"><b>SESSION-INDEPENDENT</b> (the mandated baseline)<br>
         <b>mv_stateless</b> — a true streaming MV<br>
         → <b>cc_minute_stateless</b> 91,292<br>
-        <b>mv_user_minute</b> → <b>cc_user_minute</b> 91,692 · uniqExactState<br>
+        <b>cc_user_minute</b> 91,692 · replaceable uniqExact buckets (ADR 0016 — MV retired)<br>
         <span class="sub">peak 2,894 vs 2,917 at the same minute — the gap IS the excluded background+pause</span></div>
     </div>
     <div class="arrow">▼</div>
     <div style="display:flex; gap:12px">
-      <div class="box" style="flex:1.2"><b>30 serving views</b> — minute/hour/day, content-enriched, rolling + tumbling windows, health <span class="sub">· a chart tool cannot read an AggregateFunction column; this layer is why it doesn't have to</span></div>
+      <div class="box" style="flex:1.2"><b>43 serving + health views</b> — minute/hour/day, content-enriched, normalised, rolling + tumbling windows <span class="sub">· a chart tool cannot read an AggregateFunction column; this layer is why it doesn't have to</span></div>
       <div class="box" style="flex:1"><b>ClickStack / HyperDX</b> — the visualization <span class="sub">reads the views AND our OTLP telemetry (slide 12) · zero custom UI code</span></div>
     </div>
     <div class="box gate" style="margin-top:2px"><b class="accent">THE GATE · /reconcile</b> — recomputes truth from ev_raw with window functions (not the model's arraySplit), compares <b>every</b> minute incl. idle ones, exits 1 on any diff. <span class="sub">17,028 minutes · 0 mismatched · negative-tested twice (slide 8)</span></div>
   </div>
-  <div class="foot"><span>checkpoint/1.md §A2 · Go CLI orchestrates and observes — it computes nothing about concurrency</span><span>batch-rebuild today; continuous publication is slide 15 item 1</span></div>
+  <div class="foot"><span>checkpoint/1.md §A2 · Go CLI orchestrates and observes — it computes nothing about concurrency</span><span>graded DB batch-rebuilt today; the incremental publisher is proven in scratch — slide 13</span></div>
 </section>
 
 <!-- ================================================================ SLIDE 5 -->
@@ -415,7 +415,7 @@ an interval running <b>20:59:48 → 22:04:49</b> emits:
           so on this file it is capped at <b class="accent">≤ 36,930 rows no matter how many dimensions exist</b>:</p>
         <div class="bars" style="margin-top:12px; grid-template-columns: 150px 1fr 150px">
           <div class="lbl">3 dimensions</div><div class="track"><div class="bar" style="width:67.6%"></div></div><div class="val">24,951 · 67.6%</div>
-          <div class="lbl">7 dimensions</div><div class="track"><div class="bar hi" style="width:76.2%"></div></div><div class="val">28,139 · 76.2%</div>
+          <div class="lbl">7 dimensions</div><div class="track"><div class="bar hi" style="width:76%"></div></div><div class="val">28,073 · 76.0%</div>
           <div class="lbl">the ceiling</div><div class="track" style="border-right:2px dashed #8a8a80"><div class="bar" style="width:100%; background:none; border:1px dashed #4a4a44"></div></div><div class="val">36,930</div>
         </div>
         <p class="small" style="margin-top:10px">Whole table: 111 KiB. Per-minute explosion (148,900 rows, ≈5.3× larger) has no such ceiling — that is why it isn't the serving path.</p>
@@ -426,7 +426,7 @@ an interval running <b>20:59:48 → 22:04:49</b> emits:
     <div class="col">
       <p class="small" style="margin-bottom:8px">WHAT BREAKS FIRST — SAID BEFORE WE'RE ASKED</p>
       <table>
-        <tr><td><b>Publication is batch today.</b> Aggregates rebuild via <span class="mono">make model</span>; only two views are true streaming MVs. The fix is validated on this exact service — refreshable MV, 1,579 rows in 8 s, no external scheduler (slide 15).</td></tr>
+        <tr><td><b>The graded DB is batch-published today.</b> The incremental publisher (ADR 0013/0016) is proven byte-identical to a rebuild across all four tiers in scratch — but it has never committed a run on the graded DB, and its crash/concurrency windows are audited by inspection only (slides 13 · 15).</td></tr>
         <tr><td><b>FINAL vs argMax flips at scale.</b> Our measurement (slide 9) holds at one active part and zero duplicate keys; with many parts and frequent corrections it reverses. We would re-measure, not assume.</td></tr>
         <tr><td><b>The file can't test everything.</b> <span class="mono">country</span> has a single value, so a country-filter bug is invisible to every test we own — we test on platform's 10 values instead, and say so.</td></tr>
       </table>
@@ -473,13 +473,13 @@ an interval running <b>20:59:48 → 22:04:49</b> emits:
 
 <!-- ================================================================ SLIDE 13 -->
 <section class="slide">
-  <div class="kicker"><span>UPDATE HANDLING — 3 ARRIVAL CLASSES, 3 MECHANISMS</span><span><span class="axis">→ TECHNICAL IMPLEMENTATION</span> · 13 / 15</span></div>
-  <h2>Nothing is ever mutated. <span class="dim">Late data is absorbed, appended, or diffed — never rebuilt.</span></h2>
+  <div class="kicker"><span>UPDATE HANDLING — ONE MECHANISM, EVERY ARRIVAL CLASS</span><span><span class="axis">→ TECHNICAL IMPLEMENTATION</span> · 13 / 15</span></div>
+  <h2>Nothing is ever mutated. <span class="dim">Every late arrival is re-derived per session and appended as a diff — never rebuilt.</span></h2>
   <table style="margin-top:4px">
     <tr><th style="width:26%">arrival class</th><th style="width:24%">mechanism</th><th>why it is correct</th></tr>
-    <tr><td>newer than watermark <span class="mono">W = 2,400 s</span> <span class="muted">(set by the measured 2,081 s straggler tail, not guessed)</span></td><td><b>hot tier</b>: heartbeat leases + <span class="mono">uniqExact</span> (ADR 0004/0005)</td><td>idempotent and monotone — replays are no-ops, late beats are pure additions; open sessions just keep renewing leases</td></tr>
-    <tr><td>in normal order</td><td><b>finalizer</b>: re-derive only sessions touched since last run</td><td>appends sealed hour-clipped deltas behind W; cost scales with changed sessions, not history</td></tr>
-    <tr><td>older than <span class="mono">W</span> (straggler)</td><td><b>correction-by-diff</b> (ADR 0006): recompute that one session with and without, append the difference</td><td>exactly as correct as a full rebuild — because it <i>is</i> one, of one session. <span class="mono">SimpleAggregateFunction(sum, Int64)</span> absorbs the negative rows natively</td></tr>
+    <tr><td>in order, near-real-time</td><td>an MV on <span class="mono">ev_raw</span> records touched sessions; the <b>publisher</b> claims what arrived since its cursor and re-derives only those (ADR 0013)</td><td>appends the negation of each session's published deltas plus its new ones; cost scales with changed sessions, not history</td></tr>
+    <tr><td>straggler, however late <span class="muted">(measured tail: 2,081 s after VideoSessionEnd)</span></td><td><b>correction-by-diff</b> (ADR 0006, live): recompute that one session, append −old +new</td><td>exactly as correct as a full rebuild — because it <i>is</i> one, of one session. <span class="mono">SimpleAggregateFunction(sum, Int64)</span> absorbs the negative rows natively; a 46-min straggler measured at 3.4 s</td></tr>
+    <tr><td>hour/day peaks + distinct users</td><td><b>publisher phases</b> re-derive every touched bucket; <span class="mono">cc_user_minute</span> is replaceable buckets, not a set union (ADR 0016)</td><td>replacement is the cheapest representation in which user <i>retraction</i> exists — all four tiers converge to a from-scratch rebuild: 0 differing cells across bootstrap, shrink, dimension flip, straggler, 200 forced runs</td></tr>
   </table>
   <div class="rulebox" style="border-color:#34d399">
     <div class="t">the proof — a truncation test that manufactures the worst case</div>
@@ -490,26 +490,28 @@ an interval running <b>20:59:48 → 22:04:49</b> emits:
       a stale-row defect (versioning intervals by <span class="mono">interval_end</span> let an overshot tail-grace win forever — 316 intervals, peak over-counted by 37;
       now <span class="mono">ReplacingMergeTree(build_version)</span>) and the UInt64 wrap on negated corrections (slide 7). Both fixed, both re-gated.</p>
   </div>
-  <p style="margin-top:12px" class="small"><b>Honest status:</b> the hot tier and the live straggler demo are designed and ADR'd, not yet wired.
-    The truncation test is the proof of absorption; the live path is next (slide 15).</p>
-  <div class="foot"><span>evidence/truncation.txt · ADR 0004 · ADR 0005 · ADR 0006</span><span>ev_raw retains every event — corrections are deterministic and need no stored state</span></div>
+  <p style="margin-top:12px" class="small"><b>Honest status:</b> the publisher is proven in a scratch database (evidence/publish.txt); the graded DB is
+    still batch-rebuilt — the installed publisher has never committed a run there (slide 15). The hot tier (ADR 0004/0005) was
+    <b>retired, not deferred</b>: correction-by-diff makes it unnecessary, and its lease model counted paused time as watching.</p>
+  <div class="foot"><span>evidence/truncation.txt · evidence/publish.txt · ADR 0006 · ADR 0013 · ADR 0016</span><span>ev_raw retains every event — corrections are deterministic and need no stored state</span></div>
 </section>
 
 <!-- ================================================================ SLIDE 14 -->
 <section class="slide">
-  <div class="kicker"><span>HONEST LIMITS — THE FOUR DEFINITIONAL FORKS</span><span><span class="axis">→ MATURITY</span> · 14 / 15</span></div>
-  <h2>Four definitions the data cannot settle — <span class="accent">each measured, each built as a switch</span></h2>
+  <div class="kicker"><span>HONEST LIMITS — THE FIVE DEFINITIONAL FORKS</span><span><span class="axis">→ MATURITY</span> · 14 / 15</span></div>
+  <h2>Five definitions the data cannot settle — <span class="accent">each measured, each built as a switch</span></h2>
   <table style="margin-top:2px">
     <tr><th style="width:34%">fork</th><th style="width:30%">our default, stated</th><th class="r">measured worth</th></tr>
-    <tr><td><b>1 · resume semantics.</b> 9,958 <span class="mono">resume→resume</span> pairs; 900 sessions whose first pause/resume event is a <i>resume</i> — a clean toggle cannot produce that. Does a pause close at the first resume, or one that corresponds to it?</td><td>close at first resume; unpaired resumes are noise</td><td class="r"><b class="warn">189.2 h · 9.7%</b><br><span class="muted">of counted watch time</span></td></tr>
-    <tr><td><b>2 · unclosed pauses.</b> 23% of pauses never resume. Stay paused to end of run, or end at next event?</td><td>conservative — stays paused (under-counting is visible and explainable; over-counting invents viewers)</td><td class="r"><b class="warn">99.3 h · 5.09%</b><br><span class="muted">+131 (+4.5%) on the graded peak</span></td></tr>
-    <tr><td><b>3 · heartbeat cadence.</b> The doc says 60 s; the shipped data ticks at <b>40.0 s</b> (p50 = p90 on three separate telemetry streams). Which did the ground truth assume?</td><td>the shipped data is authoritative</td><td class="r"><b class="warn">≤ 170.9 h · 8.8%</b><br><span class="muted">upper bound</span></td></tr>
-    <tr><td><b>4 · is Hindi one language or four?</b> <span class="mono">hin / HIN / hin-hindi / hin-Hindi</span> are four raw values.</td><td>store raw, normalise on read — never degrade the derivation</td><td class="r"><b class="warn">23.3%</b><br><span class="muted">on any per-language answer (peak 1,768 → 2,180)</span></td></tr>
+    <tr><td><b>1 · minute membership.</b> Is a session concurrent at minute M if it overlaps <i>any part</i> of M, or only if active <i>at the instant M:00</i> — how a sampled gauge reads? The gate cannot see this: it shares the convention.</td><td>any overlap counts — consistent across model, gate and serving tiers</td><td class="r"><b class="warn">2,507 vs 2,917 · −14.1%</b><br><span class="muted">the largest fork measured (doubts/09)</span></td></tr>
+    <tr><td><b>2 · resume semantics.</b> 9,958 <span class="mono">resume→resume</span> pairs; 900 sessions whose first pause/resume event is a <i>resume</i>. Does a pause close at the first resume, or one that corresponds to it?</td><td>close at first resume; unpaired resumes are noise</td><td class="r"><b class="warn">189.2 h · 9.6%</b><br><span class="muted">of counted watch time</span></td></tr>
+    <tr><td><b>3 · unclosed pauses.</b> 23% of pauses never resume. Stay paused to end of run, or end at next event?</td><td>conservative — stays paused (over-counting invents viewers)</td><td class="r"><b class="warn">99.3 h · +131 peak</b><br><span class="muted">pre-ADR-0009 measurement; permissive arm re-run pending</span></td></tr>
+    <tr><td><b>4 · heartbeat cadence.</b> The doc says 60 s; the shipped data ticks at <b>40.0 s</b> (p50 = p90 on three separate telemetry streams). Which did the ground truth assume?</td><td>the shipped data is authoritative</td><td class="r"><b class="warn">≤ 170.9 h · 8.6%</b><br><span class="muted">upper bound</span></td></tr>
+    <tr><td><b>5 · is Hindi one language or four?</b> <span class="mono">hin / HIN / hin-hindi / hin-Hindi</span> are four raw values.</td><td>store raw, normalise on read — never degrade the derivation</td><td class="r"><b class="warn">+23.8%</b><br><span class="muted">on any per-language answer (peak 1,774 → 2,196, live)</span></td></tr>
   </table>
-  <p style="margin-top:14px">None of these is measurable from the data: the ground truth is private, so a wrong guess is silently wrong
-    on every benchmark answer. Our gate <b>structurally cannot catch them</b> — it recomputes truth from the same rule,
-    so it agrees with itself by construction. That is why each fork is a <b>one-line switch</b>
-    (e.g. <span class="mono">UNCLOSED_PAUSE_TO_RUN_END</span>) with an ~11 s rebuild: the moment a definition is pinned, we re-run and re-gate.</p>
+  <p style="margin-top:10px">None of these is measurable from the data: the ground truth is private, so a wrong guess is silently wrong
+    on every benchmark answer. Our gate <b>structurally cannot catch them</b> — it recomputes truth from the same rule.
+    That is why each fork is a <b>one-line switch</b> (or a stated two-file convention) with an ~11 s rebuild:
+    the moment a definition is pinned, we re-run and re-gate.</p>
   <p class="small" style="margin-top:8px">Also disclosed: <span class="mono">country</span> carries a single value in the provided file, so country-filter
     bugs are invisible to our tests — we validate filtering on platform's 10 values and say so out loud.</p>
   <div class="foot"><span>doubts/ — one dossier per fork: evidence, exact wording, a decision table per answer</span><span>naming the limit pre-empts the question — this project's story is "we kept trying to disprove ourselves"</span></div>
@@ -521,21 +523,21 @@ an interval running <b>20:59:48 → 22:04:49</b> emits:
   <h2>Next steps, in scoring order — <span class="dim">each already de-risked</span></h2>
   <table style="margin-top:4px">
     <tr><th style="width:34%">step</th><th>state of de-risking</th></tr>
-    <tr><td><b>1 · Continuous publication</b> — the spec's "continuously updated aggregates", our biggest stated gap</td><td>native refreshable materialized views, <b>already validated on the graded service: 1,579 rows self-populated in 8 s</b>, no external scheduler. The refresh interval becomes a declared freshness SLA, with lag observable in <span class="mono">system.view_refreshes</span> and charted in ClickStack</td></tr>
-    <tr><td><b>2 · Wire the hot tier</b>, stitched to the sealed tier at <span class="mono">W</span></td><td>designed and ADR'd (0004/0005); upgrades update handling from "proven by test" to "watch it live", and unblocks the stitch-boundary probe</td></tr>
-    <tr><td><b>3 · Live straggler demo</b></td><td>the arithmetic is already proven by the truncation test (1,578 minutes, 0 mismatches); only the live path remains</td></tr>
-    <tr><td><b>4 · Tail-sensitivity sweep</b> — gap {120, 150, 180} × tail {0, 60, 150}</td><td>robustness evidence: either the answer is stable, or we show exactly the point we knowingly chose</td></tr>
-    <tr><td><b>5 · /bench on the released query set</b></td><td>harness ready — <span class="mono">log_comment</span>-tagged latency + bytes read from <span class="mono">system.query_log</span></td></tr>
-    <tr><td><b>6 · Ingest definition answers</b> (slide 14)</td><td>every fork is a one-line switch and an ~11 s rebuild, re-gated by <span class="mono">/reconcile</span></td></tr>
+    <tr><td><b>1 · First committed publisher run on the graded DB</b> — the spec's "continuously updated aggregates"</td><td>the mechanism is no longer a gap: the incremental finalizer maintains <b>all four tiers</b> (ADR 0013/0016), proven byte-identical to a from-scratch rebuild — <b>0 differing cells</b> across bootstrap, growth, shrink, dimension flip, a 46-min straggler and 200 forced runs; phases 0.5–1.8 s. The graded DB has the schema installed and zero committed runs</td></tr>
+    <tr><td><b>2 · Live continuous-publication demo</b> — publisher on a per-minute cadence, watermark lag charted in ClickStack</td><td>every piece exists: publish batches measured 3.5–5 s in scratch, <span class="mono">sonyliv observe</span> already emits the lag. (The hot tier was retired, not deferred — ADR 0013 measured correction-by-diff making it unnecessary)</td></tr>
+    <tr><td><b>3 · Close the publisher's crash / concurrency windows</b></td><td>consumed-before-claimed and single-publisher assumptions are audited by inspection only — reproduce, then guard (queued as ADR 0017)</td></tr>
+    <tr><td><b>4 · Commit the tail-sensitivity sweep as a harness</b></td><td>already measured by the cross-model audit: gap {120, 150, 180} × tail {0, 60, 150} spans peak <b>2,756 → 3,132</b> (13.6%); our shipped point 150/60 → 2,917. Make it one command so the unseen day re-runs it</td></tr>
+    <tr><td><b>5 · /bench on the official query set, if released</b></td><td>it never was — a <b>13-query reconstruction</b> of the statement's shapes is committed with answers, bytes read and query ids (evidence/benchmark/): largest read 814 KiB, server medians 7–45 ms, <span class="mono">ev_raw</span> never touched</td></tr>
+    <tr><td><b>6 · Ingest definition answers</b> (slide 14)</td><td>every fork is a one-line switch (minute membership: a stated two-file convention) and an ~11 s rebuild, re-gated by <span class="mono">/reconcile</span></td></tr>
   </table>
   <div class="rulebox" style="border-color:#34d399; margin-top:18px">
     <div class="t">the close</div>
     <p style="font-size:16px; line-height:1.55"><b>Correct first</b> — 17,028 minutes gated against raw events, negative-tested.
       <b>Fast second</b> — 7 ms and 329 KiB for the headline curve, and we quote what queries <i>read</i>.
-      <b>Update-friendly third</b> — three arrival classes, three mechanisms, absorption proven by a test that caught two real bugs.
+      <b>Update-friendly third</b> — one mechanism for every arrival class, all four tiers converging on the rebuild answer, proven by tests that caught two real bugs.
       And where a definition is genuinely open, we measured what it is worth and built the switch.</p>
   </div>
-  <div class="foot"><span>checkpoint/1.md §C6–C7 · docs/RUNBOOK_UNSEEN.md — the unseen day runs end-to-end in ~1 min (rehearsed twice)</span><span>SonyLIV × ClickHouse · Click-a-thon India 2026</span></div>
+  <div class="foot"><span>checkpoint/1.md §C6–C7 · docs/RUNBOOK_UNSEEN.md — unseen day: 47–58 s end-to-end, rehearsed ×3</span><span>SonyLIV × ClickHouse · Click-a-thon India 2026</span></div>
 </section>
 
 </body>

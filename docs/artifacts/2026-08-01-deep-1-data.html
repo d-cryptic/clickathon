@@ -258,11 +258,11 @@
       <div class="bar"><span>hin-hindi</span><div class="btrack"><div class="bfill" style="width:3.3%;background:var(--paused)"></div></div><span class="bval">23,095</span></div>
       <div class="bar"><span>hin-Hindi</span><div class="btrack"><div class="bfill" style="width:.4%;background:var(--paused)"></div></div><span class="bval">507</span></div>
     </div>
-    <p class="note" style="margin-top:.8rem"><b>703,524 rows · one language · four spellings.</b> Also: <span style="font-family:var(--mono)">jap</span> and <span style="font-family:var(--mono)">jpn</span> are both Japanese; <span style="font-family:var(--mono)">-soundhandler</span> (13 rows) is not a language at all.</p>
+    <p class="note" style="margin-top:.8rem"><b>703,524 rows · one language · four spellings.</b> Also: Japanese arrives as <em>four</em> values (<span style="font-family:var(--mono)">jap · jpn · JPN · jpn-japanese</span>); <span style="font-family:var(--mono)">-soundhandler</span> (13 rows) is not a language at all.</p>
     <table style="margin-top:.9rem">
       <tr><th>column</th><th>problem</th></tr>
       <tr><td>subtitle_language</td><td class="n">11 values, <b>91.6% sentinel</b> (UNK/UND/unk/und/'') · every real value has a case twin</td></tr>
-      <tr><td>player_version</td><td class="n">_ADE/_adE · _ADNE/_adNE</td></tr>
+      <tr><td>player_version</td><td class="n">_ADE vs _adE look like case twins but are <b>different releases</b> — no two player_version values collide under lower() (re-measured, ADR 0011)</td></tr>
       <tr><td>app_version</td><td class="n">5.0.36 and 5.0.36.00 are likely one release</td></tr>
       <tr><td>platform</td><td class="n">Mweb is mixed-case; the other nine are UPPER_SNAKE</td></tr>
       <tr><td>country</td><td class="n no">ONE value — a country-filter bug is invisible in all testing</td></tr>

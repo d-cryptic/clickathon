@@ -289,30 +289,35 @@
 </figure>
 
 <figure>
-  <figcaption><span class="num">FIG 10</span><span class="cap">What we need from you — four definition questions, each measured</span></figcaption>
+  <figcaption><span class="num">FIG 10</span><span class="cap">What we need from you — five definition questions, each measured</span></figcaption>
   <div class="asks">
     <div class="ask">
-      <h3>1 · Does a pause end at the <em>first</em> resume?</h3>
+      <h3>1 · Is a session "concurrent at minute M" on <em>any overlap</em>, or only if active at the instant M:00?</h3>
+      <p>A viewer watching 10:56:10–10:56:50 — do they count toward 10:56? Our model says yes (any overlap). A sampled gauge — any "how many right now" number read once a minute — says no. <b>Ask this one first</b>; it dwarfs the rest, and an answer settles the smaller boundary-tie question (2,917 → 2,916) for free.</p>
+      <div class="cost">worth 410 viewers · −14.1% on the graded peak (2,507 vs 2,917 · doubts/09)</div>
+    </div>
+    <div class="ask">
+      <h3>2 · Does a pause end at the <em>first</em> resume?</h3>
       <p>31,780 resumes vs 27,340 pauses. <b>9,958</b> back-to-back resume→resume pairs, and 900 sessions whose first such event <em>is</em> a resume. A clean toggle cannot produce that — resume also fires after seeks and buffering.</p>
-      <div class="cost">worth 189.2 h · 9.7% of counted watch time</div>
+      <div class="cost">worth 189.2 h · 9.6% of counted watch time</div>
     </div>
     <div class="ask">
-      <h3>2 · What happens to a pause that never resumes?</h3>
-      <p>23% of pauses never resume. Stay paused to the end of the run, or end at the next event?</p>
-      <div class="cost">worth +131 viewers · +4.5% on the graded peak</div>
+      <h3>3 · What happens to a pause that never resumes?</h3>
+      <p>23% of pauses never resume. Stay paused to the end of the run, or end at the next event? (The +131 / +4.5% spread was measured pre-ADR-0009; the permissive arm has not been re-run on the fixed derivation, so we quote it as historical.)</p>
+      <div class="cost">worth ~99.3 h · +131 viewers on the peak, as measured pre-tie-fix</div>
     </div>
     <div class="ask">
-      <h3>3 · Your doc says the heartbeat is 1/min. The data ticks at 40 s.</h3>
+      <h3>4 · Your doc says the heartbeat is 1/min. The data ticks at 40 s.</h3>
       <p>VideoHeartbeat is 41 telemetry streams under one label. Mixed they look aperiodic; separated, the three largest each tick at exactly 40.0 s. Every threshold we set is a function of the cadence.</p>
-      <div class="cost">upper bound 170.9 h · 8.8%</div>
+      <div class="cost">upper bound 170.9 h · 8.6%</div>
     </div>
     <div class="ask">
-      <h3>4 · Is Hindi one language or four?</h3>
+      <h3>5 · Is Hindi one language or four?</h3>
       <p><span style="font-family:var(--mono)">hin · HIN · hin-hindi · hin-Hindi</span> — 703,524 rows across four spellings. Normalise on read, or report the raw strings?</p>
-      <div class="cost">worth 23.3% on any per-language answer</div>
+      <div class="cost">worth +23.8% on any per-language answer (peak 1,774 → 2,196, read live)</div>
     </div>
   </div>
-  <p class="note"><b>None of these is measurable from the data</b> — the ground truth is private, so a wrong guess is silently wrong on every answer. Our gate structurally cannot catch them: it recomputes truth from the same rule, so it agrees with itself by construction. That is why we are asking rather than measuring. Each is a one-line switch and an 11-second rebuild.</p>
+  <p class="note"><b>None of these is measurable from the data</b> — the ground truth is private, so a wrong guess is silently wrong on every answer. Our gate structurally cannot catch them: it recomputes truth from the same rule, so it agrees with itself by construction. That is why we are asking rather than measuring. Each is a one-line switch (minute membership: a stated two-file convention) and an ~11-second rebuild.</p>
 </figure>
 
 <figure>
@@ -320,10 +325,10 @@
   <div class="panel">
     <table>
       <tr><th>item</th><th>state</th></tr>
-      <tr><td>Continuously updated aggregates</td><td class="n">incremental finalizer proven for intervals + minute deltas; <span class="no">user and hour tiers not yet maintained</span>; not deployed to the graded database</td></tr>
-      <tr><td>Benchmark evidence bundle</td><td class="n no">absent — the official query set is not in hand</td></tr>
-      <tr><td>Hot tier (ADR 0005)</td><td class="n">blocked by design: its lease model is equivalent to the gap-only model we discarded</td></tr>
-      <tr><td>Minute-boundary semantics</td><td class="n">inclusive vs half-open moves the peak 2,917 → 2,916 · both model and gate share the convention, so green proves nothing here</td></tr>
+      <tr><td>Continuously updated aggregates</td><td class="n">publisher now maintains <b>all four tiers</b> (ADR 0013 + 0016) — 0 differing cells vs a from-scratch rebuild across seven scenarios, in scratch; <span class="no">the graded database has the schema installed but zero committed runs — it is still batch-rebuilt</span></td></tr>
+      <tr><td>Benchmark evidence bundle</td><td class="n">official query set never released; <b>a 13-query reconstruction is committed</b> with answers, bytes read and query ids (evidence/benchmark/)</td></tr>
+      <tr><td>Hot tier (ADR 0005)</td><td class="n">closed — will not be built: ADR 0013 measured correction-by-diff making it unnecessary, and its lease model is equivalent to the gap-only model we discarded</td></tr>
+      <tr><td>Minute-membership semantics</td><td class="n"><span class="no">any-overlap vs instant-sampling reads 2,917 vs 2,507 (−14.1%) — the largest fork we have measured (FIG 10 ask 1)</span>; the boundary tie (2,917 → 2,916) is the small edge of the same family · model and gate share the convention, so green proves nothing here</td></tr>
     </table>
   </div>
   <p class="note">Owning the gap is worth more than hiding it. Interval derivation is a cross-block, per-session, time-ordered computation — a streaming materialized view genuinely cannot express it, which is the honest answer to “why isn’t this just an MV?”.</p>
