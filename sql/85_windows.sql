@@ -39,6 +39,22 @@
 --    `integral_*` and an `obs_*` minute count so the caller can see coverage
 --    and divide differently if it wants to.
 --
+-- 4. WHEN MINUTES TIE AT THE PEAK, THE EARLIEST ONE WINS (ADR 0014).
+--    Every `*_minute` column in this file is
+--        argMax(<minute>, (<level>, -toInt64(toUInt32(<minute>))))
+--    — concurrency first, negated epoch second, which is a TOTAL order, so the
+--    result cannot depend on merge order or max_threads. A bare
+--    argMax(minute, concurrent) returns an arbitrary row among ties and is what
+--    made the hour tier and the answer path name different minutes for the same
+--    peak on the 2026-07-25 rehearsal (evidence/unseen-rehearsal.txt, P4).
+--
+--    It is not a corner case: at the headline cube level, 49.0% of the stored
+--    hour rows have two or more change points at that hour's max, and five of
+--    the seven days with data in the provided file have a TIED day peak. One of
+--    the two that do not — 2026-07-26, peak 2,887 at 10:56 — is the day every
+--    example in this repo quotes, which is exactly why the ambiguity stayed
+--    invisible.
+--
 -- ---------------------------------------------------------------------------
 -- WHY `RANGE` FRAMES AND NOT `ROWS`
 -- ---------------------------------------------------------------------------
@@ -242,6 +258,21 @@ GROUP BY minute;
 -- Every `peak_*` here crosses hour boundaries freely. That is legal ONLY
 -- because of hour-clipping (rule 2) — on an unclipped delta model these maxima
 -- would be maxima of curve fragments and would mean nothing.
+--
+-- `peak_*_minute` answers "WHEN in the trailing window did it peak", under
+-- rule 4: the EARLIEST minute in the frame that attains the frame's max. These
+-- columns did not exist before ADR 0014 — the view reported a rolling peak with
+-- no way to say when it happened, so any caller asking "when" had to write its
+-- own argMax, which is precisely how two tiers ended up with two answers.
+-- argMax works as a window function with the same tuple it uses as an
+-- aggregate, so the rule is literally the same expression at both grains.
+--
+-- One honest limit: the frame ranges over the minute spine, which is dense
+-- inside an hour that carries data plus a 60-minute pad, not globally dense. A
+-- minute with no row is concurrency 0 and can therefore only ever tie when the
+-- whole frame is 0 — in which case `peak_*_minute` is the earliest PRESENT
+-- minute of the frame, not the earliest clock minute. Read `peak_*_minute` only
+-- where `peak_* > 0`; at 0 the question has no answer worth giving.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE VIEW v_cc_rolling_total AS
 SELECT
@@ -251,6 +282,10 @@ SELECT
     max(concurrent) OVER w5   AS peak_5m,
     max(concurrent) OVER w15  AS peak_15m,
     max(concurrent) OVER w60  AS peak_60m,
+
+    argMax(minute, (concurrent, -toInt64(toUInt32(minute)))) OVER w5  AS peak_5m_minute,
+    argMax(minute, (concurrent, -toInt64(toUInt32(minute)))) OVER w15 AS peak_15m_minute,
+    argMax(minute, (concurrent, -toInt64(toUInt32(minute)))) OVER w60 AS peak_60m_minute,
 
     sum(concurrent) OVER w5  * 60 AS integral_5m,   -- concurrency-seconds
     sum(concurrent) OVER w15 * 60 AS integral_15m,
@@ -292,6 +327,11 @@ SELECT
     max(concurrent) OVER w5   AS peak_5m,
     max(concurrent) OVER w15  AS peak_15m,
     max(concurrent) OVER w60  AS peak_60m,
+
+    -- ADR 0014, same tuple as v_cc_rolling_total; the frame is per combination.
+    argMax(minute, (concurrent, -toInt64(toUInt32(minute)))) OVER w5  AS peak_5m_minute,
+    argMax(minute, (concurrent, -toInt64(toUInt32(minute)))) OVER w15 AS peak_15m_minute,
+    argMax(minute, (concurrent, -toInt64(toUInt32(minute)))) OVER w60 AS peak_60m_minute,
 
     sum(concurrent) OVER w5  * 60 AS integral_5m,
     sum(concurrent) OVER w15 * 60 AS integral_15m,
@@ -344,6 +384,7 @@ SELECT
         + toIntervalMinute({win:UInt32})                      AS window_end,
     {win:UInt32}                                              AS window_minutes,
     max(concurrent)                                           AS peak,
+    -- ADR 0014 / rule 4 — earliest minute in the bucket that attains the max.
     argMax(minute, (concurrent, -toInt64(toUInt32(minute))))  AS peak_minute,
     sum(concurrent) * 60                                      AS integral,
     (sum(concurrent) * 60) / ({win:UInt32} * 60)              AS avg_concurrent,
@@ -366,6 +407,7 @@ SELECT
         + toIntervalMinute({win:UInt32})                      AS window_end,
     {win:UInt32}                                              AS window_minutes,
     max(concurrent)                                           AS peak,
+    -- ADR 0014 / rule 4 — earliest minute in the bucket that attains the max.
     argMax(minute, (concurrent, -toInt64(toUInt32(minute))))  AS peak_minute,
     sum(concurrent) * 60                                      AS integral,
     (sum(concurrent) * 60) / ({win:UInt32} * 60)              AS avg_concurrent,
@@ -464,6 +506,11 @@ WITH
     (
         SELECT
             max(peak)     AS pk,
+            -- ADR 0014: earliest wins, tie-broken on the stored peak_minute
+            -- itself. Legal because each stored peak_minute is ALREADY the
+            -- earliest minute at its own hour's max, so the earliest among the
+            -- hours tied at the range max is the earliest minute in the range.
+            argMax(peak_minute, (peak, -toInt64(toUInt32(peak_minute)))) AS pk_min,
             sum(integral) AS ig,
             count()       AS hrs
         FROM cc_hour_agg FINAL
@@ -516,6 +563,12 @@ WITH
     (
         SELECT
             maxIf(concurrent, b > a)              AS pk,
+            -- ADR 0014 again, on the CLIPPED start `a`: inside a partial hour
+            -- the minute a level is first visible WITHIN the range is
+            -- greatest(change point, range start), not the change point, so a
+            -- level that was already running when the range opened reports the
+            -- range start. Tie-broken on `a` for the same total-order reason.
+            argMaxIf(toDateTime(a), (concurrent, -toInt64(a)), b > a) AS pk_min,
             sum(if(b > a, concurrent * toInt64(b - a), 0)) AS ig,
             countIf(b > a)                        AS chg
         FROM
@@ -536,6 +589,27 @@ SELECT
     {p_country:String}                   AS country,
     {p_content_id:Int64}                 AS content_id,
     greatest(whole.pk, partial.pk)       AS peak,
+    -- WHEN it peaked, resolved ACROSS the two tiers under the one rule.
+    --
+    -- Each tier has already applied earliest-wins inside itself, so all that is
+    -- left is to pick between them — by peak first, and when the two tiers TIE
+    -- at the same peak value, by the earlier of the two minutes. That last
+    -- branch is the whole point of this ADR: without it, a range whose peak is
+    -- reached both in a whole hour and in a partial hour has two defensible
+    -- answers and no rule.
+    --
+    -- The emptiness guards are not decoration. max()/maxIf() over an empty set
+    -- return 0 and argMax returns the DateTime epoch 1970-01-01, which is the
+    -- earliest possible minute — so an unguarded least() would hand back
+    -- 1970-01-01 for any range that has no partial hours (i.e. every
+    -- hour-aligned range) the moment its peak happens to be 0.
+    multiIf(
+        (whole.hrs = 0) AND (partial.chg = 0), toDateTime(0),
+        partial.chg = 0,                       whole.pk_min,
+        whole.hrs = 0,                         partial.pk_min,
+        whole.pk > partial.pk,                 whole.pk_min,
+        partial.pk > whole.pk,                 partial.pk_min,
+        least(whole.pk_min, partial.pk_min))  AS peak_minute,
     whole.ig + partial.ig                AS integral,
     (whole.ig + partial.ig) / (toUInt32(re) - toUInt32(rs)) AS avg_concurrent,
     -- Provenance, so a reader can see WHICH tier answered and audit the

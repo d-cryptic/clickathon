@@ -1,0 +1,238 @@
+TIE-BREAK DETERMINISM — evidence for ADR 0014
+"which minute is THE peak minute when several minutes tie at the peak value"
+
+generated 2026-08-01T13:52:30Z   commit 8af15cb
+database  tie0014 on the local container — an ISOLATED copy of the provided 12-day file
+          (905,558 events, identical to default.ev_raw), built from sql/00,10,30,40,20,45,50,85
+          so that measuring and rebuilding could not perturb the graded service or a
+          parallel agent's work.
+server    26.7.1.1315
+model     30769 intervals· 28156 delta rows· 26186 hour rows
+headline  peak 2887 — matches the committed conservative model
+
+==========================================================================
+1  HOW OFTEN DOES THE PEAK MINUTE TIE?  (the question that decides how much
+   any of this matters)
+==========================================================================
+
+1a  DAY GRAIN, HEADLINE LEVEL (all dimensions collapsed) — every day in the file.
+    `tied_change_points` counts minutes where the curve ARRIVES at the day peak;
+    `tied_held_minutes` counts minutes spent AT it.
+       ┌────────day─┬─day_peak─┬─tied_change_points─┬─tied_held_minutes─┬────────────earliest─┬──────────────latest─┐
+    1. │ 2026-07-14 │        1 │                  7 │                30 │ 2026-07-14 15:43:00 │ 2026-07-14 16:53:00 │
+    2. │ 2026-07-21 │        1 │                  3 │                22 │ 2026-07-21 12:36:00 │ 2026-07-21 18:35:00 │
+    3. │ 2026-07-22 │        4 │                  1 │                 1 │ 2026-07-22 17:41:00 │ 2026-07-22 17:41:00 │
+    4. │ 2026-07-23 │        7 │                  3 │                 6 │ 2026-07-23 16:07:00 │ 2026-07-23 16:50:00 │
+    5. │ 2026-07-24 │        8 │                  2 │                 3 │ 2026-07-24 15:52:00 │ 2026-07-24 15:56:00 │
+    6. │ 2026-07-25 │       13 │                  4 │                 5 │ 2026-07-25 15:51:00 │ 2026-07-25 16:59:00 │
+    7. │ 2026-07-26 │     2887 │                  1 │                 1 │ 2026-07-26 10:56:00 │ 2026-07-26 10:56:00 │
+       └────────────┴──────────┴────────────────────┴───────────────────┴─────────────────────┴─────────────────────┘
+
+    READ THIS TABLE BEFORE ANYTHING ELSE. Five of the seven days with data have
+    a TIED headline day peak. The two that do not are 2026-07-22 (peak 4) and
+    2026-07-26 (peak 2,887 at 10:56) — and 2026-07-26 is the day every worked
+    example, every reconcile literal and every benchmark number in this repo
+    quotes. That is the only reason the ambiguity stayed invisible until the
+    holdout rehearsal.
+
+    2026-07-25 in this file reproduces the rehearsal exactly: peak 13, four
+    change points, earliest 15:51, latest 16:59 — 68 minutes apart.
+
+1b  DAY GRAIN, PER CUBE LEVEL, on 2026-07-26 (the busiest day, the one the
+    benchmark set is built around). One row per level; `combinations` is how
+    many distinct dimension tuples exist at that level.
+       ┌─cube_level─┬─kept_dims────────────────┬─combinations─┬─combos_with_tied_peak─┬─pct_tied─┬─worst_tied_minutes─┬─combos_multi_changepoint─┬─combos_peak_is_1─┐
+    1. │          0 │                          │            1 │                     0 │        0 │                  1 │                        0 │                0 │
+    2. │          1 │ platform                 │           10 │                     2 │       20 │                  2 │                        2 │                0 │
+    3. │          2 │ country                  │            1 │                     0 │        0 │                  1 │                        0 │                0 │
+    4. │          3 │ platform country         │           10 │                     2 │       20 │                  2 │                        2 │                0 │
+    5. │          4 │ content                  │         3229 │                  3050 │     94.5 │                 98 │                     2161 │             2703 │
+    6. │          5 │ platform content         │         4172 │                  3929 │     94.2 │                110 │                     2730 │             3589 │
+    7. │          6 │ country content          │         3229 │                  3050 │     94.5 │                 98 │                     2161 │             2703 │
+    8. │          7 │ platform country content │         4172 │                  3929 │     94.2 │                110 │                     2730 │             3589 │
+       └────────────┴──────────────────────────┴──────────────┴───────────────────────┴──────────┴────────────────────┴──────────────────────────┴──────────────────┘
+
+    The graded headline (level 0) is clean: peak 2,887, one minute, no tie. So
+    is country-only. Ties are RARE at the coarse grain on this particular day.
+
+    They are the NORM everywhere else. 94.5% of the 3,229 content_ids have a
+    tied day peak, worst case 110 minutes at the same level, and 2,703 of them
+    peak at exactly 1 viewer — for those, "when did this title peak" has as many
+    answers as it has minutes of life. The benchmark set explicitly covers
+    "dimension filters (platform, country, content, video type)"
+    (.claude/commands/bench.md), so this is squarely in scope.
+
+1c  HOUR GRAIN — how many of the stored cc_hour_agg.peak_minute values are the
+    output of a tie-break rather than of a unique argmax?
+       ┌─cube_level─┬─stored_rows─┬─rows_2plus_peak_changepoints─┬─pct_cp_tie─┬─rows_peak_held_2plus_min─┬─pct_held_tie─┬─worst_held_minutes─┐
+    1. │          0 │          98 │                           48 │         49 │                       81 │         82.7 │                 60 │
+    2. │          1 │         160 │                           63 │       39.4 │                      129 │         80.6 │                 60 │
+    3. │          2 │          98 │                           48 │         49 │                       81 │         82.7 │                 60 │
+    4. │          3 │         160 │                           63 │       39.4 │                      129 │         80.6 │                 60 │
+    5. │          4 │        5734 │                         2118 │       36.9 │                     5285 │         92.2 │                 60 │
+    6. │          5 │        7101 │                         2522 │       35.5 │                     6512 │         91.7 │                 60 │
+    7. │          6 │        5734 │                         2118 │       36.9 │                     5285 │         92.2 │                 60 │
+    8. │          7 │        7101 │                         2522 │       35.5 │                     6512 │         91.7 │                 60 │
+       └────────────┴─────────────┴──────────────────────────────┴────────────┴──────────────────────────┴──────────────┴────────────────────┘
+
+    49.0% at the headline level, 35-37% at content grain. Roughly one in three
+    of the 26,186 stored peak_minute values in this table is a choice, not a
+    measurement. That is the number that makes the rule worth fixing: the day
+    tier and the ragged-range view both roll those values up.
+
+==========================================================================
+2  DETERMINISM — the same query at max_threads 1, 8 and 32
+==========================================================================
+
+Method: each query is emitted as a FULL ORDERED RESULT SET and fingerprinted
+with md5 — not an order-independent hash-sum, because a hash-sum can cancel
+compensating errors and cannot be diffed. Nine runs per object: threads
+1 / 8 / 32, three repetitions each. All nine run with
+
+    --max_block_size 1024 --group_by_two_level_threshold 1
+    --group_by_two_level_threshold_bytes 1
+
+which forces the two-level parallel GROUP BY at every scale, i.e. the state
+merging that a bare argMax's tie handling actually depends on. Without those
+settings the defect below is much harder to provoke, which is precisely why
+it survived until a low-traffic holdout day surfaced it.
+
+== A. the earliest-wins rule, as shipped ==
+  cc_hour_agg peak_minute derivation (26,186 rows)     102a0b31b8bf  IDENTICAL across 9 runs (t=1,8,32 x3)
+  v_concurrency_hour                                   102a0b31b8bf  IDENTICAL across 9 runs (t=1,8,32 x3)
+  v_concurrency_day                                    22948628ca39  IDENTICAL across 9 runs (t=1,8,32 x3)
+  v_concurrency_day_total                              4a158b6087f2  IDENTICAL across 9 runs (t=1,8,32 x3)
+  v_cc_tumbling_hour                                   102a0b31b8bf  IDENTICAL across 9 runs (t=1,8,32 x3)
+  v_cc_tumbling_total(win=5)                           13b8496cfa97  IDENTICAL across 9 runs (t=1,8,32 x3)
+  v_cc_tumbling_total(win=15)                          7cd846a7fb4e  IDENTICAL across 9 runs (t=1,8,32 x3)
+  v_cc_tumbling_dim(win=15)                            0843381f28f9  IDENTICAL across 9 runs (t=1,8,32 x3)
+  v_cc_rolling_total  peak_5m/15m/60m_minute           0b964ef92a47  IDENTICAL across 9 runs (t=1,8,32 x3)
+  v_cc_rolling_dim    (pinned ANDROID_PHONE)           1f3950283f84  IDENTICAL across 9 runs (t=1,8,32 x3)
+  v_cc_window_range 15:00-17:00 (whole-hour tie)       642203ddacc9  IDENTICAL across 9 runs (t=1,8,32 x3)
+  v_cc_window_range 15:30-17:00 (cross-tier tie)       642203ddacc9  IDENTICAL across 9 runs (t=1,8,32 x3)
+  v_cc_window_range 10:17-11:31 (busy day)             f10837bdb44e  IDENTICAL across 9 runs (t=1,8,32 x3)
+
+== B. NEGATIVE CONTROL — the same derivation with a bare argMax ==
+  cc_hour_agg peak_minute, argMax(minute, concurrent)  102a0b31b8bf  *** 6 DISTINCT RESULTS ***
+
+The fingerprint is IDENTICAL across all nine runs for every object, including
+the three ragged ranges where the peak minute has to be resolved ACROSS the
+hour tier and the minute tier.
+
+Note the repeated fingerprint 102a0b31b8bf: the derivation query, the stored
+table read back through v_concurrency_hour, and v_cc_tumbling_hour all produce
+the same 26,186 rows. The pass-through views are not re-deriving anything, and
+this is the check that says so.
+
+==========================================================================
+3  NEGATIVE CONTROL — what the bare form actually does
+==========================================================================
+
+Same derivation, same data, same settings, one character of difference:
+
+    -  argMax(minute, (concurrent, -toInt64(toUInt32(minute))))     earliest wins
+    +  argMax(minute, concurrent)                                   arbitrary
+
+  20 consecutive runs at max_threads=32, fingerprinted by sum(cityHash64(row)):
+
+    BARE   argMax(minute, concurrent):
+         2 11584855479680220359	26186
+         1 12452939615414751602	26186
+         1 12584885504014169332	26186
+         1 13938467610898978488	26186
+         1 14621930332144344820	26186
+         1 14737504156170910647	26186
+         1 1643292932127860806	26186
+         1 16621279209711286814	26186
+         1 17327020040230163655	26186
+         2 17577539981695373510	26186
+         1 18241114042682482791	26186
+         1 3515992306300160667	26186
+         1 5014984930612199837	26186
+         4 662454104707462418	26186
+         1 7472976650263443998	26186
+
+    TUPLE  argMax(minute, (concurrent, -epoch)):
+        20 662454104707462418	26186
+
+    16 distinct answers in 20 runs; the correct one came up 5 times. The row
+    COUNT is 26,186 every time, so nothing about the output looks wrong.
+
+How wrong is any single bare run? One captured run, joined against the shipped
+earliest-wins answer:
+
+       ┌─rows_compared─┬─peak_minute_differs─┬─peak_VALUE_differs─┬─worst_minutes_apart─┐
+    1. │         26186 │                   3 │                  0 │                  35 │
+       └───────────────┴─────────────────────┴────────────────────┴─────────────────────┘
+
+    Three rows in 26,186, and never the peak VALUE — only the minute, by up to
+    35 minutes. This is the worst possible shape for a defect: too rare to show
+    up in a smoke test, invisible to any check that compares concurrency
+    numbers, and a different three rows every run. If a benchmark query asks
+    "when did concurrency peak" for an hour that happens to be one of the three,
+    the answer is wrong, and re-running to check produces a different wrong.
+
+The effect is trivially reproducible in isolation, which is worth recording so
+nobody has to re-derive it. A synthetic table, 4M rows, 64 groups, ~644 rows
+tied at each group's max, eight runs at max_threads=32, md5 of the ordered
+64-row result:
+
+    BARE   argMax(minute, concurrent)             6x 28b3d57c38ca  2x db239fdc152f
+    TUPLE  argMax(minute, (concurrent, -epoch))   8x 59f22dc31c57
+
+==========================================================================
+4  WHY THE TUPLE IS SUFFICIENT
+==========================================================================
+
+argMax keeps the row with the maximal second argument and, among equals, keeps
+whichever partial state its merge happened to visit first — which under a
+two-level parallel GROUP BY is a function of thread scheduling.
+
+    (concurrent, -toInt64(toUInt32(minute)))
+
+is a TOTAL order on the candidate rows: two rows can share `concurrent`, but no
+two rows in a group share a minute, so no two tuples are equal and "among
+equals" never arises. Nothing is left for merge order to decide. That is why
+the result does not move with max_threads and cannot move with part count,
+merge state or insert order either.
+
+The negation must be applied to a SIGNED type. `-toUInt32(minute)` would wrap
+to a huge unsigned value and invert the comparison, i.e. select the LATEST
+minute while looking like it selects the earliest; hence
+`-toInt64(toUInt32(minute))` everywhere, with no exceptions.
+
+==========================================================================
+5  RECONCILE — the gate is untouched by this change
+==========================================================================
+
+sql/90_reconcile.sql reads ev_raw and cc_minute_delta and compares per-minute
+concurrency VALUES. It does not read cc_hour_agg, v_concurrency_day,
+v_concurrency_day_total or any v_cc_* view — i.e. none of the objects this
+branch changes:
+
+    $ grep -nE "cc_hour_agg|v_concurrency_day|v_cc_|peak_minute" sql/90_reconcile.sql
+    (no matches)
+
+That is an argument, not a proof, so the gate was also run against this
+branch's SQL on the isolated database:
+
+       ┌─ord─┬─scope───┬─c1─────────────────────┬─c2───────────┬─c3─────────────┬─c4────────┬─verdict─┐
+    1. │   0 │ SUMMARY │ minutes_compared=17028 │ mismatched=0 │ max_abs_diff=0 │ peak=2887 │ PASS    │
+    2. │   2 │ sample  │ 2026-07-14 15:43:00    │ 1            │ 1              │ 0         │ PASS    │
+    3. │   2 │ sample  │ 2026-07-16 12:35:00    │ 0            │ 0              │ 0         │ PASS    │
+    4. │   2 │ sample  │ 2026-07-17 08:56:00    │ 0            │ 0              │ 0         │ PASS    │
+    5. │   2 │ sample  │ 2026-07-26 10:56:00    │ 2887         │ 2887           │ 0         │ PASS    │
+    6. │   2 │ sample  │ 2026-07-26 11:30:00    │ 193          │ 193            │ 0         │ PASS    │
+       └─────┴─────────┴────────────────────────┴──────────────┴────────────────┴───────────┴─────────┘
+
+    17,028 minutes compared, 0 mismatched, max_abs_diff 0, peak 2,887 — PASS.
+
+A note on 2,887 vs 2,917. The committed model ships the conservative
+unclosed-pause rule (UNCLOSED_PAUSE_TO_RUN_END = 1, ADR 0007 / commit cf80acc)
+and both the model and the gate derive 2,887 from it under this branch's SQL.
+The Cloud service currently SERVES 2,917 while the gate on the same service
+computes 2,887 — 177 mismatched minutes — because its stored model was built
+from a state that is not in this branch. That predates this change and is
+independent of it: nothing here touches an interval, a delta or a concurrency
+value. It is flagged rather than fixed because sql/30_build_intervals.sql and
+tools/build-model.sh belong to another workstream this round.
