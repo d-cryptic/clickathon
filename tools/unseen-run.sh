@@ -233,11 +233,14 @@ say "  objects: $(q1 "SELECT count() FROM system.tables WHERE database='${DB}'")
 
 # ---------------------------------------------------------------------------
 phase "2 load (tools/load.sh, unmodified)"
-# tools/load.sh sources ./.env with `set -a`, which OVERWRITES a CH_DATABASE
-# passed in the environment — `CH_DATABASE=x tools/load.sh` silently loads into
-# `sonyliv`. It is also the only tool that does NOT cd to the repo root, so it
-# reads the .env of whatever directory it is invoked from. We use exactly that:
-# invoke it from a sandbox holding an overridden copy of .env.
+# tools/load.sh now takes its database from --database first, then the
+# ENVIRONMENT, then ./.env (it is still the only tool that does NOT cd to the
+# repo root, so ./.env means the sandbox's copy). All three are set to $DB here
+# and they must agree: this script exports CH_DATABASE=sonyliv by sourcing the
+# repo .env at line 50, and load.sh dies rather than resolve a --database that
+# contradicts an exported CH_DATABASE. The sandbox .env stays as the third,
+# redundant belt — if either of the first two is ever dropped, the load still
+# cannot wander into production.
 SANDBOX="$TMP/sandbox"; mkdir -p "$SANDBOX"; chmod 700 "$SANDBOX"
 sed "s|^CH_DATABASE=.*|CH_DATABASE=${DB}|" "$REPO/.env" > "$SANDBOX/.env"
 chmod 600 "$SANDBOX/.env"
@@ -246,7 +249,8 @@ Without that override tools/load.sh would load into ${PROD}. Refusing to run."
 RAW_ABS="$(cd "$(dirname "$RAW")" && pwd)/$(basename "$RAW")"
 CONTENT_ABS="/dev/null"
 [ -n "$CONTENT" ] && CONTENT_ABS="$(cd "$(dirname "$CONTENT")" && pwd)/$(basename "$CONTENT")"
-( cd "$SANDBOX" && TARGET=cloud "$REPO/tools/load.sh" "$RAW_ABS" "$CONTENT_ABS" ) | tee -a "$OUT"
+( cd "$SANDBOX" && CH_DATABASE="$DB" TARGET=cloud \
+    "$REPO/tools/load.sh" --database "$DB" "$RAW_ABS" "$CONTENT_ABS" ) | tee -a "$OUT"
 
 EV=$(q1 "SELECT count() FROM ev_raw")
 [ "$EV" = "$CSV_ROWS" ] || die "ev_raw holds $EV rows, the CSV has $CSV_ROWS data rows.
