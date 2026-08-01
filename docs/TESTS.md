@@ -132,8 +132,16 @@ Both are `Int64` now.
 
 ## Self-observation (H7)
 
-`internal/otelemit`, `internal/pipelinehealth` · `go test ./internal/...` · see
+`internal/otelemit`, `internal/pipelinehealth`, `internal/chdb`, `cmd/sonyliv` · `make test` · see
 [OBSERVABILITY.md](OBSERVABILITY.md) for what `sonyliv observe` emits and why.
+
+**The Go unit suite is database-free by construction.** Every test runs against fixtures, fakes of
+the `driver.Conn` interface, `httptest` collectors, or loopback ports nothing listens on — `make ci`
+never opens a connection to any ClickHouse, least of all the graded `sonyliv` database. Coverage as
+of 2026-08-01: `pipelinehealth` 90.8%, `otelemit` 95.7%, `chdb` 93.1%, `config` 79.6%,
+`cmd/sonyliv` 58.7% (the remainder is `main`/`cli` and the live-connection halves of
+`verify`/`observe`, which cannot be unit-tested without a server and are exercised by `make verify`
+instead), 76.1% total.
 
 | Test | Proves |
 |---|---|
@@ -147,6 +155,18 @@ Both are `Int64` now.
 | `TestIntAttrEncodesAsJSONString` | OTLP/HTTP JSON's int64-as-decimal-string mapping is actually followed — a bare `int64` JSON field would lose precision above 2^53 |
 | `TestSeverityConstantsAreLowerCase` | `severity:error` saved searches keep matching — HyperDX stores `SeverityText` lower-cased (VERIFIED.md), and this is the one constant a careless edit would recapitalize |
 | `TestNewTraceID` / `TestNewSpanID` / `TestNewTraceIDIsRandom` | id shape (16/8 random bytes, lower-case hex) and that two runs do not collide |
+| `TestQueryWatermark_*` (`health_test.go`) | the v_cc_watermark sign convention survives the code path: **negative lag is healthy**, positive lag is not; an all-NULL row (fresh database) scans to zero values instead of panicking; a scan failure names the view |
+| `TestQueryBuildStages_*` | stage rows come typed off `system.query_log`; a stage with no recorded run is `Found=false`, **not** an error and not a fabricated row; a real query failure names which stage died |
+| `TestClientPostsEachSignalToItsPath` / `TestClientMetricsWireShape` (`otelemit/client_test.go`) | each signal POSTs to its `/v1/<signal>` path with the ingestion key in `authorization` and the OTLP JSON field names actually on the wire (`asDouble`, `timeUnixNano` as a decimal string) |
+| `TestClientNon2xxIsAnError` / `TestClientUnreachableCollectorIsAnError` | a 401 (wrong key) or a dead collector is a loud error carrying the status and response body — not a silent drop |
+| `TestClientUnmarshalablePayloadFailsBeforePosting` | a NaN gauge fails at marshal time, before any bytes reach the collector |
+| `TestAttrConstructorsEncodeTheTaggedUnion` / `TestSeverityNumberMapsPerOTLPSpec` / `TestLogRecordCarriesBodySeverityAndTraceCorrelation` / `TestGaugeMetricShape` | every constructor sets exactly one arm of the OTLP AnyValue union (`boolValue:false` survives `omitempty`), severity text↔number stay in sync, logs keep their trace correlation |
+| `TestTables` / `TestTablesErrors` / `TestServerVersion*` (`chdb_test.go`) | the inventory reads `system.tables` (never per-table `count()`), binds the database as a parameter, closes its rows, and each of the three failure points names itself |
+| `TestOpenUnreachable` | a dead endpoint fails **at Open** (via the ping), naming the address and user — for both plain and TLS configs. Target is a loopback port nothing listens on |
+| `TestRunDispatch` / `TestVerifyAndObserveRejectBadInputBeforeConnecting` (`cmd/sonyliv`) | CLI dispatch, and that both subcommands reject bad flags / an unknown target **before** any connection attempt |
+| `TestObserveRunLifecycle` / `TestNewChildSpanStatus` / `TestObserve*` | one trace per observe run: children parented to the root, a query failure still yields a `StatusError` span, missing reconcile evidence is a legitimate state |
+| `TestBuildMetrics` / `TestBuildLogsSeverities` | metric families with no data behind them are **absent, not zero** (a fabricated 0 reads as healthy on a dashboard); unhealthy watermark and failing/unattested gate log at `error`, missing evidence and never-run stages at `warn` |
+| `TestPrintSummary` / `TestClampUint64ToInt64` | the human summary names what it could not find; `uint64→int64` clamps at MaxInt64 instead of wrapping negative |
 
 **Anti-pattern avoided:** re-deriving build-stage duration or benchmark-query latency by wrapping a
 client-side timer around a re-run query. `system.query_log` already has the real, server-measured
@@ -154,9 +174,14 @@ number (and `granules_read`/`bytes_read`, which a client cannot know at all) —
 only ever be a strictly worse copy of data ClickHouse already recorded. See OBSERVABILITY.md's
 "what is deliberately not instrumented" section.
 
-**Not yet covered by an automated test:** the OTLP emission path itself (`internal/otelemit.Client`)
-has no unit test against a fake HTTP server — it was verified by hand against the real ClickStack
-collector instead (curl probes, then `sonyliv observe`, then reading the rows back out of
-`otel_metrics_gauge`/`otel_logs`/`otel_traces` — see OBSERVABILITY.md). A `httptest.Server`-backed
-test for the 401-without-a-key and non-2xx-wraps-body-in-error paths would be the next thing to add
-here.
+**Now covered (was the gap named here until 2026-08-01):** the OTLP emission path
+(`internal/otelemit.Client`) has `httptest.Server`-backed tests for the success, 401-wrong-key,
+dead-collector and marshal-failure paths (`client_test.go`). The by-hand verification against the
+real ClickStack collector (curl probes, then reading rows back out of
+`otel_metrics_gauge`/`otel_logs`/`otel_traces` — see OBSERVABILITY.md) remains the ground truth the
+fakes were modeled on.
+
+**Not yet covered by an automated test:** the connected halves of `sonyliv verify`/`observe`
+(`cmdVerify`/`cmdObserve` past config validation) and the `chdb.Open` success path — all need a live
+ClickHouse and are exercised by `make verify` / `sonyliv observe -dry-run` against the local stack
+instead.
