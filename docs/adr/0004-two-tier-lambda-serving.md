@@ -12,7 +12,17 @@
 > [ADR 0005](0005-heartbeat-lease-semantics.md)'s pause defect. Supersedes the update-handling section
 > of `docs/ARCHITECTURE.md`.
 
-**Status** Proposed · 2026-08-01, amended 2026-08-01 (watermark measured; hot tier blocked)
+**Status** **Superseded in part** by [ADR 0013](0013-continuous-publication-by-incremental-finalizer.md)
+· proposed 2026-08-01, amended 2026-08-01 (watermark measured; hot tier blocked), superseded 2026-08-01
+
+> **SUPERSEDED — read this first.** The *finalizer* half of this ADR is built and shipped
+> (`sql/12_publish.sql`, `tools/publish.sh`). The **two-tier topology is not**, and will not be.
+> ADR 0013 measured that once the finalizer runs on a per-minute cadence, the sealed tier's lag is
+> seconds rather than the 40 minutes `W` was sized for — so the hot tier's entire job disappears,
+> and with it the reason to accept its pause inflation. **`W` is demoted from a control knob to a
+> freshness label**: correction-by-diff absorbs a straggler of any age, so no minute has to be held
+> back. What survives from this ADR: the append-only sealed tier, the finalizer's
+> "re-derive only touched sessions" rule, and the measurement that stragglers reach 2,081 s.
 
 ## Context
 

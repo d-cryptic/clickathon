@@ -47,9 +47,13 @@ Everything in this file exists to serve one of these.
 - [x] **Truth is recomputed from `ev_raw`**, not asserted against the serving layer. A test that reads
       the model to check the model proves nothing — [docs/TESTS.md](docs/TESTS.md).
 - [x] **The gate can fail.** Negative-tested: inject one bad delta row → exit 1.
-- [x] Tier agreement: minute ↔ delta expansion (3,725 min, 0 mismatches); hour ↔ minute (98 h, 0).
+- [x] Tier agreement: minute ↔ delta expansion (**3,732** min, 0 mismatches, re-run 2026-08-01);
+      hour ↔ minute (98 h, 0).
 - [ ] **Unclosed-pause rule decided** — 23% of pauses never resume. Conservative 1,949.3 h vs
       permissive 2,048.6 h (**+5.09%**). Unknowable from the file. **Operator/mentor call.**
+      ⚠️ Both arms measured at `cf80acc`, **before** the ADR 0009 tie fix. The conservative arm is
+      now 1,978.1 h; the permissive arm has not been re-run, so the spread is stale. Not rescaled
+      here on purpose — re-measuring needs a rebuild with `UNCLOSED_PAUSE_TO_RUN_END = 0`.
 - [ ] Session-aware vs session-independent **numerically compared**, not just both built.
 
 ### Edge cases — each needs a defined, tested behaviour
@@ -85,8 +89,8 @@ backgrounding is universal, bg/fg events are **not guaranteed to pair**.
 - [x] Late-arrival correction-by-diff designed and arithmetically exact — [ADR 0006](docs/adr/0006-late-arrival-correction-by-diff.md).
 - [x] Absorption is **actually tested**, not asserted — `tools/truncation-test.sh` cuts the stream at
       the peak and replays 447,081 withheld events.
-- [ ] **…and it does not converge.** +37 on the peak minute (2,924 vs 2,887, +1.3%). Two schema
-      fixes proven in §5.
+- [ ] **…and it does not converge.** +37 on the peak minute (2,924 vs 2,887, +1.3% — both as measured
+      at `388a845`, before ADR 0009 moved the peak to 2,917; not re-run). Two schema fixes proven in §5.
 - [ ] **"Publish continuously updated aggregates"** — we batch-rebuild. Only `mv_stateless` is a real
       MV. **The biggest architectural gap**; it is literally step 4 of the organiser's blueprint.
 
@@ -128,14 +132,23 @@ event streams in real time to produce one or more aggregated tables."
 Judges will ask how the design behaves at 100×. Choices that only work at hackathon size (full
 rescans, per-minute explosion of all history) "will be treated as what they are."
 
-- [ ] High volume — millions of sessions / billions of events; state the growth law per tier.
+Measured at 1×, 10× and 100× — [evidence/scale.txt](evidence/scale.txt), regenerate with
+`tools/scale-test.sh`. 100× = 1,086,600 sessions / 89.85M events / peak concurrency 251,668.
+
+- [x] High volume — **1.09M sessions, 89.85M events**; growth law per tier is in the file
+      (serving reads are flat at the hour tier, delta rows stay 88.7% of the ADR 0008 ceiling).
 - [ ] High update rate — continuous heartbeats, frequent session mutation.
 - [ ] Concurrent queries during ingestion.
 - [ ] Long-running sessions (hours → days) — does hour-clipping hold?
-- [ ] Bursty traffic — mass simultaneous start/end.
+- [x] Bursty traffic — mass simultaneous start/end. The synthetic stream keeps the real
+      **85% of events inside two of 99 hours**, and the gate passes on all 6,799 minutes.
 - [ ] Late and out-of-order data.
 - [ ] Duplicate events — idempotency demonstrated.
 - [ ] Missing events — no heartbeat, no session end.
+- [x] **What breaks first, with the number.** The interval derivation's memory —
+      4.48 GiB of a 5.56 GiB server at 100×, `Code: 241` at default settings.
+      NOT part count (28 of 3,000), NOT merge throughput, NOT dictionary memory
+      (17.00 MiB at every scale). Thread cap to 2 → 2.59 GiB and *faster*.
 
 ---
 
@@ -172,9 +185,9 @@ show? Why this ordering key? Why materialized views, and what stays raw?
 **Evidence.** Which benchmark queries, which metrics, what did they read? Show the query log.
 
 **Business.** What decision does this change? Naive counting says 2,976.9 h of watch time; the
-foreground-only model says 1,949.3 h — **34.5% of apparent watch time is backgrounded or paused**, and
+foreground-only model says 1,978.1 h — **33.6% of apparent watch time is backgrounded or paused**, and
 ad load, capacity and content calls are all made on that number. At the peak minute: 3,708 naive vs
-**2,887** actual, a 22.1% over-count removed.
+**2,917** actual, a 21.3% over-count removed.
 
 **Trade-offs.** For every alternative you rejected — what did you measure? (Good answer on file: the
 `ev_raw` projection gives 27.7× on single-session lookups but **1.00×** on the real straggler path,

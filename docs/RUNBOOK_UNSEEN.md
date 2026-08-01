@@ -3,11 +3,12 @@
 > **Summary:** One command runs the whole path on a dataset we have never seen —
 > `tools/unseen-run.sh <raw.csv> <content.csv>` — into the isolated database `sonyliv_unseen`,
 > ending on the correctness gate. **Measured end to end: 47 s for 30,097 events, 58 s for 849,888
-> events**; the path is fixed-cost dominated, so budget ~3 min even for a 5x-bigger day. **The
-> committed gate `sql/90_reconcile.sql` does NOT work on a new day** — its five target minutes are
-> 2026-07-26 literals, so it returns zero rows and `tools/reconcile.sh` reports PASS having compared
-> nothing. That, plus nine more unseen-day assumptions (A1-A10) and five human decisions, is the body of
-> this document. Evidence for every claim: [`evidence/unseen-rehearsal.txt`](../evidence/unseen-rehearsal.txt).
+> events**; the path is fixed-cost dominated, so budget ~3 min even for a 5x-bigger day. **The gate
+> works on any day** — `sql/90_reconcile.sql` derives its target minutes from the data, compares a
+> dense spine so idle minutes are checked too, and asserts `minutes_compared` so silence can never be
+> read as success (fixed in `81c0161`; it previously hard-coded five 2026-07-26 literals and reported
+> PASS having compared nothing). Nine unseen-day assumptions (A1-A10) and five human decisions are the
+> body of this document. Evidence: [`evidence/unseen-rehearsal.txt`](../evidence/unseen-rehearsal.txt).
 
 **Rehearsed:** 2026-08-01, holdout day 2026-07-25 (204 sessions, 30,097 events, peak 13) and a
 full-size replay of 2026-07-26 (10,524 sessions, 849,888 events, peak 2,887). Both gates green.
@@ -92,8 +93,11 @@ claims.
 | `session_intervals is empty` | the derivation matched nothing — usually a timestamp-unit problem | `SELECT min(event_timestamp), max(event_timestamp) FROM sonyliv_unseen.ev_raw`. If you see 1970 or 56000, the source is **not** epoch millis and `tools/load.sh` divides by 1000 unconditionally. |
 | `rendered file … still names another database` | `sql/80_content.sql` hard-codes `sonyliv` | That guard exists because the file really does. Extend `render()` in `tools/unseen-run.sh`; do not disable the guard. |
 | `GATE FAILED` with non-zero `mismatches` | a real disagreement between the serving layer and `ev_raw` | Get the offending minutes: re-run G2 without the summary wrapper and `WHERE served != truth`. Do **not** submit. |
+| `REFUSING TO LOAD: <db> already holds data` | you are loading on top of a previous load — the loader stopped before writing anything (A4) | Decide, do not retry blindly. Redoing a bad load: `tools/load.sh --replace …`. Adding a second file on purpose: `tools/load.sh --append …`. |
+| `database '<db>' does not exist on TARGET=local` | `.env` has no `CH_DATABASE_LOCAL` and `CH_DATABASE` names the Cloud database (A5) | Add `CH_DATABASE_LOCAL=default` to `.env`, or pass `--database default`. Do **not** create a local `sonyliv` — it would be empty and every local number would read 0. |
+| `--database X contradicts CH_DATABASE=Y` | the flag and the exported variable disagree (A5) | One of the two is not what you think. Make them agree or unset `CH_DATABASE` for that command. |
 | `the 'ch' docker container is not running` | docker down | `docker compose up -d`, wait for healthy, re-run. |
-| G0 prints `ZERO ROWS` | expected on any day that is not 2026-07-26 | See assumption **A1** below. Not a failure of this run. |
+| G0 prints `ZERO ROWS` | **should no longer happen** — the gate derives its targets from the data since `81c0161` | If you genuinely see it, the gate has regressed: check `sql/90_reconcile.sql` still derives `targets` from `ev_raw`. Treat as a FAILURE, not a quirk. |
 
 ---
 
@@ -102,16 +106,31 @@ claims.
 Ordered by how much damage each does. Every one is measured in
 [`evidence/unseen-rehearsal.txt`](../evidence/unseen-rehearsal.txt).
 
-### A1 — the gate's target minutes are 2026-07-26 literals · **breaks silently, reports success**
+### A1 — ~~the gate's target minutes are 2026-07-26 literals~~ · **FIXED in `81c0161`**
 
-`sql/90_reconcile.sql:24-30` hard-codes five minutes. On 2026-07-25 the file returns **zero rows**;
-`tools/reconcile.sh:86` decides with `grep -q MISMATCH`, finds none, and prints
-`reconcile PASSED`. It also degrades *partially*: on the 2026-07-26 day-file it returned **four** rows
-instead of five, because the `2026-07-14 15:43:00` target does not exist in a one-day load — and
-nothing asserts the row count. **`make reconcile` is worthless on the unseen day until those five
-literals are re-targeted.** `tools/unseen-run.sh` works around it by templating the `targets` CTE.
+*Kept as a record because it is the sharpest example in this repo of a test that reported success
+while measuring nothing — and because the failure was invisible until the unseen-day rehearsal ran.*
 
-### A2 — the gate never compares a minute in which nobody was watching
+**What was wrong.** `sql/90_reconcile.sql` hard-coded five minutes. On 2026-07-25 the file returned
+**zero rows**; `tools/reconcile.sh` decides with `grep -q MISMATCH`, found none, and printed
+`reconcile PASSED` having compared **nothing**. It also degraded *partially*: on the 2026-07-26
+day-file it returned **four** rows instead of five, because the `2026-07-14 15:43:00` target does not
+exist in a one-day load — and nothing asserted the row count.
+
+**What it does now.** Target minutes are derived from `ev_raw`, so the gate re-targets itself on any
+day. A dense minute spine means idle minutes are compared as `0 = 0` (see A2, also fixed). A `SUMMARY`
+row carries `minutes_compared`, and `tools/reconcile.sh` fails if it is missing or zero — silence can
+no longer be read as success. Coverage went from **5 minutes to 17,028**, still zero mismatches, and
+the fabricated-500 injection that used to PASS now fails with 25 mismatched minutes.
+
+**What to check on the day:** that the `SUMMARY` row reports a `minutes_compared` in the thousands.
+If it reports zero, or the row is absent, the gate has regressed — that is a failure, not a quirk.
+
+### A2 — ~~the gate never compares a minute in which nobody was watching~~ · **FIXED in `81c0161`**
+
+*Kept as a record. The gate now builds a dense minute spine, so an idle minute is compared as `0 = 0`.
+The fabricated-500 injection described below used to PASS; it now fails with 25 mismatched minutes and
+`max_abs_diff=500`. What follows is what was wrong.*
 
 `sql/90_reconcile.sql:153-161` ends `FROM truth AS t LEFT JOIN served AS s`, and `truth` is a
 `GROUP BY` over a `CROSS JOIN`, so an idle minute produces no row. **207 of 2026-07-25's 1,364
@@ -150,30 +169,62 @@ SELECT quantileExact(0.99)(d) FROM (                                    -- is GA
 
 If p99 has moved, `GAP_S` must be changed in **both** files, in the same edit.
 
-### A4 — re-loading the same CSV doubles the day; the schema comment says it does not
+### A4 — re-loading the same CSV doubles the day · **FIXED in the loader; the schema comment is still wrong**
 
 `sql/00_schema.sql:42-44` claims `non_replicated_deduplication_window = 1000` makes "a replayed batch
 idempotent — the unseen day may be re-loaded". Measured on Cloud 26.2.1.525: loading the identical
 30,097-row CSV twice left `ev_raw` at **60,194 rows** in two byte-identical parts
 (`20260725_0_0_0`, `20260725_1_1_0`, both 30,097 rows / 102,795 bytes). That setting is for
-non-replicated MergeTree; the Cloud engine is **SharedMergeTree**. `tools/unseen-run.sh` drops the
-database first. If you ever re-load by hand, `TRUNCATE TABLE ev_raw` first.
+non-replicated MergeTree; the Cloud engine is **SharedMergeTree**. The claim in the schema comment
+remains false — nothing about the fix below makes the *engine* idempotent.
 
-### A5 — `CH_DATABASE` in the environment is silently ignored
+`tools/load.sh` now **refuses** to load into `ev_raw`/`content_dim` when either already holds rows:
+it prints both counts, loads nothing, and exits 1. To redo a load, `--replace` (TRUNCATEs both
+tables, announcing the rows it destroys); to add a day-file on purpose, `--append` (announces what it
+is adding to). Verified by `tools/load-guard-test.sh` case 3, and the same test run against the
+pre-fix loader doubles the table instead. `tools/unseen-run.sh` is unaffected — it drops the database
+first, so its tables are empty when the loader checks.
 
-Every tool does `[ -f .env ] && set -a && . ./.env && set +a`, so `.env` **overwrites** anything
-passed in the environment. `CH_DATABASE=sonyliv_unseen tools/build-model.sh` writes to **`sonyliv`**.
-All of `build-model.sh`, `reconcile.sh`, `apply-sql.sh` and `truncation-test.sh` also `cd` to the repo
-root first, so they always read the repo's `.env`. **The only way to point them at another database is
-to edit `.env`.** `tools/load.sh` is the one exception (it does not `cd`), which is why
-`tools/unseen-run.sh` runs it from a sandbox directory holding an overridden `.env`.
+### A5 — `CH_DATABASE` in the environment was silently ignored · **FIXED in `load.sh` and `apply-sql.sh` only**
 
-### A6 — `sql/80_content.sql` hard-codes the `sonyliv` database
+Every tool does `[ -f .env ] && set -a && . ./.env && set +a`, so `.env` **overwrote** anything passed
+in the environment: `CH_DATABASE=sonyliv_unseen tools/build-model.sh` wrote to **`sonyliv`**. The
+local branches were worse — neither `load.sh` nor `apply-sql.sh` passed `--database` to
+`clickhouse-client` at all, so *every* local load and local apply landed in `default` whatever the
+configuration said.
 
-`SOURCE(CLICKHOUSE(TABLE 'content_dim' DB 'sonyliv'))` at line 70 and six `dictGet('sonyliv.dict_content', …)`
-calls at lines 137, 159, 178, 199, 200, 201. Applied to any other database those views read
-**production's** dictionary. `tools/unseen-run.sh` templates them and refuses to run a file that still
-names another database.
+`tools/load.sh` and `tools/apply-sql.sh` now take `--database NAME`, rank it above the environment
+and the environment above `.env`, print the resolved name and where it came from, and hard-error
+rather than guess — including when a `--database` contradicts an exported `CH_DATABASE`, and when the
+database does not exist on the target. Both targets go through the same resolution, so a local run no
+longer silently means `default`.
+
+**`CH_DATABASE_LOCAL` is new.** `CH_DATABASE` names the *Cloud* database while the local container's
+data lives in `default`; put `CH_DATABASE_LOCAL=default` in `.env` or a local `make model` now stops
+with *"database 'sonyliv' does not exist on TARGET=local"* instead of quietly applying to `default`.
+`.env.example` does not carry the line yet.
+
+**Still unfixed:** `build-model.sh`, `reconcile.sh`, `truncation-test.sh` and `tools/ch` all `cd` to
+the repo root and let `.env` win, and `tools/ch`'s local branch has no database parameter at all — so
+the local gate reads `default` regardless. For those, editing `.env` is still the only lever.
+`tools/unseen-run.sh` now passes `--database "$DB"` *and* `CH_DATABASE="$DB"` to the loader (its
+sandbox `.env` is kept as a third, redundant guard).
+
+### A6 — ~~`sql/80_content.sql` hard-codes the `sonyliv` database~~ FIXED (ADR 0010)
+
+**Was:** `SOURCE(CLICKHOUSE(TABLE 'content_dim' DB 'sonyliv'))` plus six `dictGet('sonyliv.dict_content', …)`
+calls, so applied to any other database those views read **production's** dictionary — reproduced in a
+scratch database, where the old form returned production titles for scratch data.
+
+**Now:** the file names no database at all, like every other file in `sql/`. ClickHouse resolves the
+dictionary name at `CREATE VIEW` time and bakes it in, so each view is permanently pinned to its own
+database's dictionary — verified by applying the committed file with `--database sonyliv_scratch80`
+and reading it from a session attached to `sonyliv`. See
+[ADR 0010](adr/0010-content-views-are-database-agnostic-and-label-their-ambiguity.md).
+
+`tools/unseen-run.sh` still templates the database name out of every file and still refuses to run one
+that names another database. **Keep that guard** — it now has nothing to rewrite in `80_content.sql`,
+but it is the standing check that the defect does not come back, here or anywhere else.
 
 Related, and worse if you take a shortcut: **`tools/apply-sql.sh` with no arguments applies every
 `sql/*.sql`**, which includes `sql/60_projection.sql` (`ALTER TABLE sonyliv.ev_raw`, twice) and
@@ -189,12 +240,23 @@ outside the day (583 events dropped), and the day-file build differs from the fu
 events across 7 sessions. If the unseen day arrives as a standalone file, its first and last minutes
 are approximations, and saying so is better than being caught.
 
-### A8 — "the peak minute" is ambiguous under ties, and the tiers disagree
+### A8 — "the peak minute" is ambiguous under ties — RESOLVED, but the script still needs a patch
 
 On 2026-07-25 four minutes tie at 13 (15:51, 16:35, 16:55, 16:59). `v_concurrency_minute_delta_total`
-answers **16:59**; `cc_hour_agg` answers **16:35**. Same peak value, two different answers to *when*.
-2026-07-26's peak (2,887) is unique, so this never surfaced. Phase 7 now prints the tie count — if it
-is > 1, state the tie-breaking rule with the answer.
+answered **16:59**; `cc_hour_agg` answered **16:35**. Same peak value, two different answers to *when*.
+2026-07-26's peak (2,887) is unique, so this never surfaced.
+
+[ADR 0014](adr/0014-peak-minute-ties-resolve-to-the-earliest-minute.md) settles it: **the peak minute
+is the EARLIEST minute at which the peak level is reached**, at every tier. The serving layer now
+applies that rule everywhere — the answer for 2026-07-25 is **15:51**. Ties are not rare: 5 of the 7
+days in the provided file have a tied headline day peak, and 49.0% of stored hour rows have two or
+more change points at the hour max.
+
+**Still outstanding:** the two display queries in `tools/unseen-run.sh` (phases 6 and 7) use a bare
+`argMax` and are the actual source of the disagreement — that file was owned by another workstream
+when ADR 0014 landed, so the ADR carries the diff sketch instead of the fix. **Apply it before the
+unseen day runs**, or phase 7 will keep printing an arbitrary minute as the submitted answer.
+Phase 7 also prints the tie count; if it is > 1, state the rule alongside the answer.
 
 ### A9 — content metadata is assumed to be re-delivered
 

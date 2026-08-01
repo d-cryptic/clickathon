@@ -47,6 +47,15 @@
 -- 'HIN' and 'hin' stay distinct because the private ground truth is matched on
 -- the shipped strings, not on our idea of tidy ones.
 --
+-- ADR 0009 EXTENDS THAT RULE TO ALL SEVEN. ADR 0008 applied it to app_version,
+-- audio_language, subtitle_language and player_version only, and left user_id,
+-- content_id, platform and country on any() because the accuracy exposure there
+-- is small (95 sessions carry 2 platforms, 120 carry 2 user_ids). The accuracy
+-- argument was the wrong argument: any() is NON-DETERMINISTIC, re-measured on
+-- exactly those four columns (three hashes at max_threads 1/8/32, see below), so
+-- it makes the BUILD irreproducible regardless of how few rows it touches. One
+-- rule for all seven now; there is no second mechanism to keep in step.
+--
 -- The interval is NOT split when a dimension changes mid-interval. Splitting
 -- would put two intervals of the SAME session on the same minute with different
 -- dimension tuples, and the merge in 40_deltas.sql groups by session precisely
@@ -85,26 +94,37 @@ WITH
     per_session AS (
         SELECT
             video_session_id,
-            -- A session is almost always one user/content/platform: 1 session
-            -- has 2 content_ids, 95 have 2 platforms, 120 have 2 user_ids out
-            -- of 10,866. any() is accurate for 98.8% and the alternative
-            -- (splitting intervals per dimension change) is not worth it until
-            -- something measures it as mattering.
-            any(user_id)    AS user_id,
-            any(content_id) AS content_id,
-            any(platform)   AS platform,
-            any(country)    AS country,
             arraySort(groupArray(toUnixTimestamp(event_timestamp)))                    AS ts,
-            -- The four dimensions that used to be dropped, carried as (ts, value)
-            -- pairs so they can be attributed PER INTERVAL below rather than
-            -- collapsed to one value per session. Deliberately a SECOND array
-            -- rather than a widened `ts`: `ts` drives run splitting and is left
-            -- byte-identical, so this change provably cannot move an interval
-            -- boundary — only label it. Sorted by the whole tuple, so equal
-            -- timestamps order deterministically too.
+            -- ALL SEVEN raw dimensions, carried as (ts, value…) tuples so they can
+            -- be attributed PER INTERVAL below rather than collapsed to one value
+            -- per session. Deliberately a SECOND array rather than a widened `ts`:
+            -- `ts` drives run splitting and is left byte-identical, so this change
+            -- provably cannot move an interval boundary — only label it. Sorted by
+            -- the whole tuple, so equal timestamps order deterministically too.
+            --
+            -- user_id/content_id/platform/country used to sit above this as
+            -- any(user_id) etc., under a comment saying a session is almost always
+            -- one user/content/platform (1 session has 2 content_ids, 95 have 2
+            -- platforms, 120 have 2 user_ids out of 10,866) and that the
+            -- alternative "is not worth it until something measures it as
+            -- mattering". Something did, in commit 8bfeeb2, and it is not the
+            -- accuracy argument — it is DETERMINISM. Re-measured here on exactly
+            -- these four columns, same data, same query:
+            --   any(user_id, content_id, platform, country) per session
+            --     max_threads=1   cityHash64 = 5126827698054385970
+            --     max_threads=8                4514778022739255759
+            --     max_threads=32               2307516582733793023
+            -- Three different attributions of one input, so two rebuilds of the
+            -- same data can serve two different answers to the same filtered
+            -- query — against an EXACT private ground truth that is disqualifying,
+            -- whether it moves 120 sessions or 12,000. They now use the SAME rule
+            -- 8bfeeb2 established for the other four: dominant value per interval,
+            -- tie-broken by the value itself. New members are appended at the tail
+            -- so the existing .2–.5 slots keep their meaning. ADR 0009.
             arraySort(groupArray((
                 toUnixTimestamp(event_timestamp),
-                app_version, audio_language, subtitle_language, player_version
+                app_version, audio_language, subtitle_language, player_version,
+                user_id, content_id, platform, country
             ))) AS dim_events,
             arraySort(groupArrayIf(toUnixTimestamp(event_timestamp), event = 'pause'))  AS pauses,
             arraySort(groupArrayIf(toUnixTimestamp(event_timestamp), event = 'resume')) AS resumes,
@@ -119,7 +139,7 @@ WITH
     -- Split the session into runs wherever the gap exceeds the threshold.
     runs AS (
         SELECT
-            video_session_id, user_id, content_id, platform, country, is_open,
+            video_session_id, is_open,
             pauses, resumes, dim_events,
             arrayJoin(arraySplit((t, i) -> (i > 1) AND ((t - ts[i - 1]) > GAP_S), ts, arrayEnumerate(ts))) AS run
         FROM per_session
@@ -130,7 +150,7 @@ WITH
     -- active. ADR 0007 records the alternative and what it costs.
     windowed AS (
         SELECT
-            video_session_id, user_id, content_id, platform, country, is_open,
+            video_session_id, is_open,
             dim_events,
             run[1]              AS run_start,
             run[length(run)]    AS run_end,
@@ -141,17 +161,48 @@ WITH
             --   0 = PERMISSIVE — paused only until the next event of any kind,
             --       treating the unresolved pause as a blip.
             -- Flipping the constant at the top of this file is the whole change.
-            arraySort(arrayMap(
+            --
+            -- THE RESUME LOOKUP IS `>=`, NOT `>`, AND THAT IS A CORRECTNESS FIX.
+            -- `ts` is toUnixTimestamp(event_timestamp), i.e. TRUNCATED TO WHOLE
+            -- SECONDS, and 23.67% of adjacent event pairs already share the exact
+            -- same millisecond. A strict `>` therefore cannot see a resume that
+            -- lands in the SAME truncated second as its pause: the window ran on
+            -- to the NEXT resume, or — with no next resume — became unclosed and
+            -- ate the rest of the run. MEASURED on the real file:
+            --   pause events                                        27,340
+            --   with a resume in the same truncated second           2,697  (9.86%)
+            --   closed-pause time, strict >                          834.1 h
+            --   closed-pause time, inclusive >=                      792.6 h
+            --   raw over-exclusion from the tie                       41.5 h
+            -- Most of that raw over-exclusion overlaps time the GAP rule already
+            -- excludes, exactly as ADR 0007 found for the unclosed-pause question
+            -- (330 h estimated -> 99.3 h real). Clipped into runs and merged, the
+            -- model actually over-excluded 309.5 h -> 286.2 h, i.e. 23.3 h. See
+            -- ADR 0009 for the end-to-end effect on the PEAK.
+            -- `>=` yields a ZERO-LENGTH window (p, p) for a tie. The fold below
+            -- already absorbs it correctly — it pushes the segment up to p and
+            -- leaves the cursor at p, so no active time is lost and none is
+            -- invented — but it SPLITS one interval into two abutting ones at p.
+            -- Measured: 31,938 intervals with the split vs 30,323 without, both
+            -- at PEAK 2,917 / 1,978.1 h and both gate-green over 17,028 minutes.
+            -- The split is dropped, because an interval
+            -- boundary is also a DIMENSION ATTRIBUTION boundary (ADR 0008) and a
+            -- pause that resumed in its own second is not a boundary of anything.
+            -- Hence the outer arrayFilter(w -> w.2 > w.1, …).
+            -- The PERMISSIVE branch's lookup into `run` stays STRICT: the pause
+            -- event is itself in `run` at p, so `>=` there would match the pause
+            -- and collapse every permissive window to zero.
+            arrayFilter(w -> w.2 > w.1, arraySort(arrayMap(
                 p -> (p, least(
-                        if(arrayFirst(x -> x > p, resumes) = 0,
+                        if(arrayFirst(x -> x >= p, resumes) = 0,
                            if(UNCLOSED_PAUSE_TO_RUN_END = 1,
                               run[length(run)],
                               -- next event inside this run; run end if it is the last
                               if(arrayFirst(x -> x > p, run) = 0, run[length(run)], arrayFirst(x -> x > p, run))),
-                           arrayFirst(x -> x > p, resumes)),
+                           arrayFirst(x -> x >= p, resumes)),
                         run[length(run)])),
                 arrayFilter(p -> (p >= run[1]) AND (p < run[length(run)]), pauses)
-            )) AS pause_windows
+            ))) AS pause_windows
         FROM runs
     ),
 
@@ -192,10 +243,6 @@ FROM
 (
     SELECT
         video_session_id,
-        user_id,
-        content_id,
-        platform,
-        country,
         toDateTime64(seg.1, 3)                     AS interval_start,
         -- Tail grace is ONLY for a segment that ends because the run ended — there
         -- we do not know when the viewer actually left, so we credit one cadence.
@@ -223,6 +270,10 @@ FROM
         arrayMap(x -> x.3, seg_events) AS v_audio,
         arrayMap(x -> x.4, seg_events) AS v_sub,
         arrayMap(x -> x.5, seg_events) AS v_player,
+        arrayMap(x -> x.6, seg_events) AS v_user,
+        arrayMap(x -> x.7, seg_events) AS v_content,
+        arrayMap(x -> x.8, seg_events) AS v_platform,
+        arrayMap(x -> x.9, seg_events) AS v_country,
 
         -- Dominant value: sort the DISTINCT values by (-frequency, value) and
         -- take the first. The second sort term is what makes this deterministic
@@ -235,7 +286,15 @@ FROM
         arraySort(v -> (-toInt64(countEqual(v_app,    v)), v), arrayDistinct(v_app))[1]    AS app_version,
         arraySort(v -> (-toInt64(countEqual(v_audio,  v)), v), arrayDistinct(v_audio))[1]  AS audio_language,
         arraySort(v -> (-toInt64(countEqual(v_sub,    v)), v), arrayDistinct(v_sub))[1]    AS subtitle_language,
-        arraySort(v -> (-toInt64(countEqual(v_player, v)), v), arrayDistinct(v_player))[1] AS player_version
+        arraySort(v -> (-toInt64(countEqual(v_player, v)), v), arrayDistinct(v_player))[1] AS player_version,
+        -- The same expression, applied to the four that commit 8bfeeb2 left on
+        -- any(). content_id is Int64 rather than a string; the tie-break sorts on
+        -- the numeric value, which is just as total an order, so the rule is
+        -- unchanged rather than adapted.
+        arraySort(v -> (-toInt64(countEqual(v_user,     v)), v), arrayDistinct(v_user))[1]     AS user_id,
+        arraySort(v -> (-toInt64(countEqual(v_content,  v)), v), arrayDistinct(v_content))[1]  AS content_id,
+        arraySort(v -> (-toInt64(countEqual(v_platform, v)), v), arrayDistinct(v_platform))[1] AS platform,
+        arraySort(v -> (-toInt64(countEqual(v_country,  v)), v), arrayDistinct(v_country))[1]  AS country
     FROM folded
     ARRAY JOIN
         arrayFilter(x -> x.2 > x.1,

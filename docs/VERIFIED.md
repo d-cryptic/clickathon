@@ -71,6 +71,12 @@ Re-measured on this workload while building `sql/80_content.sql`, against `conte
 | `ev_raw` | memory | ~26 MB | 7.56 MB — **3.7×** |
 | `cc_minute_delta` (24,951 rows — the views' real workload) | elapsed | 12.8 ms | 9.8 ms — **1.3×** |
 
+> **Row count as measured**, at `34c3f05`. `cc_minute_delta` now holds **28,074** rows (ADR 0008 added
+> dimensions, ADR 0009 redistributed tuples). The timings above have **not** been re-run at the new
+> row count and are left as measured — this file is for facts, and a re-scaled guess is not one. The
+> conclusion is unchanged either way: at single- to double-digit ms, wall clock is round-trip
+> dominated, so a 12% row increase cannot rehabilitate a 34× claim.
+
 **The memory ratio reproduces almost exactly.** The 34× *time* multiplier does not, at this scale:
 wall clock here is single- to double-digit ms and round-trip dominated, and the JOIN's extra cost is
 mostly the 3.7% additional rows read from the dimension side. The advantage is real and directionally
