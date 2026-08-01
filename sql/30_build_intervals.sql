@@ -90,6 +90,46 @@ WITH
     -- is a visible, explainable error while over-counting invents viewers that
     -- were demonstrably not receiving playback events. See ADR 0007; mentor Q2.
     1 AS UNCLOSED_PAUSE_TO_RUN_END,
+    -- THE POINT-ACTIVITY RULE (ADR 0031). Does a viewer who was demonstrably
+    -- active at an instant, but for whom we can measure NO DURATION, count for
+    -- one cadence — or for nothing at all?
+    --
+    -- Until ADR 0031 this file answered "nothing at all" BY ACCIDENT: the
+    -- segment fold below drops a zero-length segment, and it does so BEFORE
+    -- TAIL_S is applied, so a run of a single event earned no interval rather
+    -- than the [t, t+TAIL_S] every other run end earns. Nothing in doubts/ or
+    -- the ADRs ever stated that as a convention. It is now a CONSTANT, so the
+    -- answer is a decision with a number attached rather than a side effect of
+    -- where a filter sits.
+    --
+    -- MEASURED on the delivered file (evidence/point-activity/), local scratch
+    -- rebuilt verbatim from this file, gate green under BOTH values:
+    --   0 = shipped     30,323 intervals  1,978.1 h  PEAK 2,917 @ 07-26 10:56
+    --   1 = point-activity-counts
+    --                   30,653 intervals  1,982.7 h  PEAK 2,927 @ 07-26 10:56
+    -- i.e. +330 intervals, +4.62 h (+0.23%), +10 PEAK (+0.34%), same minute.
+    --
+    -- The 330 are exactly the segments whose two endpoints coincide, and they
+    -- are three distinct populations — see ADR 0031 for the census:
+    --      182  a run of ONE instant (the viewer emitted one event and nothing
+    --           within GAP_S either side). 124 of those instants are a
+    --           VideoSessionEnd, which is why this interacts with doubts/07.
+    --       95  a `resume` landing exactly on the run's last instant.
+    --       53  a `pause` opening exactly where the previous segment resumed.
+    -- A FOURTH population — 5,699 segments where an UNCLOSED pause runs through
+    -- the run end — is NOT in that set and is still dropped at both values.
+    -- That viewer was paused at the run's last instant, so crediting a cadence
+    -- there would book paused time as watch time; see the window arithmetic
+    -- below, which now ends an unclosed pause at run_end + 1 to say so.
+    --
+    -- DEFAULT 0 — NOT because it is the better reading. tools/reference_
+    -- interpreter.py, which derives the spec from docs/EXPLAINER.md rather than
+    -- from this file, counts point activity, and so does this file's own tail
+    -- rule for every run that lasts even one second. ADR 0031 RECOMMENDS 1.
+    -- It ships at 0 because flipping it moves a number we have already
+    -- submitted (2,917 -> 2,927), and that is an operator's call, not a
+    -- build's. Flip it here and in sql/90_reconcile.sql together.
+    0 AS POINT_ACTIVITY_COUNTS,
 
     per_session AS (
         SELECT
@@ -192,15 +232,40 @@ WITH
             -- The PERMISSIVE branch's lookup into `run` stays STRICT: the pause
             -- event is itself in `run` at p, so `>=` there would match the pause
             -- and collapse every permissive window to zero.
+            --
+            -- A WINDOW IS HALF-OPEN [p, e): paused from p+1 through e-1, and the
+            -- viewer is counted AT p (they demonstrably acted at p) and again AT
+            -- e (a resume is an event). That is what the fold below implements,
+            -- and it is why `e` must be a REAL ACTIVE INSTANT — which is exactly
+            -- what the old `least(…, run_end)` destroyed. It clamped BOTH "a
+            -- resume closed this pause" and "nothing ever closed it, so the
+            -- viewer stayed paused to the end" to the same value, run_end, and
+            -- so claimed run_end was active in both. While zero-length segments
+            -- were dropped that was invisible. Under POINT_ACTIVITY_COUNTS = 1
+            -- it would credit a cadence to 5,699 segments whose viewer was
+            -- provably still paused — so the two cases are now distinguished:
+            --   resume r with p <= r <= run_end  ->  e = r          (active at r)
+            --   otherwise (no resume, or one beyond the run)
+            --                                    ->  e = run_end + 1
+            -- run_end + 1 is one past the last instant of the run: the whole run
+            -- is paused-through, and the final segment (run_end + 1, run_end) is
+            -- empty at EITHER value of POINT_ACTIVITY_COUNTS. At value 0 this
+            -- rewrite is provably a no-op — the old expression differed only in
+            -- a cursor value that no surviving segment ever read — and the gate
+            -- confirms it: 17,028 minutes, 0 mismatched, PEAK unchanged at 2,917.
             arrayFilter(w -> w.2 > w.1, arraySort(arrayMap(
-                p -> (p, least(
-                        if(arrayFirst(x -> x >= p, resumes) = 0,
+                p -> (p,
+                        if((arrayFirst(x -> x >= p, resumes) != 0)
+                             AND (arrayFirst(x -> x >= p, resumes) <= run[length(run)]),
+                           toUInt32(arrayFirst(x -> x >= p, resumes)),
                            if(UNCLOSED_PAUSE_TO_RUN_END = 1,
-                              run[length(run)],
-                              -- next event inside this run; run end if it is the last
-                              if(arrayFirst(x -> x > p, run) = 0, run[length(run)], arrayFirst(x -> x > p, run))),
-                           arrayFirst(x -> x >= p, resumes)),
-                        run[length(run)])),
+                              toUInt32(run[length(run)] + 1),
+                              -- next event inside this run; one past the run end
+                              -- if it is the last (unreachable: p < run_end means
+                              -- run_end itself always qualifies)
+                              if(arrayFirst(x -> x > p, run) = 0,
+                                 toUInt32(run[length(run)] + 1),
+                                 toUInt32(arrayFirst(x -> x > p, run)))))),
                 arrayFilter(p -> (p >= run[1]) AND (p < run[length(run)]), pauses)
             ))) AS pause_windows
         FROM runs
@@ -208,12 +273,20 @@ WITH
 
     -- Complement of the merged pause windows within [run_start, run_end].
     -- arrayFold walks the sorted windows carrying (segments_so_far, cursor).
+    --
+    -- The push test is where POINT_ACTIVITY_COUNTS bites for the 53 segments
+    -- whose pause opens exactly where the previous one resumed: `win.1 > acc.2`
+    -- discards the single active instant at acc.2, `win.1 = acc.2` keeps it as a
+    -- zero-length segment. Starts stay strictly increasing either way — a push
+    -- sets the cursor to win.2 > win.1 >= acc.2 — so no two segments of one run
+    -- can share an interval_start and collide on the ReplacingMergeTree key.
     folded AS (
         SELECT
             *,
             arrayFold(
                 (acc, win) -> (
-                    if(win.1 > acc.2, arrayPushBack(acc.1, (acc.2, win.1)), acc.1),
+                    if((win.1 > acc.2) OR ((POINT_ACTIVITY_COUNTS = 1) AND (win.1 = acc.2)),
+                       arrayPushBack(acc.1, (acc.2, win.1)), acc.1),
                     greatest(acc.2, win.2)
                 ),
                 pause_windows,
@@ -297,7 +370,13 @@ FROM
         arraySort(v -> (-toInt64(countEqual(v_country,  v)), v), arrayDistinct(v_country))[1]  AS country
     FROM folded
     ARRAY JOIN
-        arrayFilter(x -> x.2 > x.1,
+        -- The final segment (cursor, run_end), and the POINT_ACTIVITY_COUNTS
+        -- test again. `x.2 > x.1` drops the run's last instant whenever the
+        -- segment has no duration; `x.2 >= x.1` keeps it and it collects TAIL_S
+        -- above, exactly as a one-second segment ending at the same instant
+        -- would. A paused-through run is empty at BOTH values because its cursor
+        -- is run_end + 1, so x.2 < x.1 (see the window arithmetic above).
+        arrayFilter(x -> if(POINT_ACTIVITY_COUNTS = 1, x.2 >= x.1, x.2 > x.1),
             arrayPushBack(fold.1, (fold.2, toUInt32(run_end)))
         ) AS seg
 );
