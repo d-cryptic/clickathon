@@ -23,19 +23,23 @@ Everything in this file exists to serve one of these.
 |---|---|---|---|
 | C1 | **Correctness** | Benchmark answers vs private ground truth. Foreground-only means foreground-only; overcounting backgrounded time is *the* failure mode. | Gate passes vs `ev_raw` — [`evidence/reconcile.txt`](evidence/reconcile.txt) |
 | C2 | **Query performance** | Latency at the given volume, **and what the queries read** — not just wall time. | 299 KB / 23 ms vs 2.55 MB / 56 ms (8.5×) |
-| C3 | **Update handling** | Open sessions + late heartbeats absorbed **incrementally**, or recomputed? | ⚠️ **does not converge** — see §5 |
-| C4 | **Design quality** | Schema/representation choices *and the reasoning*. "A team that can defend its trade-offs beats a team with a lucky benchmark." | ADRs 0001–0007 |
-| C5 | **The unseen day** | Results on the sealed dataset, with latencies **and pipeline evidence**. *No pipeline evidence, no credit.* | `/unseen` skill exists, unexercised |
+| C3 | **Update handling** | Open sessions + late heartbeats absorbed **incrementally**, or recomputed? | ✅ converges after the `388a845` schema fixes (`evidence/truncation.txt`, re-run 2026-08-01: all 1,579 minutes, peak 2,917). ⚠️ Incremental path covers `session_intervals`+`cc_minute_delta` only; hour/user tiers batch-rebuild, and the installed publisher has never committed a run on `sonyliv` — see §4/§5 |
+| C4 | **Design quality** | Schema/representation choices *and the reasoning*. "A team that can defend its trade-offs beats a team with a lucky benchmark." | ADRs 0001–0014 |
+| C5 | **The unseen day** | Results on the sealed dataset, with latencies **and pipeline evidence**. *No pipeline evidence, no credit.* | Rehearsed — `tools/unseen-run.sh`, ~2.5 min for a 1 GB day, `evidence/unseen-rehearsal.txt` |
 
 ### Hard requirements (not scored — gating)
 
-- [ ] **ClickHouse is the primary datastore** — ingestion, modeling, all concurrency computation.
-- [ ] **Meaningfully integrate** ClickStack, Langfuse **or** LibreChat. *Superficial inclusion won't count.*
-      → ClickStack, charting real concurrency off Cloud. **Still shallow:** we observe ingestion lag but
-      not our own watermark lag; nothing of ours emits OTLP.
-- [ ] **No hand-computed answers.** Every number traceable to a query log or trace.
-- [ ] **No credentials in git.**
-- [ ] LICENSE present.
+- [x] **ClickHouse is the primary datastore** — ingestion, modeling, all concurrency computation live
+      in `sql/`; the Go binary orchestrates and observes, it computes nothing.
+- [x] **Meaningfully integrate** ClickStack, Langfuse **or** LibreChat. *Superficial inclusion won't count.*
+      → ClickStack in both directions: six hosted dashboards chart our serving layer, and
+      `sonyliv observe` emits our watermark lag / build timing / gate outcome over OTLP
+      (docs/OBSERVABILITY.md). ⚠️ Two persisted user-tier sources select the wrong column —
+      `docs/WORKTREE_QUEUE.md` Q13.
+- [ ] **No hand-computed answers.** Every number traceable to a query log or trace. *(Ongoing rule,
+      re-checked at submission.)*
+- [ ] **No credentials in git.** *(Ongoing rule, re-checked at submission.)*
+- [x] LICENSE present (MIT, restored from `fc2c483`).
 
 ---
 
@@ -54,12 +58,14 @@ Everything in this file exists to serve one of these.
       ⚠️ Both arms measured at `cf80acc`, **before** the ADR 0009 tie fix. The conservative arm is
       now 1,978.1 h; the permissive arm has not been re-run, so the spread is stale. Not rescaled
       here on purpose — re-measuring needs a rebuild with `UNCLOSED_PAUSE_TO_RUN_END = 0`.
-- [ ] Session-aware vs session-independent **numerically compared**, not just both built.
+- [x] Session-aware vs session-independent **numerically compared**: 2,894 stateless vs 2,917
+      session-aware at the peak minute ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) layer 5).
 
 ### Edge cases — each needs a defined, tested behaviour
 
-Empty strings · NULL timestamps · duplicate records (**4,210 rows, 0.46%, 863 sessions — not yet
-deduped**) · missing session end · missing heartbeat · zero-length and invalid intervals ·
+Empty strings · NULL timestamps · duplicate records (**4,210 rows, 0.46%, 863 sessions — measured
+inert for totals/peak, NOT inert at filter grain: 6 attributions and three audio curves move,
+`docs/WORKTREE_QUEUE.md` Q5**) · missing session end · missing heartbeat · zero-length and invalid intervals ·
 out-of-order events · overlapping sessions for one user. Traps that actually bite are in
 [docs/DATA_DICTIONARY.md#traps](docs/DATA_DICTIONARY.md) — `event_timestamp` is epoch **ms**,
 backgrounding is universal, bg/fg events are **not guaranteed to pair**.
@@ -89,23 +95,29 @@ backgrounding is universal, bg/fg events are **not guaranteed to pair**.
 - [x] Late-arrival correction-by-diff designed and arithmetically exact — [ADR 0006](docs/adr/0006-late-arrival-correction-by-diff.md).
 - [x] Absorption is **actually tested**, not asserted — `tools/truncation-test.sh` cuts the stream at
       the peak and replays 447,081 withheld events.
-- [ ] **…and it does not converge.** +37 on the peak minute (2,924 vs 2,887, +1.3% — both as measured
-      at `388a845`, before ADR 0009 moved the peak to 2,917; not re-run). Two schema fixes proven in §5.
-- [ ] **"Publish continuously updated aggregates"** — we batch-rebuild. Only `mv_stateless` is a real
-      MV. **The biggest architectural gap**; it is literally step 4 of the organiser's blueprint.
+- [x] **…and after the two §5 schema fixes it converges** — re-run 2026-08-01 on the current model:
+      versioned incremental == production truth on **all 1,579 minutes, peak 2,917**
+      (`evidence/truncation.txt`; the file deliberately keeps the broken `interval_end` variant to
+      prove the test still *detects* the historical +37 divergence).
+- [~] **"Publish continuously updated aggregates"** — **partial.** ADR 0013's finalizer maintains
+      `session_intervals` + `cc_minute_delta` and is proven byte-identical to a rebuild *for those two
+      tables* (`evidence/publish.txt`). It has zero references to `cc_hour_agg`/`cc_user_minute` — the
+      hour/day and user tiers still batch-rebuild (`docs/WORKTREE_QUEUE.md` Q2) — and on `sonyliv` it
+      is installed but has never committed a run, so live numbers all come from batch rebuilds.
 
 ---
 
-## 5. Known defects — proven, unfixed
+## 5. Known defects — both FIXED at `388a845` and applied to the graded database
 
-Both are schema changes to the graded database. **Ask the operator before applying.**
+Kept as a record; the gate was re-run green after each.
 
-1. `session_intervals` is `ReplacingMergeTree(interval_end)`, which assumes re-derivation only ever
-   *extends* an interval. It doesn't — the `TAIL_S=60s` grace can overshoot, so a stale row wins
-   forever (316 intervals too long, 315 stuck `is_open=1`). → version on monotonic `build_version`.
-   **Fix proven to converge on all 1,578 minutes.**
-2. `cc_minute_delta.starts`/`ends` are `UInt64` and silently wrap on a negative corrective row
-   (`max()` returns 1.8e19). → `SimpleAggregateFunction(sum, Int64)`.
+1. ~~`session_intervals` was `ReplacingMergeTree(interval_end)`~~, which assumes re-derivation only
+   ever *extends* an interval. It doesn't — the `TAIL_S=60s` grace can overshoot, so a stale row won
+   forever (316 intervals too long, 315 stuck `is_open=1`). **Fixed:** versioned on monotonic
+   `build_version`; convergence re-proven 2026-08-01 on all 1,579 minutes (`evidence/truncation.txt`).
+2. ~~`cc_minute_delta.starts`/`ends` were `UInt64`~~ and silently wrapped on a negative corrective row
+   (`max()` returned 1.8e19). **Fixed:** `SimpleAggregateFunction(sum, Int64)`; counters verified sane
+   post-rebuild.
 
 ---
 
@@ -117,13 +129,13 @@ event streams in real time to produce one or more aggregated tables."
 | Deliverable | State |
 |---|---|
 | Foreground concurrency | ✅ `cc_minute_delta` → `cc_hour_agg` |
-| Session-aware **and** session-independent tables | ✅ both; ⚠️ not yet compared numerically |
-| User-level concurrency (`uniqExact`, **not** deltas — a user holds several sessions) | ✅ `sql/45_user_concurrency.sql` |
-| **Content-level concurrency by title** (metadata enrichment) | ❌ missing |
-| **Time-window trend** — rolling / fixed windows | ❌ missing |
-| **Dedup of repeated events** | ❌ missing — 4,210 rows |
+| Session-aware **and** session-independent tables | ✅ both; compared at the peak minute: 2,894 stateless vs 2,917 session-aware |
+| User-level concurrency (`uniqExact`, **not** deltas — a user holds several sessions) | ✅ `sql/45_user_concurrency.sql` — platform/country/content_id grain only |
+| **Content-level concurrency by title** (metadata enrichment) | ✅ `sql/80_content.sql` — `dict_content` + title/type/category views, hour-peak reconciled 0 mismatches. Title is a label, not an asset key: 2,773 titles map to >1 content_id |
+| **Time-window trend** — rolling / fixed windows | ✅ `sql/85_windows.sql` — verified against brute-force self-join, 0 mismatches at 5/15/60 min. platform/country/content_id grain only |
+| **Dedup of repeated events** | ⚠️ **decided, scoped** — proven inert for totals/peak (`evidence/dedup.txt`); NOT inert at filter grain (Q5, ADR 0016 pre-assigned): 6 attributions and the `hin`/`non`/`unk` audio curves move |
 | Schemas documented from `dataset_details.md` | ✅ [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) |
-| Filter dimensions survive derivation | ⚠️ only **3 of 10** — spec says "should work even if dimensions increase" |
+| Filter dimensions survive derivation | ⚠️ **7 of 7 raw dims carried in the interval/delta tier** (ADR 0008; bounded rows) + 3 content dims via dictionary — but hour/day, user, window and stateless paths expose only platform/country/content_id, so support is **not uniform** across grains ([codex-validation/002.md](docs/codex-validation/002.md) §8) |
 
 ---
 
