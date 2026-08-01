@@ -113,10 +113,20 @@ SQL30 = open("sql/30_build_intervals.sql").read()
 SQL40 = open("sql/40_deltas.sql").read()
 
 # ---------------------------------------------------------------- pipeline IO
-GAP_S, TAIL_S = 150, 60      # sql/10_intervals.sql tunables — asserted below
-m = re.search(r"HEARTBEAT_GAP_S\D+(\d+)", open("sql/10_intervals.sql").read())
-if m and int(m.group(1)) != GAP_S:
-    sys.exit(f"golden-gen: sql/10 GAP_S={m.group(1)} != {GAP_S} — update cohorts")
+GAP_S, TAIL_S = 150, 60      # the model's tunables — asserted below
+# The cohort geometry is arithmetic on these two numbers, so a change to either
+# invalidates every closed-form expectation. sql/10_intervals.sql only DOCUMENTS
+# them in prose ("HEARTBEAT_GAP_S : a gap longer than this…"); the values that
+# actually run are the aliases in sql/30_build_intervals.sql. Assert against the
+# code, not the comment — matching the prose captured "99" out of "p99".
+for const, want in (("GAP_S", GAP_S), ("TAIL_S", TAIL_S)):
+    m = re.search(rf"(\d+)\s+AS\s+{const}\b", SQL30)
+    if not m:
+        sys.exit(f"golden-gen: no '<n> AS {const}' in sql/30 — cohort geometry "
+                 f"can no longer be checked against the model's tunables")
+    if int(m.group(1)) != want:
+        sys.exit(f"golden-gen: sql/30 {const}={m.group(1)} != {want} — every "
+                 f"closed-form expectation is derived from {want}; update cohorts")
 
 DIMS = dict(platform="GOLDEN_TV", app_version="1.0.0", country="india",
             audio_language="hin", subtitle_language="unk", player_version="1.8.2")

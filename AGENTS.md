@@ -28,6 +28,7 @@ what is verified, what is broken, and what is still missing, in one page.
 | Write SQL the way this repo writes SQL | [docs/CONVENTIONS.md](docs/CONVENTIONS.md) |
 | **Set up the Go toolchain / write Go here** | [docs/GO.md](docs/GO.md) — `direnv allow`, then `make ci` |
 | Know what is tested and what to avoid | [docs/TESTS.md](docs/TESTS.md) |
+| **Check the model against answers it did not compute** | [docs/GOLDEN.md](docs/GOLDEN.md) — closed-form, statistical and degenerate cohorts plus the organiser file as a regression pin. `tools/golden-gen.sh` |
 | Pick up the next task | [TODOS.md](TODOS.md) |
 | **Spawn the next worktree** | [docs/WORKTREE_QUEUE.md](docs/WORKTREE_QUEUE.md) — prioritised, brief-ready, with ADR numbers pre-assigned |
 | **Read the cross-model audit** | [docs/codex-validation/](docs/codex-validation/) — Codex reviewing our claims, not our code |

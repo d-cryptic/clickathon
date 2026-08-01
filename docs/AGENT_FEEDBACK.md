@@ -119,3 +119,37 @@
   "UPSTREAM SPEC CHANGED" — a false alarm on every fresh worktree (the body is unchanged; only the
   repo's own "vendored verbatim" banner is stripped). Either exclude the banner from the synced
   region or hash only the upstream body.
+
+## 2026-08-02 · V1 golden cohorts (`tools/golden-gen.sh`)
+
+- **The model's tunables are documented in one file and executed in another, with no single source.**
+  `sql/10_intervals.sql` names `HEARTBEAT_GAP_S` and `TAIL_GRACE_S` and explains them at length, but
+  carries no values; the numbers that actually run are anonymous aliases — `150 AS GAP_S`,
+  `60 AS TAIL_S` — in `sql/30_build_intervals.sql`, duplicated in `sql/90_reconcile.sql`. Any harness
+  whose expectations are arithmetic on those constants (this one, and `evidence/scale.txt`'s geometry)
+  has to guard against drift by regexing SQL. The previous leg of this session guarded the *prose*,
+  and `HEARTBEAT_GAP_S\D+(\d+)` matched "inter-arrival p99 of 49s" — a `GAP_S=99` that would have
+  aborted every run for a reason that does not exist. Suggestion: put the two values in one place
+  both the SQL and the tooling read (a `sql/05_tunables.sql`, or named constants that keep their
+  names down the chain), so "changing one without the other is a spec divergence" is enforced by
+  construction rather than by the reconcile gate plus two hopeful regexes.
+
+- **The `prop_*` / `golden_*` scratch-DB-prefix pattern is the right shape and should be the house
+  rule.** Asserting the database name in the harness *and* sending it explicitly on every query makes
+  the graded `sonyliv` and the local `default` structurally unreachable — no flag, no env var, and no
+  mistargeted `TARGET=` can reach them. It cost about six lines and it is the only reason a harness
+  that `TRUNCATE`s freely was safe to run against a service six worktrees share. Worth promoting from
+  "two tools happen to do this" to a stated convention in `docs/CONVENTIONS.md`, especially given the
+  `build-model.sh` / `reconcile.sh` env-clobber bugs still open above.
+
+- **`tools/load.sh --database <db> --replace` behaved exactly as documented against a scratch DB** —
+  header shape check, announced truncation, correct target — which is worth recording because the
+  three notes above it in this file are all about sibling tools that do not. It is the reference
+  implementation; copying its env-capture prologue into the stragglers would close the class.
+
+- **Positive: nothing disagreed.** Eleven cohorts whose answers were computed outside the pipeline
+  (closed-form geometry, two distributions with stated 4σ bands, five degenerate boundaries, and the
+  delivered file re-derived by the reference interpreter) produced exactly one divergence, and it was
+  the already-known point-activity drop. A harness finding nothing is a weak signal on its own — the
+  value here is that the cohorts are *characterised*, so the next failure names which property broke
+  instead of just saying the headline moved.
