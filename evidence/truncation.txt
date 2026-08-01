@@ -1,0 +1,95 @@
+TRUNCATION / OPEN-SESSION ABSORPTION TEST   (TODOS H4 + H8)
+generated 2026-08-01T10:15:19Z
+cut 2026-07-26 10:56:00  ·  isolated database sonyliv_trunc  ·  sonyliv read-only
+--------------------------------------------------------------------------
+PHASE 0 — reset the test database (never touches sonyliv)
+
+PHASE 1 — load the truncated slice: event_timestamp < 2026-07-26 10:56:00
+  458477 events · 6659 sessions · last event 2026-07-26 10:55:59.999
+  withheld: 447081 events · 7723 sessions touched
+
+PHASE 2 — build the model on the stump (this is what the dashboard served at 2026-07-26 10:56:00)
+  15363 intervals · is_open=1 on 6973 intervals over 3491 sessions (52.6% of sessions in the slice)
+  stump concurrency  @10:56 = 2431  @11:10 = 0
+
+PHASE 3 — the late arrival: insert every event >= 2026-07-26 10:56:00
+
+PHASE 4 — absorb INCREMENTALLY (ADR 0006). cc_minute_delta is never truncated,
+          never mutated, never rebuilt. Only appended to.
+  4a  snapshot the OLD derivation for the touched sessions
+      6984 old intervals over 3497 sessions
+  4b  append the NEGATION of their deltas
+  4c  re-derive ONLY the touched sessions (ReplacingMergeTree takes the new versions)
+  4d  append the new deltas for those sessions
+      cc_minute_delta now holds 38016 rows, 17537 of them negative corrections
+
+PHASE 5 — control: from-scratch full build over the same complete stream
+
+--------------------------------------------------------------------------
+RESULT — concurrency at the two probe minutes
+--------------------------------------------------------------------------
+                                        10:56      11:10
+truncated (stump, pre-absorption)        2431          0
+after INCREMENTAL absorption             2924       2450
+control: from-scratch full build         2887       2450
+production truth (sonyliv)               2887       2450
+
+--------------------------------------------------------------------------
+CONVERGENCE over EVERY minute — spot checks prove nothing
+--------------------------------------------------------------------------
+DIVERGES   3 of 1578 minutes differ · max |diff| 37
+DIVERGES   3 of 1578 minutes differ · max |diff| 37
+Code: 62. DB::Exception: Syntax error: failed at position 736 (a) (line 12, col 44): a
+FULL OUTER JOIN sonyliv_trunc.session_intervals_control FINAL b
+  USING (video_session_id, interval_start) FORMAT TSVRaw. Expected one of: SAMPLE, table, table function, subquery or list of joined tables, array join, LEFT ARRAY JOIN, INNER, ARRAY JOIN, GLOBAL, LOCAL, ANY, ALL, ASOF, SEMI, ANTI, ONLY, LEFT, RIGHT, FULL, CROSS, PASTE, JOIN, token, OpeningRoundBracket, PREWHERE, WHERE, GROUP BY, WITH, HAVING, WINDOW, QUALIFY, ORDER BY, LIMIT, OFFSET, FETCH, SETTINGS, UNION, EXCEPT, INTERSECT, INTO OUTFILE, FORMAT, ParallelWithClause, PARALLEL WITH, end of query. (SYNTAX_ERROR) (version 26.2.1.525 (official build))
+
+--------------------------------------------------------------------------
+WATERMARK — how far BACK from the cut did truncation corrupt the answer?
+(measured, not guessed: ADR 0004 requires W be set from the data)
+--------------------------------------------------------------------------
+earliest corrupted minute 2026-07-26 10:55:00 · that is 60 s before the cut · 3 minutes were wrong in the stump
+
+  minutes leading up to the cut — stump vs truth:
+    ┌──────────────minute─┬─stump─┬─truth─┬─diff─┐
+ 1. │ 2026-07-26 10:16:00 │    90 │    90 │    0 │
+ 2. │ 2026-07-26 10:17:00 │    96 │    96 │    0 │
+ 3. │ 2026-07-26 10:18:00 │    95 │    95 │    0 │
+ 4. │ 2026-07-26 10:19:00 │    91 │    91 │    0 │
+ 5. │ 2026-07-26 10:20:00 │    97 │    97 │    0 │
+ 6. │ 2026-07-26 10:21:00 │    98 │    98 │    0 │
+ 7. │ 2026-07-26 10:22:00 │   104 │   104 │    0 │
+ 8. │ 2026-07-26 10:23:00 │   102 │   102 │    0 │
+ 9. │ 2026-07-26 10:24:00 │   102 │   102 │    0 │
+10. │ 2026-07-26 10:25:00 │    97 │    97 │    0 │
+11. │ 2026-07-26 10:26:00 │    97 │    97 │    0 │
+12. │ 2026-07-26 10:27:00 │    94 │    94 │    0 │
+13. │ 2026-07-26 10:28:00 │    95 │    95 │    0 │
+14. │ 2026-07-26 10:29:00 │    96 │    96 │    0 │
+15. │ 2026-07-26 10:30:00 │   335 │   335 │    0 │
+16. │ 2026-07-26 10:31:00 │   568 │   568 │    0 │
+17. │ 2026-07-26 10:32:00 │   733 │   733 │    0 │
+18. │ 2026-07-26 10:33:00 │   896 │   896 │    0 │
+19. │ 2026-07-26 10:34:00 │  1061 │  1061 │    0 │
+20. │ 2026-07-26 10:35:00 │  1227 │  1227 │    0 │
+21. │ 2026-07-26 10:36:00 │  1394 │  1394 │    0 │
+22. │ 2026-07-26 10:37:00 │  1527 │  1527 │    0 │
+23. │ 2026-07-26 10:38:00 │  1666 │  1666 │    0 │
+24. │ 2026-07-26 10:39:00 │  1774 │  1774 │    0 │
+25. │ 2026-07-26 10:40:00 │  1893 │  1893 │    0 │
+26. │ 2026-07-26 10:41:00 │  2023 │  2023 │    0 │
+27. │ 2026-07-26 10:42:00 │  2150 │  2150 │    0 │
+28. │ 2026-07-26 10:43:00 │  2290 │  2290 │    0 │
+29. │ 2026-07-26 10:44:00 │  2300 │  2300 │    0 │
+30. │ 2026-07-26 10:45:00 │  2374 │  2374 │    0 │
+31. │ 2026-07-26 10:46:00 │  2470 │  2470 │    0 │
+32. │ 2026-07-26 10:47:00 │  2526 │  2526 │    0 │
+33. │ 2026-07-26 10:48:00 │  2611 │  2611 │    0 │
+34. │ 2026-07-26 10:49:00 │  2669 │  2669 │    0 │
+35. │ 2026-07-26 10:50:00 │  2701 │  2701 │    0 │
+36. │ 2026-07-26 10:51:00 │  2681 │  2681 │    0 │
+37. │ 2026-07-26 10:52:00 │  2730 │  2730 │    0 │
+38. │ 2026-07-26 10:53:00 │  2746 │  2746 │    0 │
+39. │ 2026-07-26 10:54:00 │  2800 │  2800 │    0 │
+40. │ 2026-07-26 10:55:00 │  2781 │  2833 │  -52 │
+41. │ 2026-07-26 10:56:00 │  2431 │  2887 │ -456 │
+    └─────────────────────┴───────┴───────┴──────┘
