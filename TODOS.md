@@ -16,11 +16,16 @@
       PASSED. It also never compares an IDLE minute (207 of 1,364 on the holdout) — proven by
       fabricating 500 viewers at an idle minute and watching the gate pass. Derive the minutes from
       the data, assert the row count, add a spine. See docs/SESSION-2026-08-01.md §4.
-- [x] **[H*]** **Continuously updated aggregates — DONE** (ADR 0013). `sql/12_publish.sql` +
+- [x] **[H*]** **Continuously updated aggregates — DONE** (ADR 0013 + ADR 0016). `sql/12_publish.sql` +
       `tools/publish.sh`: an MV marks which sessions each INSERT touched, a finalizer re-derives only
       those and appends `-deltas(old) + deltas(new)`. Nothing truncated, nothing rebuilt. Proven in
       `evidence/publish.txt` — byte-identical to a from-scratch rebuild at every stage, including a
       straggler 46 min behind the watermark corrected in **3.4 s** reading 11.6% of `ev_raw`.
+      ADR 0013 alone left the user and hour/day tiers behind (Codex §4.1); ADR 0016 closes that —
+      the finalizer's `hours`/`users` phases re-derive the touched hour-cube rows and user-minute
+      buckets (`cc_user_minute` is now replace-not-union, so retraction works), and
+      `publish-test.sh` compares ALL FOUR tiers after growth, shrink, dimension change and a
+      straggler.
       **NOT applied to `sonyliv`** — going live is a human's call, see ADR 0013's last section.
       Two follow-ons it deliberately did not do:
   - [ ] **[H*]** Make `session_intervals` a view over an append-only per-run ledger, so the

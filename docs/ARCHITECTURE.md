@@ -57,7 +57,11 @@ comparison the statement mandates.
 **6 · `session_dirty` + the finalizer** — how the aggregates stay current. `mv_session_dirty` fires on
 every INSERT into `ev_raw` and records which sessions that insert touched, stamped with **ingest**
 time. `tools/publish.sh` claims what has arrived since its cursor, re-derives **only those sessions**,
-and appends `−deltas(old) + deltas(new)`. `v_cc_publish_lag` is the freshness metric; `v_cc_watermark`
+and appends `−deltas(old) + deltas(new)`. It then re-derives the hour-cube rows and user-minute
+buckets the batch's time window touched ([ADR 0016](adr/0016-publisher-owns-the-user-and-hour-tiers.md)):
+`cc_hour_agg` and `cc_user_minute` are both ReplacingMergeTree(computed_at), so the re-derivation
+SUPERSEDES — which is what lets a correction retract a user from a minute, the thing the retired
+set-union MV could never express. `v_cc_publish_lag` is the freshness metric; `v_cc_watermark`
 still reports event-time staleness. See [ADR 0013](adr/0013-continuous-publication-by-incremental-finalizer.md)
 and `evidence/publish.txt`.
 

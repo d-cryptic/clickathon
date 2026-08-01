@@ -3,6 +3,23 @@
 > **Summary:** What was awkward, what slowed the agent down, and suggestions. Appended at session end,
 > ingested periodically. Newest first. **No secrets.**
 
+## 2026-08-01 — incremental publisher tiers (ADR 0016)
+
+- **The worktree was cut from `main`, not `dev`, and every briefed file was "missing".** The brief
+  said target `dev`; the fresh worktree sat at `main`'s tip, where `sql/12_publish.sql` etc. do not
+  exist. `git reset --hard origin/dev` (no local commits) fixed it, but this is the third session
+  bitten by branch-vs-worktree drift — `sc worktree create` briefs should state the base the tree
+  was actually cut from.
+- **`.env` absent in the fresh worktree again** — same as the ADR 0013 session's note. Copying from
+  the main checkout worked; `tools/env-doctor.sh` remains unbuilt and remains worth building.
+- **The extraction-marker idiom (`PUBLISH_EXTRACT_BEGIN/END`) earned its keep immediately**: the
+  first templated hour INSERT failed because `WHERE` cannot precede `ARRAY JOIN` — caught in a
+  10-second probe against a scratch DB *before* the 8-minute harness ran. Probing each templated
+  statement standalone before the full harness should be standard for future publish.sh phases.
+- **The queue's reserved-ADR table was stale on arrival** (said "next free: 0015" while the brief
+  said 0015 was taken). Assigning ADR numbers in the brief, as this round did, works; the queue
+  needs updating in the same commit that claims a number, which this branch now does.
+
 ## 2026-08-01 — repo scaffolding
 
 - Scaffolded from 57 verified corrections gathered pre-event. The highest-value carry-over is

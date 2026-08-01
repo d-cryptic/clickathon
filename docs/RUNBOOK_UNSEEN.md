@@ -287,9 +287,10 @@ file must be placed by hand.
   tell the operator to set the chart range to `2026-07-14 → 2026-07-26`, and `docs/` repeats it. The
   HyperDX dashboard has **no** stored time range — it is a human step, and on the unseen day it is
   the wrong instruction.
-- **`sql/45_user_concurrency.sql:68`** still describes `session_intervals` as
-  `ReplacingMergeTree(interval_end)`. It is versioned on `build_version` now. Stale comment, right
-  behaviour.
+- ~~**`sql/45_user_concurrency.sql:68`** still describes `session_intervals` as
+  `ReplacingMergeTree(interval_end)`.~~ Resolved by the ADR 0016 rewrite of that file: the stale
+  comment is gone, `cc_user_minute` is itself `ReplacingMergeTree(computed_at)` now, and the file's
+  INSERT is the canonical re-derivation (safe to re-run — it replaces, with retraction tombstones).
 
 ---
 
