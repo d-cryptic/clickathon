@@ -46,23 +46,32 @@ func set[T any](t *testing.T, dest any, v T) {
 	*p = &v
 }
 
+// The seven v_cc_watermark column values the fake row scans, all DISTINCT so
+// a swapped pair of scan destinations cannot go unnoticed — an audit probe
+// showed that swapping raw/sealed survived an only-not-zero assertion.
+var (
+	wmRaw       = time.Date(2026, 7, 26, 11, 31, 0, 0, time.UTC)
+	wmSealed    = wmRaw.Add(90 * time.Second)
+	wmHourLast  = wmRaw.Truncate(time.Hour)
+	wmHourFinal = wmRaw.Truncate(time.Hour).Add(-time.Hour)
+	wmTrend     = wmRaw.Add(-30 * time.Second)
+)
+
 // watermarkRow builds a driver.Row that scans the seven v_cc_watermark
 // columns. Nil-able behavior is exercised by the caller leaving fields unset.
 func watermarkRow(t *testing.T, sealedLag int64, hourComplete uint8) driver.Row {
 	t.Helper()
-	raw := time.Date(2026, 7, 26, 11, 31, 0, 0, time.UTC)
-	sealed := raw.Add(90 * time.Second)
 	return &fakeRow{scan: func(dest ...any) error {
 		if len(dest) != 7 {
 			t.Fatalf("Scan got %d dests, want 7 (v_cc_watermark has 7 columns)", len(dest))
 		}
-		set(t, dest[0], raw)
-		set(t, dest[1], sealed)
+		set(t, dest[0], wmRaw)
+		set(t, dest[1], wmSealed)
 		set(t, dest[2], sealedLag)
-		set(t, dest[3], raw.Truncate(time.Hour))
-		set(t, dest[4], raw.Truncate(time.Hour))
+		set(t, dest[3], wmHourLast)
+		set(t, dest[4], wmHourFinal)
 		set(t, dest[5], hourComplete)
-		set(t, dest[6], raw)
+		set(t, dest[6], wmTrend)
 		return nil
 	}}
 }
@@ -91,8 +100,16 @@ func TestQueryWatermark_HealthySteadyState(t *testing.T) {
 	if !wm.HourTierLastHourComplete {
 		t.Error("HourTierLastHourComplete = false, want true")
 	}
-	if wm.RawWatermark.IsZero() || wm.SealedWatermark.IsZero() || wm.TrendWatermark.IsZero() {
-		t.Errorf("watermark timestamps not populated: %+v", wm)
+	// Each timestamp must land in ITS field. The five columns carry distinct
+	// values precisely so a swapped pair of scan destinations fails here.
+	if !wm.RawWatermark.Equal(wmRaw) || !wm.SealedWatermark.Equal(wmSealed) {
+		t.Errorf("raw/sealed = %v/%v, want %v/%v", wm.RawWatermark, wm.SealedWatermark, wmRaw, wmSealed)
+	}
+	if !wm.HourTierLastHour.Equal(wmHourLast) || !wm.HourFinalThrough.Equal(wmHourFinal) {
+		t.Errorf("hour_last/hour_final = %v/%v, want %v/%v", wm.HourTierLastHour, wm.HourFinalThrough, wmHourLast, wmHourFinal)
+	}
+	if !wm.TrendWatermark.Equal(wmTrend) {
+		t.Errorf("TrendWatermark = %v, want %v", wm.TrendWatermark, wmTrend)
 	}
 }
 
@@ -179,14 +196,39 @@ func dispatchStages(intervals, delta driver.Row) func(string) driver.Row {
 func TestQueryBuildStages_BothStagesFound(t *testing.T) {
 	t.Parallel()
 	ranAt := time.Now().Add(-2 * time.Minute)
-	conn := &fakeConn{queryRow: dispatchStages(
+	var queries []string
+	dispatch := dispatchStages(
 		buildStageRow(t, ranAt, 5230, 896400, 121492),
 		buildStageRow(t, ranAt.Add(6*time.Second), 1210, 121492, 17028),
-	)}
+	)
+	conn := &fakeConn{queryRow: func(query string) driver.Row {
+		queries = append(queries, query)
+		return dispatch(query)
+	}}
 
 	stages, err := pipelinehealth.QueryBuildStages(context.Background(), conn, "sonyliv")
 	if err != nil {
 		t.Fatalf("QueryBuildStages() error = %v, want nil", err)
+	}
+
+	// The predicates ARE the stage definitions — a wrong table name or a
+	// dropped filter finds the wrong query_log rows while every value below
+	// still checks out (an audit probe corrupted `.ev_raw` and survived a
+	// routing-only fake). Pin each stage's load-bearing fragments, with the
+	// database qualifier attached.
+	if len(queries) != 2 {
+		t.Fatalf("QueryBuildStages issued %d queries, want 2", len(queries))
+	}
+	wantFragments := [][]string{
+		{`has(tables, 'sonyliv.session_intervals')`, `has(tables, 'sonyliv.ev_raw')`},
+		{`has(tables, 'sonyliv.cc_minute_delta')`, `has(tables, 'sonyliv.session_intervals')`, `NOT has(tables, 'sonyliv.ev_raw')`},
+	}
+	for i, fragments := range wantFragments {
+		for _, frag := range append(fragments, `type = 'QueryFinish'`, `query_kind = 'Insert'`) {
+			if !strings.Contains(queries[i], frag) {
+				t.Errorf("stage %d query missing %q:\n%s", i, frag, queries[i])
+			}
+		}
 	}
 	if len(stages) != 2 {
 		t.Fatalf("len(stages) = %d, want 2", len(stages))

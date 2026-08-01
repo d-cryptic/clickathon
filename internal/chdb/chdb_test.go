@@ -82,6 +82,9 @@ func TestTables(t *testing.T) {
 		if !strings.Contains(query, "system.tables") {
 			t.Errorf("Tables queried %q, want system.tables (not count(*) per table)", query)
 		}
+		if !strings.Contains(query, "ORDER BY name") {
+			t.Errorf("Tables query %q lost its ORDER BY name — output order is part of the contract (deterministic verify output)", query)
+		}
 		if len(args) != 1 || args[0] != "sonyliv" {
 			t.Errorf("Tables args = %v, want the database name as the single bound parameter", args)
 		}

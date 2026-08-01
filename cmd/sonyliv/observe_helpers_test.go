@@ -233,6 +233,30 @@ func metricNames(metrics []otelemit.Metric) map[string]bool {
 	return names
 }
 
+// gaugeValue returns the single data-point value of the named gauge, failing
+// the test if the metric is absent, has no gauge arm, or has more/fewer than
+// one point. Metric NAMES appearing is not the contract a dashboard depends
+// on — the VALUES are; an audit probe showed an inverted gate_pass survived a
+// names-only assertion.
+func gaugeValue(t *testing.T, metrics []otelemit.Metric, name string) float64 {
+	t.Helper()
+	for _, m := range metrics {
+		if m.Name != name {
+			continue
+		}
+		if m.Gauge == nil || len(m.Gauge.DataPoints) != 1 {
+			t.Fatalf("metric %s: want exactly one gauge point, got %+v", name, m.Gauge)
+		}
+		p := m.Gauge.DataPoints[0]
+		if p.AsDouble == nil {
+			t.Fatalf("metric %s: point has no asDouble value", name)
+		}
+		return *p.AsDouble
+	}
+	t.Fatalf("metric %s not emitted", name)
+	return 0
+}
+
 func TestBuildMetrics(t *testing.T) {
 	t.Parallel()
 	wm := &pipelinehealth.Watermark{SealedLagSeconds: -90, HourTierLastHourComplete: true}
@@ -245,26 +269,49 @@ func TestBuildMetrics(t *testing.T) {
 		Summary:     pipelinehealth.ReconcileSummary{Found: true, MinutesCompared: 17028, Verdict: "PASS"},
 	}
 
-	names := metricNames(buildMetrics(wm, stages, ev, true))
-	for _, want := range []string{
-		"sonyliv.watermark.sealed_lag_seconds",
-		"sonyliv.watermark.healthy",
-		"sonyliv.watermark.hour_tier_complete",
-		"sonyliv.build.stage_duration_seconds",
-		"sonyliv.build.stage_rows_written",
-		"sonyliv.build.seconds_since_last_run",
-		"sonyliv.reconcile.gate_pass",
-		"sonyliv.reconcile.max_abs_delta",
-		"sonyliv.reconcile.evidence_age_seconds",
+	metrics := buildMetrics(wm, stages, ev, true)
+	for name, want := range map[string]float64{
+		"sonyliv.watermark.sealed_lag_seconds": -90,
+		"sonyliv.watermark.healthy":            1,
+		"sonyliv.watermark.hour_tier_complete": 1,
+		"sonyliv.build.stage_duration_seconds": 5.23,
+		"sonyliv.build.stage_rows_written":     121492,
+		"sonyliv.build.seconds_since_last_run": 120,
+		"sonyliv.reconcile.gate_pass":          1,
+		"sonyliv.reconcile.max_abs_delta":      0,
 	} {
-		if !names[want] {
-			t.Errorf("buildMetrics missing %s", want)
+		if got := gaugeValue(t, metrics, name); got != want {
+			t.Errorf("%s = %v, want %v", name, got, want)
+		}
+	}
+	if age := gaugeValue(t, metrics, "sonyliv.reconcile.evidence_age_seconds"); age < 590 || age > 620 {
+		t.Errorf("evidence_age_seconds = %v, want ~600 for evidence generated 10 minutes ago", age)
+	}
+
+	// A failing gate must emit gate_pass=0 and surface the drift magnitude —
+	// the two numbers the alert fires on.
+	failing := &pipelinehealth.ReconcileEvidence{
+		GeneratedAt: time.Now(),
+		Summary: pipelinehealth.ReconcileSummary{
+			Found: true, MinutesCompared: 17028, Mismatched: 177, MaxAbsDiff: 39, Verdict: "MISMATCH"},
+	}
+	unhealthy := &pipelinehealth.Watermark{SealedLagSeconds: 600}
+	metrics = buildMetrics(unhealthy, nil, failing, true)
+	for name, want := range map[string]float64{
+		"sonyliv.watermark.sealed_lag_seconds": 600,
+		"sonyliv.watermark.healthy":            0,
+		"sonyliv.watermark.hour_tier_complete": 0,
+		"sonyliv.reconcile.gate_pass":          0,
+		"sonyliv.reconcile.max_abs_delta":      39,
+	} {
+		if got := gaugeValue(t, metrics, name); got != want {
+			t.Errorf("%s = %v, want %v", name, got, want)
 		}
 	}
 
 	// No evidence and no found stages: those metric families must be ABSENT,
 	// not emitted with fabricated zeros a dashboard would read as healthy.
-	names = metricNames(buildMetrics(wm, []pipelinehealth.BuildStage{{Stage: "session_intervals", Found: false}}, ev, false))
+	names := metricNames(buildMetrics(wm, []pipelinehealth.BuildStage{{Stage: "session_intervals", Found: false}}, ev, false))
 	for name := range names {
 		if strings.HasPrefix(name, "sonyliv.build.") || strings.HasPrefix(name, "sonyliv.reconcile.") {
 			t.Errorf("buildMetrics emitted %s with no data behind it", name)
