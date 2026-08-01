@@ -91,6 +91,21 @@ These are **code-inspection findings, not reproduced incidents** — reproduce b
 
 ---
 
+## Q26 · The sentinel collision is latent, not live — and the unseen day is exactly when it fires
+
+The unseen-day rehearsal (R9) demonstrated that a **real** `content_id = -1` session is served as
+peak 2 against a true peak of 1, because the cube's all-content rollup uses `-1` as its sentinel and
+the two silently merge. Every cube query for that content is then wrong.
+
+**Checked against the graded data before prioritising it:** `ev_raw` contains **0** events with
+`content_id = -1` and **0** with `-987654399`. So nothing we serve today is wrong. This is a trap
+that fires **only if the unseen day contains one** — which is precisely why the rehearsal
+manufactured one, and precisely the scenario we get no chance to debug.
+
+Fix so a real id can never collide with a rollup marker: a separate `is_rollup` flag, a value outside
+the id domain, or a documented guarantee that negative ids are reserved. Whichever, the unseen-day
+loader should **assert** the invariant rather than trust it.
+
 ## 🔴 The spawn defect that caused a production incident
 
 `sc worktree create` bases a new worktree on **`main`**, NOT on the target branch, even after
