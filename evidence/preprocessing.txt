@@ -1,0 +1,119 @@
+PREPROCESSING — hostile input quarantined, counted, and provably answer-neutral (ADR 0025)
+==========================================================================================
+date: 2026-08-02 · target: ClickHouse Cloud 26.2.1.525 · scratch DBs t3_preproc / t3_cruel / t3_clean
+graded database `sonyliv` NOT touched — reads only, per standing instruction.
+Reproduce: apply sql/15_normalise.sql to a scratch DB holding ev_raw, then run the queries below.
+
+== 0 · Baseline (t3_preproc: the provided 905,558-row file, committed pipeline verbatim) ==
+
+  intervals: 30,323 over 10,866 sessions · delta rows 28,073 (opens 20,002 / closes 16,826)
+  hour rows 98, peak 2,917 · user-minute buckets 91,692
+
+  sql/90_reconcile.sql:
+  SUMMARY  minutes_compared=17028  mismatched=0  max_abs_diff=0  peak=2917  PASS
+
+== 1 · The provided file is CLEAN on every hostile-input class (measured, t3_preproc) ==
+
+  invalid UTF-8:      session_id 0 · user_id 0 · event cols 0 · all 6 dimension cols 0
+  ctrl/ZWSP/BOM:      0 rows in any probed column
+  empty-after-trim:   video_session_id 0 · user_id 0 · event_type 0 · event 0
+  padded identities:  0
+  timestamps:         span 2026-07-14 15:43:58.144 → 2026-07-26 11:30:04.847
+                      epoch-zero 0 · pre-2020 0 · post-2027 0
+  session_start:      epoch-zero 0 · pre-2020 0 · event_before_session_start 0
+  content_id:         min 20,971,538 · max 2,078,177,474 · negative 0 · = -1: 0
+  content_dim:        1 negative id (-987654322, the trap-5 poison row) · UTF-8 clean
+
+  Consequence: on this file the quarantine is EMPTY and every flag is zero, so the
+  sections added by ADR 0025 cannot move any number the repo publishes. The classes
+  exist for the cruel generator (T2) and the unseen day.
+
+== 2 · Self-tests (literals only, run at every apply) ==
+
+  sql/15_normalise.sql applied to t3_preproc: ok — 30 normalisation assertions
+  (incl. 6 new norm_scrub cases built from char() bytes) + 15 quarantine-classifier
+  assertions, all green. Applied twice — idempotent, as the repo requires.
+
+== 3 · Cruel injection A: 10 quarantine-class rows (t3_cruel = real file + injections) ==
+
+  Injected: 3× empty session_id (byte-identical, to prove `copies`), whitespace-only sid,
+  zero-width-only sid, invalid-UTF-8 sid (0xC3 0x28), invalid-UTF-8 user_id (0xFF 0xFE),
+  epoch-zero ts, 1999 ts, 2299 (DateTime64-saturation) ts.  ev_raw: 905,568 rows.
+
+  SELECT reason, rows, distinct_rows, sessions FROM v_quarantine_summary;
+   ┌─reason──────────────┬─rows─┬─distinct_rows─┬─sessions─┐
+   │ session_id_unusable │    5 │             3 │        3 │   ← 3 identical rows → 1 group, copies=3
+   │ ts_out_of_range     │    3 │             3 │        3 │
+   │ identity_not_utf8   │    2 │             2 │        2 │
+   └─────────────────────┴──────┴───────────────┴──────────┘
+  Second apply of the file: identical table — the sweep is IDEMPOTENT (ReplacingMergeTree
+  on (reason, src_hash), src_hash = cityHash64 of all 13 raw columns).
+
+  v_preprocess_summary:  raw_rows 905,568 · quarantined_rows 10 · model_input_rows 905,558
+
+== 4 · The clean view is the original file, byte for byte ==
+
+  count + order-free content hashes over all 13 columns:
+   ┌─src──────────────┬───rows─┬────────────xor_hash─┬─────────────sum_hash─┐
+   │ cruel_clean_view │ 905558 │ 9809963598418387088 │ 13118056588632894114 │
+   │ original_ev_raw  │ 905558 │ 9809963598418387088 │ 13118056588632894114 │
+   └──────────────────┴────────┴─────────────────────┴──────────────────────┘
+
+== 5 · Model built from the clean view (t3_clean) — the disguise check ==
+
+  "Preprocessing that changes the answer is a model change wearing a disguise."
+  t3_clean.ev_raw ← t3_cruel.v_ev_model_input, then the committed build verbatim:
+
+   ┌─build────────────┬─intervals─┬─delta_rows─┬─hour_peak─┬─user_buckets─┐
+   │ clean_from_cruel │     30323 │      28073 │      2917 │        91692 │
+   │ baseline         │     30323 │      28073 │      2917 │        91692 │
+   └──────────────────┴───────────┴────────────┴───────────┴──────────────┘
+
+  sql/90_reconcile.sql on t3_clean:
+  SUMMARY  minutes_compared=17028  mismatched=0  max_abs_diff=0  peak=2917  PASS
+
+  10 hostile rows in, 10 quarantined, answers byte-identical to the baseline.
+
+== 6 · Cruel injection B: 8 keep-and-count rows (flag + normalise classes) ==
+
+  Injected: empty user_id · event-before-session-start · session_start epoch-zero ·
+  content_id = -1 (the ADR 0022 rollup sentinel) · invalid-UTF-8 audio_language ·
+  space-padded session_id · 'HIN<U+200B>' · '<U+00A0>hin-Hindi'.
+
+  SELECT flag, rows, sessions FROM v_preprocess_flags;      ← reads v_ev_model_input,
+   ┌─flag───────────────────────┬─rows─┬─sessions─┐            so quarantined rows
+   │ identity_padded            │    1 │        1 │            cannot double-report
+   │ user_id_empty              │    1 │        1 │
+   │ dimension_not_utf8         │    1 │        1 │
+   │ event_before_session_start │    1 │        1 │
+   │ content_id_rollup_sentinel │    1 │        1 │
+   │ session_start_out_of_range │    1 │        1 │
+   └────────────────────────────┴──────┴──────────┘
+  v_preprocess_summary: raw 905,576 · quarantined 10 (unchanged) · model_input 905,566
+  — all 8 rows KEPT, each one counted.
+
+  Normalise class, on read (no byte stored differently):
+  SELECT norm_lang(audio_language) AS grp, uniqExact(audio_language) AS variants, count()
+  FROM ev_raw WHERE video_session_id LIKE 'cruel-f%' AND norm_lang(audio_language)='hin'
+   → grp hin · variants 3 · rows 5      ('hin', 'HIN<U+200B>', '<U+00A0>hin-Hindi' → one group)
+
+== 7 · Cost, measured on the full file (system.query_log, Cloud) ==
+
+  classifier full scan   SELECT count() FROM ev_raw WHERE q_reason(...) != ''
+                          98 ms · 905,558 rows · 122.63 MiB read
+  flags view full scan   136 ms · 905,558 rows · 143.36 MiB read
+  clean view full scan   130 ms · 905,558 rows · 122.63 MiB read
+  quarantine sweep       first run 327 ms · 905,568 rows · 122.63 MiB · wrote 8 rows
+                          re-runs 75–80 ms (query condition cache skips non-matching granules)
+
+  The sweep is one statement inside sql/15_normalise.sql, which build-model.sh already
+  applies as stage 6/6 — preprocessing therefore runs on every load/build with no new
+  tooling, and costs ~0.3 s on a 905K-row day.
+
+== 8 · What is deliberately NOT wired ==
+
+  v_ev_model_input exists; sql/30_build_intervals.sql and sql/90_reconcile.sql still read
+  ev_raw directly. Switching them is a TWO-FILE change (model and gate must move together
+  or the gate correctly fails on any day where the quarantine is non-empty) and both files
+  are owned by other lanes. Proposal + decision table: docs/adr/0025. On the provided file
+  the point is moot — zero rows quarantine, the view IS ev_raw (section 4).

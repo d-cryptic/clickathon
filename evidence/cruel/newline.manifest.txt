@@ -1,0 +1,9 @@
+CRUEL knob 'newline' · seed 20260822 · day 2026-08-22 UTC · data/cruel-newline-raw.csv
+events 98 (+header) · sessions 4 · truth minutes 17 (0 SPEC_ONLY)
+designed peak 4 @ 2026-08-22 09:00 UTC (spec projection; SPEC_ONLY minutes are a policy, not a truth)
+
+hazards:
+  - n03 carries ONE quoted embedded newline — the load is valid CSV; any line-count-based row assertion is not
+
+expected breakage when run:
+  - unseen-run.sh phase 2 dies: wc -l counts the embedded newline as a row, loaded rows != CSV_ROWS, although the load was CORRECT

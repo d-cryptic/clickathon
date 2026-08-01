@@ -1,0 +1,73 @@
+case	target	shape	expect	verdict	detail	note
+wr01_unknown_platform	scratch	b02	rows:0	SILENT-WRONG	expected 0 row(s), got 1: 2026-06-01 10:00:00|2026-06-01 11:00:00|NOKIA_9000|*|-1|0|0|0|0|0	unknown dimension value must be empty, not a zero-row that reads as "nobody watched"
+wr02_case_platform	scratch	b02	rows:0	SILENT-WRONG	expected 0 row(s), got 1: 2026-06-01 10:00:00|2026-06-01 11:00:00|Android_Phone|*|-1|0|0|0|0|0	case variant of a real value silently answers zero
+wr03_star_platform	scratch	b02	value:peak=1	SILENT-WRONG	peak: expected 1, got 8	a REAL platform named '*' is unqueryable: '*' means "all" in the interface, so the literal answer (peak 1) is unreachable
+wr04_real_platform	scratch	b02	truth_range	SILENT-WRONG	integral: truth 6840, shape 9180	baseline: an exact real value answers exactly
+wr05_collision_rollup	scratch	b01	value:peak=8;integral=12180	SILENT-WRONG	integral: expected 12180, got 15180	ADR 0022 hole: v_cc_window_range pins sentinels but NOT cube_level, so the real content_id=-1 curve is summed into the rollup
+wr06_collision_content	scratch	b04	value:peak=1;integral=2340	SILENT-WRONG	peak: expected 1, got 8; integral: expected 2340, got 15180	asking for the REAL content -1 (peak 1, integral 2340) is impossible: -1 means "all content" in the interface
+wr07_unknown_content	scratch	b04	rows:0	SILENT-WRONG	expected 0 row(s), got 1: 2026-06-01 10:00:00|2026-06-01 11:00:00|*|*|777|0|0|0|0|0	unknown content id must be empty, not zero
+wr08_inverted_range	scratch	b01	error	LOUD-PASS	failed loudly: Code: 395. DB::Exception: v_cc_window_range: p_end must be strictly after p_start: while executing 'FUNCTION throwIf(_CAST(1_UInt8	end before start must fail loudly (throwIf)
+wr09_empty_range	scratch	b01	error	LOUD-PASS	failed loudly: Code: 395. DB::Exception: v_cc_window_range: p_end must be strictly after p_start: while executing 'FUNCTION throwIf(_CAST(1_UInt8	zero-length range must fail loudly, not divide by zero
+wr10_zero_span	scratch	b01	value:peak=0;integral=0	PASS	peak=0, integral=0	range of genuinely zero concurrency: 0/0 is the CORRECT answer here
+wr11_before_first	scratch	b01	value:peak=0;integral=0	PASS	peak=0, integral=0	range entirely before the first event: 0 is defensible but indistinguishable from "no data yet"
+wr12_after_last	scratch	b01	value:peak=0;integral=0	PASS	peak=0, integral=0	range entirely after the last event: same caveat as wr11
+wr13_one_minute	scratch	b01	truth_range	PASS	peak/integral match truth (peak=8, integral=480)	exactly one minute (the peak minute: 8 for 60 s)
+wr14_ragged	scratch	b11	truth_range	PASS	peak/integral match truth (peak=8, integral=10080)	ragged range: partial hour + hour tier + partial hour
+wr15_mid_minute	scratch	b01	truth_range	PASS	peak/integral match truth (peak=8, integral=9390)	range starting and ending mid-MINUTE: sub-minute clipping at both edges
+wr16_sub_minute	scratch	b01	truth_range	PASS	peak/integral match truth (peak=8, integral=240)	30-second range inside one minute (integral must be 8x30=240)
+wr17_hour_exact	scratch	b01	truth_range	PASS	peak/integral match truth (peak=1, integral=3600)	range exactly on hour boundaries over a session that ends exactly ON a boundary
+wr18_full_span	scratch	b10	truth_range	SILENT-WRONG	integral: truth 34860, shape 37860	the whole fixture in one range
+wr19_avg_zero_hours	scratch	b01	value:peak=8;integral=12180;avg_concurrent=1.69	WRONG	integral: expected 12180, got 15180; avg_concurrent: expected 1.69, got 2.11	time-weighted average must divide by the FULL range including the zero hour 11 (12180/7200=1.69)
+ht01_no_data_day	scratch	b05	rows:0	PASS	0 row(s) as expected	a day with no data serves EMPTY, not zeros — correct contrast to the window shape
+ht02_day_hours	scratch	b05	rows:11	PASS	11 row(s) as expected	exactly the 11 hours that carry activity
+ht03_day_rollup	scratch	x05	value:peak=8;peak_minute=2026-06-01 10:30:00;integral=33000;avg_concurrent=0.3819	PASS	peak=8, peak_minute=2026-06-01 10:30:00, integral=33000, avg_concurrent=0.3819	hand-computed day truth: peak 8 first at 10:30, integral exactly 33000 s
+ht04_day2	scratch	x05	value:peak=1;integral=1860	PASS	peak=1, integral=1860	second day: one 31-minute session
+ht05_tie_earliest	scratch	x04	value:peak=1;peak_minute=2026-06-01 20:00:00;integral=120	PASS	peak=1, peak_minute=2026-06-01 20:00:00, integral=120	ADR 0014: peak level reached at 20:00 AND 20:59 — earliest must win
+ht06_empty_hour	scratch	x04	rows:0	PASS	0 row(s) as expected	an hour with no viewers is absent from the hour tier, not a zero row
+ht07_middle_hour	scratch	x04	value:peak=1;integral=3600	PASS	peak=1, integral=3600	middle hour of a 4-hour interval: no open/close events inside it, must still read peak 1 held all hour
+ht08_lastminute_end	scratch	x04	value:peak=2;integral=4560	PASS	peak=2, integral=4560	session ending at 14:59:59: the close in the last minute of the hour must not leak
+ht09_no_leak_hour15	scratch	x04	value:peak=1;integral=1800	PASS	peak=1, integral=1800	hour 15 must show ONLY the 15:30 session — a leaked close from 14:59:59 would corrupt it
+ht10_b12_alldays	scratch	b12	rows:2	PASS	2 row(s) as expected	exactly the two days that exist
+ht11_top_content_unique	scratch	b13	unique:content_id	WRONG	duplicate content_id value(s) in result: 101	a platform literally named '*' creates a cube-level-5 row that b13's sentinel filter cannot exclude - duplicate content rows
+ht12_orphan_title	scratch	b13	record	PASS	recorded 4 row(s)	recorded: orphan content 999 must render '(unknown)', and the REAL content -1 is excluded by b13's content_id != -1 filter
+ms01_aligned_hour	scratch	b06	truth_series	PASS	all 60 minutes match truth	baseline: hour-aligned dashboard curve is exact
+ms02_midhour	scratch	b06	truth_series	SILENT-WRONG	60/60 minutes differ: 2026-06-01 10:30:00: truth 8.0, shape 2.0; 2026-06-01 10:31:00: truth 7.0, shape 1.0; 2026-06-01 10:32:00: truth 7.0, shape 1.0; 2026-06-01 10:33:00: truth 7.0, shape 1.0 (+56 more)	b06 taken at a NON-aligned start: running sum loses the carry-in of 10:00-10:29 and reports a plausible wrong curve
+ms03_empty_hour	scratch	b06	truth_series	PASS	all 60 minutes match truth	quiet hour: the curve must be 60 explicit zeros
+ms04_planted_case_twin	scratch	b07	truth_series	PASS	all 60 minutes match truth	lowercase twin EXISTS as its own value: equality serves it correctly (contrast wr02)
+ms05_unknown_platform	scratch	b07	truth_series	PASS	all 60 minutes match truth	unknown platform yields an all-zero curve - numerically true, indistinguishable from a real quiet hour (see wr01)
+vt01_live	scratch	b08	truth_range	PASS	peak/integral match truth (peak=5, integral=23580)	catalog-driven filter incl. the real content -1 (it IS 'live' in the catalog)
+vt02_unknown_type	scratch	b08	rows:0	SILENT-WRONG	expected 0 row(s), got 1: stream|0|1970-01-01 00:00:00|0|0|0	unknown video type: aggregate returns peak 0 + epoch peak_minute - zero-that-looks-like-an-answer
+vt03_case_type	scratch	b08	rows:0	SILENT-WRONG	expected 0 row(s), got 1: LIVE|0|1970-01-01 00:00:00|0|0|0	case variant of a real video type answers zero
+vt04_blank_type	scratch	b08	value:peak=0	PASS	peak=0	blank video type matches the catalog row that HAS no sessions: 0 is right, but identical in shape to vt02's wrong 0
+vt05_vod	scratch	b08	truth_range	PASS	peak/integral match truth (peak=2, integral=8400)	second catalog bucket, cross-checked independently
+in01_pair	scratch	b09	truth_range	PASS	peak/integral match truth (peak=5, integral=12420)	the documented hour-tier fallback: partial filter recomputed at minute grain
+in02_duplicates	scratch	b09	truth_range	PASS	peak/integral match truth (peak=4, integral=10440)	duplicate IN entries must not double count (IN is a set)
+in03_empty_list	scratch	b09	value:peak=0	PASS	peak=0	empty IN list: zero is the honest answer for an empty set
+in04_single_rare	scratch	b09	truth_range	PASS	peak/integral match truth (peak=1, integral=960)	a value that exists in exactly ONE hour of the range
+in05_mixed_unknown	scratch	b09	truth_range	PASS	peak/integral match truth (peak=4, integral=10440)	unknown member of the list contributes nothing, silently - the real member still answers
+in06_huge_list	scratch	b09	truth_range	PASS	peak/integral match truth (peak=8, integral=33000)	500-element IN list (every real platform + 490 fakes) must equal the unfiltered day
+xd01_hour_tier_audio	scratch	x01	error	LOUD-PASS	failed loudly: Code: 47. DB::Exception: Unknown expression or function identifier `audio_language` in scope SELECT hour	filtering the hour tier by a dimension it does not carry fails LOUDLY (Code 47), never silently unfiltered
+xd02_raw_hindi	scratch	x02	value:peak=2	PASS	peak=2	raw equality sees 2 of the 4 concurrent Hindi spellings - the ADR 0011 hole, on designed data
+xd03_norm_hindi	scratch	x03	value:peak=4	PASS	peak=4	norm_lang on BOTH sides folds all four spellings regardless of which one the caller typed
+xd04_devanagari	scratch	x03	value:peak=1	PASS	peak=1	Devanagari spelling is NOT merged by the subtag rule - its own visible bucket, by design (drift audit catches it)
+cw01_unknown_platform	cloud	b02	rows:0	SILENT-WRONG	expected 0 row(s), got 1: 2026-07-26 00:00:00|2026-07-27 00:00:00|NOKIA_9000|*|-1|0|0|0|0|0	deployed window view: unknown platform
+cw02_case_platform	cloud	b02	rows:0	SILENT-WRONG	expected 0 row(s), got 1: 2026-07-26 00:00:00|2026-07-27 00:00:00|android_phone|*|-1|0|0|0|0|0	deployed: case variant of ANDROID_PHONE
+cw03_inverted_range	cloud	b01	error	LOUD-PASS	failed loudly: Code: 395. DB::Exception: v_cc_window_range: p_end must be strictly after p_start: while executing 'FUNCTION throwIf(_CAST(1_UInt8	deployed view is pre-ADR-0014 - does it still refuse an inverted range?
+cw04_empty_range	cloud	b01	error	LOUD-PASS	failed loudly: Code: 395. DB::Exception: v_cc_window_range: p_end must be strictly after p_start: while executing 'FUNCTION throwIf(_CAST(1_UInt8	deployed: zero-length range
+cw05_before_first	cloud	b01	value:peak=0;integral=0	PASS	peak=0, integral=0	deployed: range before the first event
+cw06_real_platform	cloud	b02	truth_range	SILENT-WRONG	peak: truth 1706, shape 1837; integral: truth 4688520, shape 5149740	deployed serving vs graded intervals, through the bench shape itself
+cw07_ragged	cloud	b11	truth_range	SILENT-WRONG	peak: truth 2681, shape 2950; integral: truth 6641400, shape 7380660	deployed ragged decomposition vs independent truth
+cw08_mid_minute	cloud	b01	truth_range	SILENT-WRONG	peak: truth 2154, shape 2379; integral: truth 1224330, shape 1352280	deployed: sub-minute range edges
+cw09_one_minute	cloud	b01	truth_range	SILENT-WRONG	peak: truth 2681, shape 2950; integral: truth 160860, shape 177000	deployed: the known peak minute alone (2887)
+cw10_duplicates	cloud	b09	truth_range	SILENT-WRONG	peak: truth 1706, shape 1903; integral: truth 4688520, shape 5193180	deployed: duplicate IN entries
+cw11_empty_list	cloud	b09	value:peak=0	PASS	peak=0	deployed: empty IN list
+cw12_huge_list	cloud	b09	truth_range	SILENT-WRONG	peak: truth 2681, shape 2950; integral: truth 7142340, shape 7903920	deployed: 500-element IN list vs unfiltered truth
+cw13_unknown_video_type	cloud	b08	rows:0	SILENT-WRONG	expected 0 row(s), got 1: stream|0|1970-01-01 00:00:00|0|0|0	deployed: unknown video type - zero-looking aggregate row
+cw14_case_video_type	cloud	b08	rows:0	SILENT-WRONG	expected 0 row(s), got 1: Live|0|1970-01-01 00:00:00|0|0|0	deployed: case variant of a real video type
+cw15_hour_tier_audio	cloud	x01	error	LOUD-PASS	failed loudly: Code: 47. DB::Exception: Unknown expression or function identifier `audio_language` in scope SELECT hour	deployed hour tier: non-carried dimension fails loudly
+cw16_raw_hindi	cloud	x02	value:peak=1768	WRONG	peak: expected 1768, got 1798	ADR 0011 on the graded data: raw equality peak Hindi = 1768
+cw17_norm_hindi	cloud	x03	value:peak=2180	WRONG	peak: expected 2180, got 2203	ADR 0011 on the graded data: normalised peak Hindi = 2180 (+23.3%)
+cw18_star_platform	cloud	b02	record	PASS	recorded 1 row(s)	recorded: '*' means "all platforms" in the interface - fine today, unqueryable the day a platform is literally '*'
+cw19_b06_midhour	cloud	b06	truth_series	SILENT-WRONG	60/60 minutes differ: 2026-07-26 10:30:00: truth 266.0, shape 198.0; 2026-07-26 10:31:00: truth 491.0, shape 469.0; 2026-07-26 10:32:00: truth 650.0, shape 645.0; 2026-07-26 10:33:00: truth 827.0, shape 835.0 (+56 more)	deployed b06 at a non-aligned start: same carry-in loss as ms02
+cw20_top_content_unique	cloud	b13	unique:content_id	PASS	all 10 content_id values distinct	deployed b13: content rows must be unique (no hostile values on graded data)
+cw21_b05_empty_day	cloud	b05	rows:0	PASS	0 row(s) as expected	deployed hour tier: a day past the data serves empty

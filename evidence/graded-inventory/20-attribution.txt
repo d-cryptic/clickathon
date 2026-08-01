@@ -1,0 +1,70 @@
+    ┌──────────event_time─┬─user────┬─http_user_agent─┬─interface─┬─q──────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+ 1. │ 2026-08-01 10:12:11 │ default │ curl/8.7.1      │         2 │ ALTER TABLE sonyliv.ev_raw (ADD PROJECTION IF NOT EXISTS proj_by_session (SELECT * ORDER BY video_session_id,  │
+ 2. │ 2026-08-01 10:12:11 │ default │ curl/8.7.1      │         2 │ ALTER TABLE sonyliv.ev_raw ADD PROJECTION IF NOT EXISTS proj_by_session (SELECT * ORDER BY (video_session_id,  │
+ 3. │ 2026-08-01 10:12:13 │ default │ curl/8.7.1      │         2 │ ALTER TABLE sonyliv.ev_raw MATERIALIZE PROJECTION proj_by_session                                              │
+ 4. │ 2026-08-01 10:48:24 │ default │                 │         1 │ CREATE TABLE IF NOT EXISTS sonyliv.cc_user_minute UUID 'f5ba8a0a-a428-45f0-9b58-296a3b5e4018' (`minute` DateTi │
+ 5. │ 2026-08-01 10:48:24 │ default │                 │         1 │ -- ============================================================================ -- 45_user_concurrency.sql —   │
+ 6. │ 2026-08-01 10:48:25 │ default │                 │         1 │ CREATE MATERIALIZED VIEW IF NOT EXISTS sonyliv.mv_user_minute UUID 'cddf244a-698c-4d50-be68-9cb25e117d9f' TO s │
+ 7. │ 2026-08-01 10:48:25 │ default │                 │         1 │ -- --------------------------------------------------------------------------- -- Incremental absorption: any  │
+ 8. │ 2026-08-01 10:48:26 │ default │                 │         1 │ CREATE OR REPLACE VIEW sonyliv.v_user_concurrency_minute UUID '7be17093-9f47-4f22-843d-8b09f49104ed' (`minute` │
+ 9. │ 2026-08-01 10:48:26 │ default │                 │         1 │ -- --------------------------------------------------------------------------- -- Serving views — merge stat   │
+10. │ 2026-08-01 10:48:27 │ default │                 │         1 │ CREATE OR REPLACE VIEW sonyliv.v_user_concurrency_minute_total UUID 'cd30b797-0a71-49e2-8f0b-64ab64264eb3' (`m │
+11. │ 2026-08-01 10:48:27 │ default │                 │         1 │ -- The headline user curve: total distinct users active per minute, all -- dimensions collapsed. Re-merges the │
+12. │ 2026-08-01 13:02:21 │ default │ curl/8.7.1      │         2 │ TRUNCATE TABLE sonyliv.cc_user_minute                                                                          │
+13. │ 2026-08-01 13:02:21 │ default │ curl/8.7.1      │         2 │ TRUNCATE TABLE cc_user_minute                                                                                  │
+14. │ 2026-08-01 13:02:36 │ default │ curl/8.7.1      │         2 │ TRUNCATE TABLE sonyliv.cc_user_minute                                                                          │
+15. │ 2026-08-01 13:02:36 │ default │ curl/8.7.1      │         2 │ TRUNCATE TABLE cc_user_minute                                                                                  │
+16. │ 2026-08-01 13:43:33 │ default │ curl/8.7.1      │         2 │ TRUNCATE TABLE sonyliv.cc_user_minute                                                                          │
+17. │ 2026-08-01 13:43:33 │ default │ curl/8.7.1      │         2 │ TRUNCATE TABLE cc_user_minute                                                                                  │
+18. │ 2026-08-01 13:44:02 │ default │ curl/8.7.1      │         2 │ TRUNCATE TABLE sonyliv.cc_user_minute                                                                          │
+19. │ 2026-08-01 13:44:02 │ default │ curl/8.7.1      │         2 │ TRUNCATE TABLE cc_user_minute                                                                                  │
+20. │ 2026-08-01 13:44:23 │ default │ curl/8.7.1      │         2 │ TRUNCATE TABLE sonyliv.cc_user_minute                                                                          │
+21. │ 2026-08-01 13:44:23 │ default │ curl/8.7.1      │         2 │ TRUNCATE TABLE cc_user_minute                                                                                  │
+22. │ 2026-08-01 13:45:06 │ default │ curl/8.7.1      │         2 │ TRUNCATE TABLE sonyliv.cc_user_minute                                                                          │
+23. │ 2026-08-01 13:45:06 │ default │ curl/8.7.1      │         2 │ TRUNCATE TABLE cc_user_minute                                                                                  │
+24. │ 2026-08-01 13:45:33 │ default │                 │         1 │ CREATE TABLE IF NOT EXISTS sonyliv.cc_user_minute UUID '8c8441fd-e4d1-49b3-838e-2f6b305a80d0' (`minute` DateTi │
+25. │ 2026-08-01 13:45:33 │ default │                 │         1 │ -- ============================================================================ -- 45_user_concurrency.sql —   │
+26. │ 2026-08-01 13:45:33 │ default │                 │         1 │ CREATE MATERIALIZED VIEW IF NOT EXISTS sonyliv.mv_user_minute UUID 'd9af877c-f2a6-4915-a273-f09906c2c6de' TO s │
+27. │ 2026-08-01 13:45:33 │ default │                 │         1 │ -- --------------------------------------------------------------------------- -- Incremental absorption: any  │
+28. │ 2026-08-01 13:45:35 │ default │                 │         1 │ CREATE OR REPLACE VIEW sonyliv.v_user_concurrency_minute UUID '150d573e-b9e9-46c0-9f90-b62b8c37a9dc' (`minute` │
+29. │ 2026-08-01 13:45:35 │ default │                 │         1 │ -- --------------------------------------------------------------------------- -- Serving views — merge stat   │
+30. │ 2026-08-01 13:45:35 │ default │                 │         1 │ CREATE OR REPLACE VIEW sonyliv.v_user_concurrency_minute_total UUID '87262813-ba29-454a-918d-53e7c07d8117' (`m │
+31. │ 2026-08-01 13:45:35 │ default │                 │         1 │ -- The headline user curve: total distinct users active per minute, all -- dimensions collapsed. Re-merges the │
+32. │ 2026-08-01 13:46:05 │ default │                 │         1 │ -- --------------------------------------------------------------------------- -- Incremental absorption: any  │
+33. │ 2026-08-01 13:46:05 │ default │                 │         1 │ -- ============================================================================ -- 45_user_concurrency.sql —   │
+34. │ 2026-08-01 13:46:05 │ default │                 │         1 │ CREATE MATERIALIZED VIEW IF NOT EXISTS sonyliv.mv_user_minute UUID 'c0858c2e-e427-4a55-8400-ca0093f4dbac' TO s │
+35. │ 2026-08-01 13:46:05 │ default │                 │         1 │ CREATE TABLE IF NOT EXISTS sonyliv.cc_user_minute UUID '731a77c9-2d7a-4840-8b69-f8348c177244' (`minute` DateTi │
+36. │ 2026-08-01 13:46:07 │ default │                 │         1 │ CREATE OR REPLACE VIEW sonyliv.v_user_concurrency_minute UUID '087bd19d-efc2-4bdb-bdde-9a379aa0717e' (`minute` │
+37. │ 2026-08-01 13:46:07 │ default │                 │         1 │ -- --------------------------------------------------------------------------- -- Serving views — merge stat   │
+38. │ 2026-08-01 13:46:07 │ default │                 │         1 │ CREATE OR REPLACE VIEW sonyliv.v_user_concurrency_minute_total UUID '9450af2c-d58e-405d-b990-cb0e2e63c2cd' (`m │
+39. │ 2026-08-01 13:46:07 │ default │                 │         1 │ -- The headline user curve: total distinct users active per minute, all -- dimensions collapsed. Re-merges the │
+40. │ 2026-08-01 13:46:15 │ default │ curl/8.7.1      │         2 │ TRUNCATE TABLE sonyliv.cc_user_minute                                                                          │
+41. │ 2026-08-01 13:46:15 │ default │ curl/8.7.1      │         2 │ TRUNCATE TABLE cc_user_minute                                                                                  │
+42. │ 2026-08-01 13:52:12 │ default │ curl/8.7.1      │         2 │ TRUNCATE TABLE sonyliv.cc_user_minute                                                                          │
+43. │ 2026-08-01 13:52:12 │ default │ curl/8.7.1      │         2 │ TRUNCATE TABLE cc_user_minute                                                                                  │
+44. │ 2026-08-01 13:53:42 │ default │ curl/8.7.1      │         2 │ TRUNCATE TABLE IF EXISTS sonyliv.cc_user_minute                                                                │
+45. │ 2026-08-01 13:53:42 │ default │ curl/8.7.1      │         2 │ TRUNCATE TABLE IF EXISTS cc_user_minute                                                                        │
+46. │ 2026-08-01 13:57:36 │ default │ curl/8.7.1      │         2 │ TRUNCATE TABLE IF EXISTS sonyliv.cc_user_minute                                                                │
+47. │ 2026-08-01 13:57:36 │ default │ curl/8.7.1      │         2 │ TRUNCATE TABLE IF EXISTS cc_user_minute                                                                        │
+48. │ 2026-08-01 13:58:04 │ default │ curl/8.7.1      │         2 │ TRUNCATE TABLE IF EXISTS sonyliv.cc_user_minute                                                                │
+49. │ 2026-08-01 13:58:04 │ default │ curl/8.7.1      │         2 │ TRUNCATE TABLE IF EXISTS cc_user_minute                                                                        │
+50. │ 2026-08-01 13:58:39 │ default │ curl/8.7.1      │         2 │ TRUNCATE TABLE IF EXISTS sonyliv.cc_user_minute                                                                │
+51. │ 2026-08-01 13:58:39 │ default │ curl/8.7.1      │         2 │ TRUNCATE TABLE IF EXISTS cc_user_minute                                                                        │
+52. │ 2026-08-01 13:59:36 │ default │ curl/8.7.1      │         2 │ TRUNCATE TABLE IF EXISTS sonyliv.cc_user_minute                                                                │
+53. │ 2026-08-01 13:59:36 │ default │ curl/8.7.1      │         2 │ TRUNCATE TABLE IF EXISTS cc_user_minute                                                                        │
+54. │ 2026-08-01 15:38:16 │ default │                 │         1 │ CREATE TABLE IF NOT EXISTS sonyliv.session_dirty UUID '8aacdf66-5494-4870-ad32-918504c64306' (`marked_at` Date │
+55. │ 2026-08-01 15:38:16 │ default │                 │         1 │ -- ============================================================================ -- 12_publish.sql — CONTINUO   │
+56. │ 2026-08-01 15:38:16 │ default │                 │         1 │ CREATE MATERIALIZED VIEW IF NOT EXISTS sonyliv.mv_session_dirty UUID '90079dcb-47d0-463b-94a7-7822a5ffa865' TO │
+57. │ 2026-08-01 15:38:16 │ default │                 │         1 │ -- Fires on every insert into ev_raw — the bulk load, the unseen day, a single -- replayed straggler. GROUP    │
+58. │ 2026-08-01 15:38:17 │ default │                 │         1 │ CREATE TABLE IF NOT EXISTS sonyliv.cc_publish_batch UUID 'ced7b660-44ba-43b0-b715-4a17d6a6b0f0' (`run_id` UInt │
+59. │ 2026-08-01 15:38:17 │ default │                 │         1 │ -- --------------------------------------------------------------------------- -- cc_publish_batch — the ses   │
+60. │ 2026-08-01 15:38:17 │ default │                 │         1 │ CREATE TABLE IF NOT EXISTS sonyliv.cc_publish_consumed UUID '6f83de75-5cd7-48cb-abb9-aff4e392ac81' (`marked_at │
+61. │ 2026-08-01 15:38:17 │ default │                 │         1 │ -- --------------------------------------------------------------------------- -- cc_publish_consumed — whic   │
+62. │ 2026-08-01 15:38:18 │ default │                 │         1 │ CREATE TABLE IF NOT EXISTS sonyliv.cc_publish_runs UUID '424f83cd-2048-46b9-8fbb-63e33bcec4a3' (`run_id` UInt6 │
+63. │ 2026-08-01 15:38:18 │ default │                 │         1 │ -- --------------------------------------------------------------------------- -- cc_publish_runs — the writ   │
+64. │ 2026-08-01 15:38:18 │ default │                 │         1 │ CREATE OR REPLACE VIEW sonyliv.v_cc_publish_lag UUID '531b9c5b-8191-4744-8cb1-8bb2be09d045' (`publish_cursor`  │
+65. │ 2026-08-01 15:38:18 │ default │                 │         1 │ -- --------------------------------------------------------------------------- -- v_cc_publish_lag — REFRESH   │
+66. │ 2026-08-01 15:38:32 │ default │ curl/8.7.1      │         2 │ ALTER TABLE cc_publish_batch DROP PARTITION 1785598710629                                                      │
+67. │ 2026-08-01 16:39:10 │ default │ curl/8.7.1      │         2 │ TRUNCATE TABLE IF EXISTS sonyliv.cc_user_minute                                                                │
+68. │ 2026-08-01 16:39:10 │ default │ curl/8.7.1      │         2 │ TRUNCATE TABLE IF EXISTS cc_user_minute                                                                        │
+    └──────────event_time─┴─user────┴─http_user_agent─┴─interface─┴─q──────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

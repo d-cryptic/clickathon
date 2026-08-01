@@ -1,0 +1,398 @@
+BENCHMARK — latency + bytes-read evidence over the serving layer
+target: cloud database=sonyliv   commit: bfc5092   server: 26.2.1.525   tag: bench-20260801T165403Z
+
+*** THIS QUERY SET IS OUR RECONSTRUCTION, NOT THE OFFICIAL SET. ***
+The official benchmark query set was never released. These 13 queries are the
+shapes the problem statement names — peak AND average concurrency, at minute /
+hour / day grain, with dimension filters (platform, country, content, video
+type) — plus the partial-filter shape (platform IN two values) that the hour
+tier explicitly does NOT serve, so its documented minute-scan fallback is
+measured rather than guessed. Grain and parameter choices are ours.
+
+method: warm-up discarded (idle Cloud service measured at 29.3 s on first
+query); then per query 1x EXPLAIN indexes=1 + 3 timed runs with
+use_query_cache=0 AND use_query_condition_cache=0; median reported. Latency is
+the server-side elapsed_ns from X-ClickHouse-Summary; wall ms includes network
+from the operator laptop to ClickHouse Cloud. 'stable' = all 3 runs returned
+byte-identical answers. Every run is labelled with
+log_comment='bench:<query>:run<N>:bench-20260801T165403Z' and its query_id is
+listed in section 2, so every number below is auditable in system.query_log.
+
+dataset (sha256-pinned in tools/fetch_data.sh):
+   ch-hackathon-raw-data.csv 15ce6df78e7239820fb9951f2a5c68de2abb47a0950068947e1a0344a0283a96 (232827255 bytes)
+   ch-hackathon-content-data.csv e013c4958e9b6396f9cc6cd2681bb6944bb65dc810b7f0925f78254ed9c7ddd4 (1181455 bytes)
+serving-layer state at run time: ev_raw=905558 session_intervals=30323 cc_minute_delta=28073 cc_hour_agg=26254
+
+== 1. THE TABLE — bytes read first: judges look at what a query READS ==
+
+   query                                 bytes read  rows read  server ms (med/3)  wall ms (med/3)  result rows  PK granules sel/tot  stable
+   -----------------------------------------------------------------------------------------------------------------------------------------
+   b01_day_peak_avg_total                240.0 KiB   8,193      44.5               502              1            1/4 + 0/0            yes   
+   b02_day_peak_avg_platform             240.0 KiB   8,193      40.6               402              1            1/4 + 0/0            yes   
+   b03_day_peak_avg_country              240.0 KiB   8,193      24.4               393              1            1/4 + 0/0            yes   
+   b04_day_peak_avg_content              240.0 KiB   8,193      37.6               424              1            1/4 + 0/0            yes   
+   b05_hour_grain_peak_day               336.0 KiB   8,192      12.2               512              12           1/4                  yes   
+   b06_minute_series_peak_hour           312.0 KiB   26,622     7.5                388              60           4/4                  yes   
+   b07_minute_series_peak_hour_platform  208.0 KiB   16,384     7.0                1,037            60           2/4                  yes   
+   b08_day_peak_avg_video_type           814.1 KiB   60,086     17.8               378              1            4/4                  yes   
+   b09_day_peak_avg_partial_platform     208.0 KiB   16,384     9.4                381              1            2/4                  yes   
+   b10_range_peak_avg_full_span          240.0 KiB   8,193      31.8               1,091            1            1/4 + 0/0            yes   
+   b11_range_peak_avg_ragged             552.0 KiB   34,815     40.3               417              1            1/4 + 4/4            yes   
+   b12_day_grain_all_days                272.0 KiB   8,192      13.0               430              7            1/4                  yes   
+   b13_hour_top_content                  272.0 KiB   8,192      14.3               481              10           1/4                  yes   
+
+Context for the bytes column: the raw events table (ev_raw, 905,558 rows) is
+NEVER read. The largest scan above touches only the delta/hour serving tiers;
+compare evidence/scale.txt for how these same shapes behave at 10x and 100x.
+
+== 2. PER QUERY — text, parameters, answer, query ids ==
+
+---- b01_day_peak_avg_total ----------------------------------------------------
+params:
+   p_start=2026-07-26 00:00:00
+   p_end=2026-07-27 00:00:00
+   p_platform=*
+   p_country=*
+   p_content_id=-1
+query: evidence/benchmark/b01_day_peak_avg_total.sql   explain: results/b01_day_peak_avg_total.explain.txt
+runs:
+   run1  query_id=550cb10d-a8bd-468c-8f1b-c865ed2f11fc  elapsed=18.9 ms  read_rows=8,193  read_bytes=245,761
+   run2  query_id=47d8a2cb-767b-4e9c-9c16-ab9e19dbe704  elapsed=44.5 ms  read_rows=8,193  read_bytes=245,761
+   run3  query_id=8e6c2ded-9a75-4a65-9d96-8e97ba94e308  elapsed=134.6 ms  read_rows=8,193  read_bytes=245,761
+answer (run 1, byte-identical across runs unless flagged above):
+      ┌─────────range_start─┬───────────range_end─┬─platform─┬─country─┬─content_id─┬─peak─┬─integral─┬─avg_concurrent─┬─hours_from_hour_tier─┬─change_points_from_minute_tier─┐
+   1. │ 2026-07-26 00:00:00 │ 2026-07-27 00:00:00 │ *        │ *       │         -1 │ 2917 │  7957680 │           92.1 │                   12 │                              0 │
+      └─────────────────────┴─────────────────────┴──────────┴─────────┴────────────┴──────┴──────────┴────────────────┴──────────────────────┴────────────────────────────────┘
+
+---- b02_day_peak_avg_platform -------------------------------------------------
+params:
+   p_start=2026-07-26 00:00:00
+   p_end=2026-07-27 00:00:00
+   p_platform=ANDROID_PHONE
+   p_country=*
+   p_content_id=-1
+query: evidence/benchmark/b02_day_peak_avg_platform.sql   explain: results/b02_day_peak_avg_platform.explain.txt
+runs:
+   run1  query_id=e9306205-7504-464c-9494-3a74c82e1582  elapsed=40.6 ms  read_rows=8,193  read_bytes=245,761
+   run2  query_id=5d2e654d-8297-4f6d-a824-cfd0e0ed040e  elapsed=41.5 ms  read_rows=8,193  read_bytes=245,761
+   run3  query_id=303a01cc-ce61-40c4-aebb-d3af16ab5688  elapsed=28.7 ms  read_rows=8,193  read_bytes=245,761
+answer (run 1, byte-identical across runs unless flagged above):
+      ┌─────────range_start─┬───────────range_end─┬─platform──────┬─country─┬─content_id─┬─peak─┬─integral─┬─avg_concurrent─┬─hours_from_hour_tier─┬─change_points_from_minute_tier─┐
+   1. │ 2026-07-26 00:00:00 │ 2026-07-27 00:00:00 │ ANDROID_PHONE │ *       │         -1 │ 1837 │  5149740 │           59.6 │                   12 │                              0 │
+      └─────────────────────┴─────────────────────┴───────────────┴─────────┴────────────┴──────┴──────────┴────────────────┴──────────────────────┴────────────────────────────────┘
+
+---- b03_day_peak_avg_country --------------------------------------------------
+params:
+   p_start=2026-07-26 00:00:00
+   p_end=2026-07-27 00:00:00
+   p_platform=*
+   p_country=india
+   p_content_id=-1
+query: evidence/benchmark/b03_day_peak_avg_country.sql   explain: results/b03_day_peak_avg_country.explain.txt
+runs:
+   run1  query_id=75baeb02-7a3a-491f-b354-38e3aa00c8e5  elapsed=20.8 ms  read_rows=8,193  read_bytes=245,761
+   run2  query_id=e6d362ae-23d2-409c-b3b8-3943acd6ddf6  elapsed=24.4 ms  read_rows=8,193  read_bytes=245,761
+   run3  query_id=3eba79af-0a33-4b9a-a442-0b54682e9e61  elapsed=32.7 ms  read_rows=8,193  read_bytes=245,761
+answer (run 1, byte-identical across runs unless flagged above):
+      ┌─────────range_start─┬───────────range_end─┬─platform─┬─country─┬─content_id─┬─peak─┬─integral─┬─avg_concurrent─┬─hours_from_hour_tier─┬─change_points_from_minute_tier─┐
+   1. │ 2026-07-26 00:00:00 │ 2026-07-27 00:00:00 │ *        │ india   │         -1 │ 2917 │  7957680 │           92.1 │                   12 │                              0 │
+      └─────────────────────┴─────────────────────┴──────────┴─────────┴────────────┴──────┴──────────┴────────────────┴──────────────────────┴────────────────────────────────┘
+
+---- b04_day_peak_avg_content --------------------------------------------------
+params:
+   p_start=2026-07-26 00:00:00
+   p_end=2026-07-27 00:00:00
+   p_platform=*
+   p_country=*
+   p_content_id=2078157818
+query: evidence/benchmark/b04_day_peak_avg_content.sql   explain: results/b04_day_peak_avg_content.explain.txt
+runs:
+   run1  query_id=3cf3b203-1de8-4863-995f-c27f2cb0b319  elapsed=51.9 ms  read_rows=8,193  read_bytes=245,761
+   run2  query_id=eeb6069e-aa80-402a-81c6-cc46dbadb8d7  elapsed=32.3 ms  read_rows=8,193  read_bytes=245,761
+   run3  query_id=fba6088d-9477-4938-86dd-11976e4f912d  elapsed=37.6 ms  read_rows=8,193  read_bytes=245,761
+answer (run 1, byte-identical across runs unless flagged above):
+      ┌─────────range_start─┬───────────range_end─┬─platform─┬─country─┬─content_id─┬─peak─┬─integral─┬─avg_concurrent─┬─hours_from_hour_tier─┬─change_points_from_minute_tier─┐
+   1. │ 2026-07-26 00:00:00 │ 2026-07-27 00:00:00 │ *        │ *       │ 2078157818 │  433 │   965220 │          11.17 │                    3 │                              0 │
+      └─────────────────────┴─────────────────────┴──────────┴─────────┴────────────┴──────┴──────────┴────────────────┴──────────────────────┴────────────────────────────────┘
+
+---- b05_hour_grain_peak_day ---------------------------------------------------
+params:
+   p_day=2026-07-26 00:00:00
+query: evidence/benchmark/b05_hour_grain_peak_day.sql   explain: results/b05_hour_grain_peak_day.explain.txt
+runs:
+   run1  query_id=aa1a140c-a550-4881-becd-644970ddc113  elapsed=12.7 ms  read_rows=8,192  read_bytes=344,064
+   run2  query_id=60731ac5-97e8-4355-88d3-31e46ffa7d2f  elapsed=6.9 ms  read_rows=8,192  read_bytes=344,064
+   run3  query_id=b208241c-bee8-4e88-99b7-5bd45662ebe3  elapsed=12.2 ms  read_rows=8,192  read_bytes=344,064
+answer (run 1, byte-identical across runs unless flagged above):
+       ┌────────────────hour─┬─peak─┬─────────peak_minute─┬─integral─┬─avg_concurrent─┐
+    1. │ 2026-07-26 00:00:00 │    3 │ 2026-07-26 00:26:00 │     6660 │           1.85 │
+    2. │ 2026-07-26 01:00:00 │    4 │ 2026-07-26 01:06:00 │     6840 │            1.9 │
+    3. │ 2026-07-26 02:00:00 │    2 │ 2026-07-26 02:51:00 │     2040 │           0.57 │
+    4. │ 2026-07-26 03:00:00 │    9 │ 2026-07-26 03:42:00 │    14280 │           3.97 │
+    5. │ 2026-07-26 04:00:00 │    9 │ 2026-07-26 04:03:00 │    26520 │           7.37 │
+    6. │ 2026-07-26 05:00:00 │   17 │ 2026-07-26 05:55:00 │    35040 │           9.73 │
+    7. │ 2026-07-26 06:00:00 │   22 │ 2026-07-26 06:19:00 │    53160 │          14.77 │
+    8. │ 2026-07-26 07:00:00 │   24 │ 2026-07-26 07:45:00 │    61200 │             17 │
+    9. │ 2026-07-26 08:00:00 │   40 │ 2026-07-26 08:35:00 │   100080 │           27.8 │
+   10. │ 2026-07-26 09:00:00 │   55 │ 2026-07-26 09:59:00 │   151620 │          42.12 │
+   11. │ 2026-07-26 10:00:00 │ 2917 │ 2026-07-26 10:56:00 │  3927720 │        1091.03 │
+   12. │ 2026-07-26 11:00:00 │ 2873 │ 2026-07-26 11:00:00 │  3572520 │         992.37 │
+       └─────────────────────┴──────┴─────────────────────┴──────────┴────────────────┘
+
+---- b06_minute_series_peak_hour -----------------------------------------------
+params:
+   p_hour=2026-07-26 10:00:00
+query: evidence/benchmark/b06_minute_series_peak_hour.sql   explain: results/b06_minute_series_peak_hour.explain.txt
+runs:
+   run1  query_id=00bc0882-0a94-4876-adc4-edf56b3ed8b5  elapsed=7.5 ms  read_rows=26,622  read_bytes=319,464
+   run2  query_id=32cb7266-f336-4eeb-93cc-e0d195ce3996  elapsed=7.5 ms  read_rows=26,622  read_bytes=319,464
+   run3  query_id=ddcb6c6e-7ee7-4448-b769-d9856256b7d1  elapsed=8.1 ms  read_rows=26,622  read_bytes=319,464
+answer (run 1, byte-identical across runs unless flagged above):
+       ┌──────────────minute─┬─concurrent─┐
+    1. │ 2026-07-26 10:00:00 │         57 │
+    2. │ 2026-07-26 10:01:00 │         56 │
+    3. │ 2026-07-26 10:02:00 │         57 │
+    4. │ 2026-07-26 10:03:00 │         55 │
+    5. │ 2026-07-26 10:04:00 │         60 │
+    6. │ 2026-07-26 10:05:00 │         58 │
+    7. │ 2026-07-26 10:06:00 │         58 │
+    8. │ 2026-07-26 10:07:00 │         64 │
+    9. │ 2026-07-26 10:08:00 │         69 │
+   10. │ 2026-07-26 10:09:00 │         73 │
+   11. │ 2026-07-26 10:10:00 │         78 │
+   12. │ 2026-07-26 10:11:00 │         84 │
+   13. │ 2026-07-26 10:12:00 │         82 │
+   14. │ 2026-07-26 10:13:00 │         80 │
+   15. │ 2026-07-26 10:14:00 │         83 │
+   16. │ 2026-07-26 10:15:00 │         85 │
+   17. │ 2026-07-26 10:16:00 │         93 │
+   18. │ 2026-07-26 10:17:00 │        100 │
+   19. │ 2026-07-26 10:18:00 │         98 │
+   20. │ 2026-07-26 10:19:00 │         93 │
+   21. │ 2026-07-26 10:20:00 │         99 │
+   22. │ 2026-07-26 10:21:00 │         99 │
+   23. │ 2026-07-26 10:22:00 │        105 │
+   24. │ 2026-07-26 10:23:00 │        103 │
+   25. │ 2026-07-26 10:24:00 │        103 │
+   26. │ 2026-07-26 10:25:00 │         98 │
+   27. │ 2026-07-26 10:26:00 │         97 │
+   28. │ 2026-07-26 10:27:00 │         94 │
+   29. │ 2026-07-26 10:28:00 │         96 │
+   30. │ 2026-07-26 10:29:00 │         96 │
+   31. │ 2026-07-26 10:30:00 │        335 │
+   32. │ 2026-07-26 10:31:00 │        569 │
+   33. │ 2026-07-26 10:32:00 │        738 │
+   34. │ 2026-07-26 10:33:00 │        902 │
+   35. │ 2026-07-26 10:34:00 │       1069 │
+   36. │ 2026-07-26 10:35:00 │       1238 │
+   37. │ 2026-07-26 10:36:00 │       1406 │
+   38. │ 2026-07-26 10:37:00 │       1535 │
+   39. │ 2026-07-26 10:38:00 │       1681 │
+   40. │ 2026-07-26 10:39:00 │       1791 │
+   41. │ 2026-07-26 10:40:00 │       1909 │
+   42. │ 2026-07-26 10:41:00 │       2042 │
+   43. │ 2026-07-26 10:42:00 │       2170 │
+   44. │ 2026-07-26 10:43:00 │       2315 │
+   45. │ 2026-07-26 10:44:00 │       2325 │
+   46. │ 2026-07-26 10:45:00 │       2398 │
+   47. │ 2026-07-26 10:46:00 │       2494 │
+   48. │ 2026-07-26 10:47:00 │       2554 │
+   49. │ 2026-07-26 10:48:00 │       2634 │
+   50. │ 2026-07-26 10:49:00 │       2692 │
+   51. │ 2026-07-26 10:50:00 │       2726 │
+   52. │ 2026-07-26 10:51:00 │       2705 │
+   53. │ 2026-07-26 10:52:00 │       2758 │
+   54. │ 2026-07-26 10:53:00 │       2771 │
+   55. │ 2026-07-26 10:54:00 │       2825 │
+   56. │ 2026-07-26 10:55:00 │       2860 │
+   57. │ 2026-07-26 10:56:00 │       2917 │
+   58. │ 2026-07-26 10:57:00 │       2885 │
+   59. │ 2026-07-26 10:58:00 │       2855 │
+   60. │ 2026-07-26 10:59:00 │       2890 │
+       └──────────────minute─┴─concurrent─┘
+
+---- b07_minute_series_peak_hour_platform --------------------------------------
+params:
+   p_hour=2026-07-26 10:00:00
+   p_platform=ANDROID_PHONE
+query: evidence/benchmark/b07_minute_series_peak_hour_platform.sql   explain: results/b07_minute_series_peak_hour_platform.explain.txt
+runs:
+   run1  query_id=d958a632-946f-462c-b652-f190cf149693  elapsed=7.9 ms  read_rows=16,384  read_bytes=212,992
+   run2  query_id=193e1e4f-266c-4632-ab56-c7f844d6b575  elapsed=7.0 ms  read_rows=16,384  read_bytes=212,992
+   run3  query_id=9bb82649-c94b-4b1d-8540-1671a1b1d866  elapsed=6.9 ms  read_rows=16,384  read_bytes=212,992
+answer (run 1, byte-identical across runs unless flagged above):
+       ┌──────────────minute─┬─concurrent─┐
+    1. │ 2026-07-26 10:00:00 │         54 │
+    2. │ 2026-07-26 10:01:00 │         53 │
+    3. │ 2026-07-26 10:02:00 │         54 │
+    4. │ 2026-07-26 10:03:00 │         52 │
+    5. │ 2026-07-26 10:04:00 │         56 │
+    6. │ 2026-07-26 10:05:00 │         54 │
+    7. │ 2026-07-26 10:06:00 │         53 │
+    8. │ 2026-07-26 10:07:00 │         59 │
+    9. │ 2026-07-26 10:08:00 │         64 │
+   10. │ 2026-07-26 10:09:00 │         67 │
+   11. │ 2026-07-26 10:10:00 │         71 │
+   12. │ 2026-07-26 10:11:00 │         76 │
+   13. │ 2026-07-26 10:12:00 │         74 │
+   14. │ 2026-07-26 10:13:00 │         72 │
+   15. │ 2026-07-26 10:14:00 │         75 │
+   16. │ 2026-07-26 10:15:00 │         78 │
+   17. │ 2026-07-26 10:16:00 │         86 │
+   18. │ 2026-07-26 10:17:00 │         91 │
+   19. │ 2026-07-26 10:18:00 │         89 │
+   20. │ 2026-07-26 10:19:00 │         85 │
+   21. │ 2026-07-26 10:20:00 │         90 │
+   22. │ 2026-07-26 10:21:00 │         91 │
+   23. │ 2026-07-26 10:22:00 │         98 │
+   24. │ 2026-07-26 10:23:00 │         97 │
+   25. │ 2026-07-26 10:24:00 │         96 │
+   26. │ 2026-07-26 10:25:00 │         91 │
+   27. │ 2026-07-26 10:26:00 │         91 │
+   28. │ 2026-07-26 10:27:00 │         89 │
+   29. │ 2026-07-26 10:28:00 │         88 │
+   30. │ 2026-07-26 10:29:00 │         88 │
+   31. │ 2026-07-26 10:30:00 │        224 │
+   32. │ 2026-07-26 10:31:00 │        365 │
+   33. │ 2026-07-26 10:32:00 │        457 │
+   34. │ 2026-07-26 10:33:00 │        558 │
+   35. │ 2026-07-26 10:34:00 │        671 │
+   36. │ 2026-07-26 10:35:00 │        769 │
+   37. │ 2026-07-26 10:36:00 │        875 │
+   38. │ 2026-07-26 10:37:00 │        954 │
+   39. │ 2026-07-26 10:38:00 │       1050 │
+   40. │ 2026-07-26 10:39:00 │       1120 │
+   41. │ 2026-07-26 10:40:00 │       1186 │
+   42. │ 2026-07-26 10:41:00 │       1245 │
+   43. │ 2026-07-26 10:42:00 │       1344 │
+   44. │ 2026-07-26 10:43:00 │       1440 │
+   45. │ 2026-07-26 10:44:00 │       1453 │
+   46. │ 2026-07-26 10:45:00 │       1514 │
+   47. │ 2026-07-26 10:46:00 │       1578 │
+   48. │ 2026-07-26 10:47:00 │       1606 │
+   49. │ 2026-07-26 10:48:00 │       1667 │
+   50. │ 2026-07-26 10:49:00 │       1695 │
+   51. │ 2026-07-26 10:50:00 │       1707 │
+   52. │ 2026-07-26 10:51:00 │       1686 │
+   53. │ 2026-07-26 10:52:00 │       1714 │
+   54. │ 2026-07-26 10:53:00 │       1720 │
+   55. │ 2026-07-26 10:54:00 │       1760 │
+   56. │ 2026-07-26 10:55:00 │       1794 │
+   57. │ 2026-07-26 10:56:00 │       1837 │
+   58. │ 2026-07-26 10:57:00 │       1783 │
+   59. │ 2026-07-26 10:58:00 │       1783 │
+   60. │ 2026-07-26 10:59:00 │       1802 │
+       └──────────────minute─┴─concurrent─┘
+
+---- b08_day_peak_avg_video_type -----------------------------------------------
+params:
+   p_day=2026-07-26 00:00:00
+   p_video_type=live
+query: evidence/benchmark/b08_day_peak_avg_video_type.sql   explain: results/b08_day_peak_avg_video_type.explain.txt
+runs:
+   run1  query_id=30fca501-7f1b-41fd-b71d-2911c24eba02  elapsed=16.1 ms  read_rows=60,086  read_bytes=833,647
+   run2  query_id=26150913-60b1-49d4-bab3-1d7ec5312f8f  elapsed=17.8 ms  read_rows=60,086  read_bytes=833,647
+   run3  query_id=ece3723e-60b4-4013-b7ee-c093dbafa050  elapsed=19.6 ms  read_rows=60,086  read_bytes=833,647
+answer (run 1, byte-identical across runs unless flagged above):
+      ┌─video_type─┬─peak─┬─────────peak_minute─┬─integral─┬─avg_concurrent─┬─change_points_scanned─┐
+   1. │ live       │  468 │ 2026-07-26 10:48:00 │  1194240 │          13.82 │                    66 │
+      └────────────┴──────┴─────────────────────┴──────────┴────────────────┴───────────────────────┘
+
+---- b09_day_peak_avg_partial_platform -----------------------------------------
+params:
+   p_day=2026-07-26 00:00:00
+   p_platforms=['ANDROID_PHONE','ANDROID_TAB']
+query: evidence/benchmark/b09_day_peak_avg_partial_platform.sql   explain: results/b09_day_peak_avg_partial_platform.explain.txt
+runs:
+   run1  query_id=be0c592f-5625-452e-98fa-f65cdb03bb1d  elapsed=8.6 ms  read_rows=16,384  read_bytes=212,992
+   run2  query_id=af5d4a28-314c-4c33-b948-90b8347da2b5  elapsed=9.4 ms  read_rows=16,384  read_bytes=212,992
+   run3  query_id=febd7e15-89fd-4d40-97ed-729244140572  elapsed=18.5 ms  read_rows=16,384  read_bytes=212,992
+answer (run 1, byte-identical across runs unless flagged above):
+      ┌─platforms───────────────────────┬─peak─┬─────────peak_minute─┬─integral─┬─avg_concurrent─┬─change_points_scanned─┐
+   1. │ ['ANDROID_PHONE','ANDROID_TAB'] │ 1883 │ 2026-07-26 10:56:00 │  5263800 │          60.92 │                   504 │
+      └─────────────────────────────────┴──────┴─────────────────────┴──────────┴────────────────┴───────────────────────┘
+
+---- b10_range_peak_avg_full_span ----------------------------------------------
+params:
+   p_start=2026-07-14 00:00:00
+   p_end=2026-07-27 00:00:00
+   p_platform=*
+   p_country=*
+   p_content_id=-1
+query: evidence/benchmark/b10_range_peak_avg_full_span.sql   explain: results/b10_range_peak_avg_full_span.explain.txt
+runs:
+   run1  query_id=dea99033-efa1-432b-aff1-4639db5157d2  elapsed=31.8 ms  read_rows=8,193  read_bytes=245,761
+   run2  query_id=db575a00-13ae-456a-acd5-579a4de6d812  elapsed=26.9 ms  read_rows=8,193  read_bytes=245,761
+   run3  query_id=c0149435-29ae-4ed4-9a84-ed909e2d34a9  elapsed=54.1 ms  read_rows=8,193  read_bytes=245,761
+answer (run 1, byte-identical across runs unless flagged above):
+      ┌─────────range_start─┬───────────range_end─┬─platform─┬─country─┬─content_id─┬─peak─┬─integral─┬─avg_concurrent─┬─hours_from_hour_tier─┬─change_points_from_minute_tier─┐
+   1. │ 2026-07-14 00:00:00 │ 2026-07-27 00:00:00 │ *        │ *       │         -1 │ 2917 │  8418360 │           7.49 │                   98 │                              0 │
+      └─────────────────────┴─────────────────────┴──────────┴─────────┴────────────┴──────┴──────────┴────────────────┴──────────────────────┴────────────────────────────────┘
+
+---- b11_range_peak_avg_ragged -------------------------------------------------
+params:
+   p_start=2026-07-26 10:17:00
+   p_end=2026-07-26 11:31:00
+   p_platform=*
+   p_country=*
+   p_content_id=-1
+query: evidence/benchmark/b11_range_peak_avg_ragged.sql   explain: results/b11_range_peak_avg_ragged.explain.txt
+runs:
+   run1  query_id=f938918f-a1ec-4348-8522-995223f02ed3  elapsed=27.8 ms  read_rows=34,815  read_bytes=565,225
+   run2  query_id=29e86133-f028-46f2-aeac-99517537ede9  elapsed=40.5 ms  read_rows=34,815  read_bytes=565,225
+   run3  query_id=f5e1a454-919e-4e1f-aad0-5dbbdfcbe01c  elapsed=40.3 ms  read_rows=34,815  read_bytes=565,225
+answer (run 1, byte-identical across runs unless flagged above):
+      ┌─────────range_start─┬───────────range_end─┬─platform─┬─country─┬─content_id─┬─peak─┬─integral─┬─avg_concurrent─┬─hours_from_hour_tier─┬─change_points_from_minute_tier─┐
+   1. │ 2026-07-26 10:17:00 │ 2026-07-26 11:31:00 │ *        │ *       │         -1 │ 2917 │  7428420 │        1673.07 │                    0 │                             74 │
+      └─────────────────────┴─────────────────────┴──────────┴─────────┴────────────┴──────┴──────────┴────────────────┴──────────────────────┴────────────────────────────────┘
+
+---- b12_day_grain_all_days ----------------------------------------------------
+params: (none)
+query: evidence/benchmark/b12_day_grain_all_days.sql   explain: results/b12_day_grain_all_days.explain.txt
+runs:
+   run1  query_id=080b8312-cdb3-4a09-a9b4-73b262cfe190  elapsed=14.9 ms  read_rows=8,192  read_bytes=278,528
+   run2  query_id=865dd6f6-5e17-4cc1-a058-7f83a7f88b5d  elapsed=13.0 ms  read_rows=8,192  read_bytes=278,528
+   run3  query_id=659fafa5-34d0-4cda-98d8-1adde5c21f29  elapsed=7.7 ms  read_rows=8,192  read_bytes=278,528
+answer (run 1, byte-identical across runs unless flagged above):
+      ┌────────day─┬─peak─┬─────────peak_minute─┬─integral─┬─avg_concurrent─┬─active_hours─┐
+   1. │ 2026-07-14 │    1 │ 2026-07-14 15:43:00 │     1800 │           0.02 │            2 │
+   2. │ 2026-07-21 │    1 │ 2026-07-21 12:36:00 │     1320 │           0.02 │            3 │
+   3. │ 2026-07-22 │    4 │ 2026-07-22 17:41:00 │    36300 │           0.42 │           17 │
+   4. │ 2026-07-23 │    7 │ 2026-07-23 16:07:00 │    72120 │           0.83 │           21 │
+   5. │ 2026-07-24 │    8 │ 2026-07-24 15:52:00 │    93540 │           1.08 │           20 │
+   6. │ 2026-07-25 │   13 │ 2026-07-25 15:51:00 │   255600 │           2.96 │           23 │
+   7. │ 2026-07-26 │ 2917 │ 2026-07-26 10:56:00 │  7957680 │           92.1 │           12 │
+      └────────────┴──────┴─────────────────────┴──────────┴────────────────┴──────────────┘
+
+---- b13_hour_top_content ------------------------------------------------------
+params:
+   p_hour=2026-07-26 10:00:00
+query: evidence/benchmark/b13_hour_top_content.sql   explain: results/b13_hour_top_content.explain.txt
+runs:
+   run1  query_id=d0d46367-f1bb-4f73-a6f8-44cc4561a2de  elapsed=14.3 ms  read_rows=8,192  read_bytes=278,528
+   run2  query_id=219a3e16-338e-4a61-aa87-ad1b74f1757c  elapsed=9.6 ms  read_rows=8,192  read_bytes=278,528
+   run3  query_id=6567c6e3-8198-4433-894b-63091022b4e3  elapsed=17.2 ms  read_rows=8,192  read_bytes=278,528
+answer (run 1, byte-identical across runs unless flagged above):
+       ┌─content_id─┬─title─────┬─video_type─┬─peak─┬─────────peak_minute─┬─avg_concurrent─┐
+    1. │ 2078157818 │ wekek ked │ live       │  433 │ 2026-07-26 10:43:00 │          165.3 │
+    2. │ 2078158760 │ dijoj jeh │ vod        │  100 │ 2026-07-26 10:56:00 │           34.3 │
+    3. │ 2078158543 │ verar feg │ vod        │   65 │ 2026-07-26 10:59:00 │             21 │
+    4. │ 2078158511 │ dakuk keg │ vod        │   61 │ 2026-07-26 10:52:00 │           22.1 │
+    5. │ 2078158762 │ kenin ceb │ vod        │   54 │ 2026-07-26 10:59:00 │           18.2 │
+    6. │ 2078158755 │ nehah haj │ vod        │   53 │ 2026-07-26 10:53:00 │           15.3 │
+    7. │ 2078158754 │ pofof fad │ vod        │   52 │ 2026-07-26 10:57:00 │           17.3 │
+    8. │ 2078158542 │ wenin cef │ vod        │   47 │ 2026-07-26 10:50:00 │           16.1 │
+    9. │ 2078158479 │ mupep dac │ vod        │   45 │ 2026-07-26 10:55:00 │           13.7 │
+   10. │ 2078157821 │ jewuw keh │ live       │   32 │ 2026-07-26 10:59:00 │              7 │
+       └────────────┴───────────┴────────────┴──────┴─────────────────────┴────────────────┘
+
+== 3. HOW TO AUDIT ==
+
+Every timed run above is in the graded service's query log:
+
+   SELECT query_id, log_comment, query_duration_ms, read_rows, read_bytes
+   FROM clusterAllReplicas(default, system.query_log)
+   WHERE type = 'QueryFinish' AND log_comment LIKE 'bench:%:bench-20260801T165403Z'
+   ORDER BY log_comment
+
+Regenerate this file end to end with: tools/bench.sh

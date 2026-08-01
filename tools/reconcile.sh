@@ -15,7 +15,16 @@
 #   TARGET=cloud tools/reconcile.sh   # the graded service
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Bug 11 (queue Q33): `set -a && . ./.env` OVERWRITES variables already exported
+# by the caller, so `CH_DATABASE=scratch tools/reconcile.sh` used to reconcile
+# `sonyliv` instead — the graded database — while reporting the scratch name
+# nowhere. Capture the caller's view FIRST, then let it win. Same pattern as
+# tools/ch, tools/load.sh and tools/apply-sql.sh.
+ENV_DB="${CH_DATABASE-}"
+ENV_DB_LOCAL="${CH_DATABASE_LOCAL-}"
 [ -f .env ] && set -a && . ./.env && set +a
+[ -n "$ENV_DB" ]       && export CH_DATABASE="$ENV_DB"
+[ -n "$ENV_DB_LOCAL" ] && export CH_DATABASE_LOCAL="$ENV_DB_LOCAL"
 TARGET="${TARGET:-local}"
 OUT=evidence/reconcile.txt
 mkdir -p evidence

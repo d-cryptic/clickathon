@@ -14,6 +14,21 @@ The 4,210 duplicate rows are PROVABLY INERT for concurrency. Deduplicating
 ev_raw changes NOTHING: not one interval, not one minute, not the peak, not the
 integral. We therefore DO NOT add a dedup step to the pipeline.
 
+  *** SCOPE OF THIS VERDICT — added 2026-08-01, after re-measurement ***
+  This proof was taken against the model generation that served THREE dimensions
+  (platform, country, content_id) at the old headline (30,769 intervals, peak
+  2,887 @ 10:56). At that grain it holds, and the boundary/total half of it
+  still holds verbatim on the current model (section 6). What did NOT survive
+  is the DIMENSION grain: the model now serves SEVEN dimensions attributed by a
+  frequency vote (ADR 0008/0009), which is exactly the multiplicity-sensitive
+  aggregate guard (a) in section 5 warns about. The guard fired. Re-measured on
+  the current model (30,323 intervals, peak 2,917): duplicates remain inert for
+  every interval boundary, every total and the unfiltered curve, and are NOT
+  inert for dimension attribution — 6 intervals flip audio_language and the
+  per-language curves move. Full numbers in section 6; the mentor dossier is
+  doubts/06-dedup-at-filter-grain.md. Read "INERT" below as "inert at total
+  grain"; do not cite this file for dimension-filtered answers.
+
 That is a deliberate answer, not an omission. A dedup pass would cost a full
 extra pass over ev_raw on every rebuild and would buy exactly zero correctness.
 The reason it buys zero is structural, and the structure is what we rely on —
@@ -255,6 +270,58 @@ in section 3 before trusting concurrency again.
       This returns 0 on the provided file. If it returns non-zero on the unseen
       day, the verdict in this file does not transfer — add the deterministic
       dedup and re-run the section 3 A/B.
+
+================================================================================
+6 · RE-MEASUREMENT AT SEVEN-DIMENSION GRAIN — 2026-08-01, current model
+================================================================================
+The model this file originally measured attributed three dimensions per session
+with any(). The current model (ADR 0008/0009/0012; 30,323 intervals, 1,978.1 h,
+peak 2,917) attributes SEVEN dimensions per interval with a dominant-value vote:
+
+  arraySort(v -> (-countEqual(values, v), v), arrayDistinct(values))[1]
+
+countEqual counts EVENTS — the aggregate class guard (a) names. The section 3
+A/B was therefore re-run against the current derivation, verbatim from
+sql/30_build_intervals.sql, both arms in one query. The dedup arm is pinned
+deterministically so the arms are comparable:
+
+  SELECT * FROM ev_raw
+  ORDER BY video_session_id, event_timestamp, event_type, event, subtitle_language
+  LIMIT 1 BY video_session_id, event_timestamp, event_type, event
+  -- 905,558 -> 901,348 rows
+
+WHAT STILL HOLDS (the set-of-instants argument, unchanged):
+
+  intervals_raw / intervals_dedup       30,323 / 30,323
+  hours_raw / hours_dedup               1,978.1 / 1,978.1
+  cityHash64 of all (session, start, end), both arms
+                                        1595692701993512111  <-- IDENTICAL
+  => unfiltered curve, peak 2,917 and integral unchanged BY CONSTRUCTION.
+
+WHAT DOES NOT HOLD — dimension attribution is a vote, and duplicates vote:
+
+  intervals whose 7-dimension attribution differs        6
+    (all audio_language; all among hin / non / unk)
+  session 3575B56C… interval 10:52:15-10:52:43, the mechanism:
+    raw   votes  unk 11, hin 5   -> unk
+    dedup votes  unk  5, hin 5   -> tie -> tie-break by value -> hin
+    (six duplicated unk-carrying heartbeats WERE the majority)
+
+  serving-convention per-minute curves by audio_language:
+    value   minutes_differing   max_abs_diff   peak_raw   peak_dedup
+    hin            18                2           1,774        1,774
+    non            15                1              30           30
+    unk            26                2             183          184   <-- moves
+    unfiltered      0                0           2,917        2,917
+
+VERDICT AT THIS GRAIN: NOT INERT. Upstream step 3 ("deduplicate late or
+repeated events") is validated as a no-op for totals and NOT validated for
+dimension-filtered answers. sql/90_reconcile.sql compares per-minute totals
+only and carries no dimension columns, so no gate we run can see this class of
+difference. Whether the raw or deduplicated attribution is the one to serve is
+a graders' definition question: doubts/06-dedup-at-filter-grain.md carries the
+evidence, the exact wording, and the decision table. Policy ADR 0016 is
+reserved for recording the answer.
 
 ================================================================================
 REPRODUCING

@@ -1,0 +1,2 @@
+invariant	total_integral	catalogued_integral	orphan_integral	orphan_pct	orphan_content_ids	verdict
+join_consistency_orphan	34860	33840	1020	2.926	[999]	PASS-WITH-DISCLOSURE: orphan watch time exists and is excluded from every video_type answer

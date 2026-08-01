@@ -1,0 +1,112 @@
+UNSEEN-DAY RUN
+generated 2026-08-01T19:26:56Z   commit 1f45aab
+target database cruel_scratch   ·   raw data/cruel-worst-raw.csv   ·   content data/cruel-content.csv
+--------------------------------------------------------------------------
+reset: DROP DATABASE cruel_scratch — re-loading without this DOUBLES ev_raw (measured; see the note in this script)
+preflight ok · server 26.2.1.525 · database cruel_scratch ready and empty
+raw CSV header matches the loader · 46924 data rows
+
+SQL fingerprint (sha256, first 12) — the exact model this run exercised:
+  4a8377de1e08  sql/00_schema.sql
+  de80eaf031af  sql/10_intervals.sql
+  4ffca75940bf  sql/20_views.sql
+  6ba8c21fb5f8  sql/30_build_intervals.sql
+  d1dfeb14c894  sql/40_deltas.sql
+  764ee4c5d810  sql/45_user_concurrency.sql
+  20fefccc4705  sql/50_hour_agg.sql
+  15525d8870b4  sql/80_content.sql
+  0e278f3516e3  sql/85_windows.sql
+  be6a7a4f2e0f  sql/90_reconcile.sql
+  fffb7ab3ea43  tools/load.sh
+  git 1f45aab (sql+tools clean)
+
+--------------------------------------------------------------------------
+PHASE — 1 schema (00_schema, 10_intervals) — tables + the stateless MV
+--------------------------------------------------------------------------
+  objects: 6 created
+
+--------------------------------------------------------------------------
+PHASE — 2 load (tools/load.sh, unmodified)
+--------------------------------------------------------------------------
+target=cloud  database=cruel_scratch  (from --database)  mode=refuse
+loading content_dim from /Users/barun/.superconductor/worktrees/clickathon-project/sc-coherent-fluxon-4bad/data/cruel-content.csv ...
+loading ev_raw from /Users/barun/.superconductor/worktrees/clickathon-project/sc-coherent-fluxon-4bad/data/cruel-worst-raw.csv ...
+loaded into TARGET=cloud, database cruel_scratch:
+   ┌─t───────────┬─before─┬──rows─┬─added─┐
+1. │ ev_raw      │      0 │ 46924 │ 46924 │
+2. │ content_dim │      0 │    30 │    30 │
+   └─────────────┴────────┴───────┴───────┘
+  ev_raw 46924 = CSV data rows 46924
+  1666 sessions · 1661 users · 28 content ids · 1970-01-01 00:00:00.000 -> 2027-08-22 10:15:00.250
+  content_dim 30 rows
+  cc_minute_stateless 722 rows (mv_stateless fired during the load)
+  data spans 1970-01-01 00:00:00 .. 2027-08-22 10:15:00  (5 calendar day(s))
+
+  SENTINEL COLLISION IN THE DATA (ADR 0022):
+    ev_raw rows with content_id = -1: 25 · platform = '*': 0 · country = '*': 0
+    cc_hour_agg and its views stay CORRECT (cube_level separates rollup from value).
+    NOT safe for the colliding value: sql/85_windows.sql's p_* = sentinel
+    convention, tools/clickstack-cloud.sh CUBE_TOTAL, tools/build-model.sh's
+    status line, evidence/benchmark sentinel pins. Route per-content answers
+    for that id through cc_hour_agg WITH cube_level pinned, or cc_minute_delta.
+  UNSEEN_ACK_SENTINEL=1 — acknowledged, continuing.
+
+--------------------------------------------------------------------------
+PHASE — 3 intervals (30_build_intervals.sql)
+--------------------------------------------------------------------------
+  1667 intervals over 1665 sessions · 0 still open · 311.4 active hours
+
+--------------------------------------------------------------------------
+PHASE — 4 user tier (45_user_concurrency.sql)
+--------------------------------------------------------------------------
+  cc_user_minute 768 rows
+
+--------------------------------------------------------------------------
+PHASE — 5 deltas (40_deltas.sql)
+--------------------------------------------------------------------------
+  909 delta rows · opens 1668 · closes 1665
+
+--------------------------------------------------------------------------
+PHASE — 6 views (20) + hour agg (50) + content (80) + windows (85)
+--------------------------------------------------------------------------
+  cc_hour_agg 241 rows
+  hour tier says peak 1200 @ 2026-08-22 20:00:00
+
+--------------------------------------------------------------------------
+PHASE — 7 the answer (this is what we would submit)
+--------------------------------------------------------------------------
+  session concurrency  peak 1200 @ 2026-08-22 20:00:00  (earliest tied minute — ADR 0014)
+  user concurrency     peak 1200
+  stateless baseline   peak 1200
+  minutes tied at the peak: 12  (dense spine; the change-point count under-reports)
+
+--------------------------------------------------------------------------
+PHASE — 8 THE GATE — truth recomputed from ev_raw
+--------------------------------------------------------------------------
+
+sql/90_reconcile.sql, verbatim (SUMMARY + up to 20 mismatches + 5 samples):
+     0	SUMMARY	minutes_compared=30315496	mismatched=0	max_abs_diff=0	peak=1200	PASS
+     2	sample	1970-01-01 00:00:00	0	0	0	PASS
+     2	sample	1979-10-12 23:26:00	0	0	0	PASS
+     2	sample	2001-06-21 05:51:00	0	0	0	PASS
+     2	sample	2026-08-22 20:01:00	1200	1200	0	PASS
+     2	sample	2027-08-22 10:15:00	1	1	0	PASS
+
+     asserted: minutes_compared=30315496 equals the day's spine (1970-01-01 00:00:00 .. 2027-08-22 10:15:00)
+
+--------------------------------------------------------------------------
+TIMINGS — wall clock, this run, 46924 events
+--------------------------------------------------------------------------
+  1 schema (00_schema, 10_intervals) — tables + the stateless MV     6s
+  2 load (tools/load.sh, unmodified)                            10s
+  3 intervals (30_build_intervals.sql)                           6s
+  4 user tier (45_user_concurrency.sql)                          4s
+  5 deltas (40_deltas.sql)                                       2s
+  6 views (20) + hour agg (50) + content (80) + windows (85)    16s
+  7 the answer (this is what we would submit)                   12s
+  8 THE GATE — truth recomputed from ev_raw                  106s
+  TOTAL                                                        168s
+
+--------------------------------------------------------------------------
+VERDICT — GATE PASSED on cruel_scratch. peak 1200 @ 2026-08-22 20:00:00 (earliest tied minute).
+--------------------------------------------------------------------------
