@@ -15,14 +15,16 @@
 | [02](02-resume-semantics.md) | `resume` fires for four different reasons | **189.2 h — 9.7%** of counted watch time | the pause-exclusion rule |
 | [03](03-content-catalog.md) | Empty `video_type`, colliding titles, a poison id | how content-level answers are labelled | `sql/80_content.sql` views |
 | [04](04-dimension-normalisation.md) | Hindi is **four** strings — one language or four? | **23.3%** on any per-language answer (peak 1,768 vs 2,180) | which figure a filtered benchmark query submits |
+| [05](05-minute-boundary-membership.md) | An interval ending exactly on a minute boundary — in that minute, or not? | **the graded peak: 2,917 vs 2,916**, 92 minutes, and our gate cannot tell | the minute-membership convention in `40_deltas.sql` + `90_reconcile.sql` |
+| [06](06-dedup-at-filter-grain.md) | Duplicates are inert for totals — and flip 6 dimension attributions | every dimension-filtered answer (`unk` audio peak 183 vs 184) | whether a dedup pass precedes attribution (ADR 0016) |
 
 ## How these differ from `docs/MENTOR_QUESTIONS.md`
 
 `MENTOR_QUESTIONS.md` ranks all seventeen and carries our current assumption for each, so a mentor can
 confirm or deny rather than compose an answer. That file stays authoritative for *what to ask first*.
 
-A `doubts/` file exists where measuring the data **changed the question**. Two of the three below
-supersede the version in `MENTOR_QUESTIONS.md`:
+A `doubts/` file exists where measuring the data **changed the question**. Most of the files below
+supersede or sharpen the version in `MENTOR_QUESTIONS.md`:
 
 - **01 supersedes Q17.** Q17 says "your doc claims 1/min, our data is aperiodic." That was wrong — the
   data is not aperiodic, it ticks at 40 s. The sharper question is answerable; the old one invited a
@@ -33,6 +35,14 @@ supersede the version in `MENTOR_QUESTIONS.md`:
   four new filter dimensions without examining the *values* in them. It is the one doubt here whose
   machinery is already built either way ([ADR 0011](../docs/adr/0011-normalise-filter-dimensions-at-query-time.md)),
   so the answer changes a `WHERE` clause rather than a model.
+- **05 deepens Q8.** Q8 asks "any overlap, or active at the instant?" in the abstract. Measuring found
+  the concrete boundary the abstract question hides — an interval ending exactly on a minute boundary
+  — and that the two readings differ by **exactly one viewer at the graded peak minute** while both
+  the serving SQL and the reconcile gate share one convention, so a green gate cannot decide it.
+- **06 scopes `evidence/dedup.txt`.** The dedup-is-inert proof was right at the grain it measured
+  (totals) and is wrong at the grain the model now serves (7 dimensions): the attribution vote counts
+  events, so duplicates vote. The question — does the ground truth dedup before attributing? — only
+  exists because the finer measurement was taken.
 
 ## Rules for this folder
 
