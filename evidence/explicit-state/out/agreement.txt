@@ -1,0 +1,35 @@
+-- evidence/explicit-state/analysis.sql — query-only agreement + unmatched-pair
+-- Q1 · Per-event agreement: what does the event stream look like around each
+Row 1:
+──────
+bg_events:                    14700
+unclosed_bg:                  337
+bg_last_event_of_session:     231
+gap_gt150_starts_at_bg:       3419
+gap_gt150_starts_within_150s: 4229
+next_event_within_60s:        8848
+
+-- Q2 · THE agreement number: seconds inside explicit bg->fg windows
+-- Q2 · THE agreement number: seconds inside explicit bg->fg windows
+Row 1:
+──────
+bg_windows:            13824
+bg_hours:              916.3
+counted_as_watching_h: 29.3
+
+-- Q3 · WHY the overlap is so small although 60% of bg events see another event
+-- Q3 · WHY the overlap is so small although 60% of bg events see another event
+Row 1:
+──────
+pause_within_10s_before_bg: 11086
+pause_within_60s_before_bg: 12604
+bg_events:                  14700
+
+-- Q4 · Unmatched-pair recount, per session (ADR 0007 cited the GLOBAL count
+-- Q4 · Unmatched-pair recount, per session (ADR 0007 cited the GLOBAL count
+Row 1:
+──────
+orphan_fg_no_prior_bg: 29
+sessions_with_bg:      10866
+sessions:              10866
+

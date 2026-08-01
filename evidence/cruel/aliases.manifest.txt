@@ -1,0 +1,9 @@
+CRUEL knob 'aliases' · seed 20260822 · day 2026-08-22 UTC · data/cruel-aliases-raw.csv
+events 250 (+header) · sessions 10 · truth minutes 27 (0 SPEC_ONLY)
+designed peak 10 @ 2026-08-22 12:10 UTC (spec projection; SPEC_ONLY minutes are a policy, not a truth)
+
+hazards:
+  - five spellings of Hindi, three of ANDROID_PHONE, two of india — totals are defined; every FILTERED query fragments across raw variants (ADR 0011 / doubts/04)
+
+questions for the organisers:
+  - Is the private ground truth matched on raw dimension strings or on a normalised form? 'hin' vs 'HIN' moves every filtered answer.

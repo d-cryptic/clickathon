@@ -1,0 +1,11 @@
+invariant	target	verdict	detail
+inv1_peak_not_sum_of_dim_peaks	scratch	PASS	peak_not_sum_of_dim_peaks 8 8 11 PASS;
+inv1_peak_not_sum_of_dim_peaks	cloud	INVARIANT-FAIL	peak_not_sum_of_dim_peaks 2681 2917 2758 FAIL: serving headline peak 2917 != truth 2681;
+inv2_users_never_summed	scratch	PASS	users_never_summed 408 0 0 11 1 PASS;
+inv2_users_never_summed	cloud	INVARIANT-FAIL	users_never_summed 3658 586 74 69 9 FAIL: serving user tier disagrees with interval truth;
+inv4_day_peak_eq_max_minute_cloud	cloud	INVARIANT-FAIL	0 7 2 FAIL;1 25 12 FAIL;2 7 2 FAIL;
+inv4_day_peak_eq_max_minute_scratch	scratch	PASS	0 2 0 0 PASS;1 8 0 0 PASS;2 2 0 0 PASS;
+inv5_user_le_session	scratch	PASS	0 408 0 0 PASS;1 507 0 0 PASS;2 408 0 0 PASS;
+inv5_user_le_session	cloud	INVARIANT-FAIL	0 3732 643 247 FAIL;1 5231 1061 171 FAIL;2 3732 643 247 FAIL;
+inv6_join_consistency_orphan	scratch	PASS	join_consistency_orphan 34860 33840 1020 2.926 [999] PASS-WITH-DISCLOSURE: orphan watch time exists and is excluded from every video_type answer;
+inv6_join_consistency_orphan	cloud	PASS	join_consistency_orphan 7579380 7579380 0 0 [] PASS: no orphans on this dataset;

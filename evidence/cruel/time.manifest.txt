@@ -1,0 +1,20 @@
+CRUEL knob 'time' · seed 20260822 · day 2026-08-22 UTC · data/cruel-time-raw.csv
+events 172 (+header) · sessions 12 · truth minutes 71 (11 SPEC_ONLY)
+designed peak 5 @ 2026-08-22 15:30 UTC (spec projection; SPEC_ONLY minutes are a policy, not a truth)
+
+hazards:
+  - t_ebs* END before START (hour 02, SPEC_ONLY)
+  - t_pre events 30 min before session_start_epoch — spec ignores the epoch column
+  - t_rb clock rollback mid-session; sorted timestamps stay continuous
+  - t_bnd* 5 sessions whose tail ends EXACTLY at 15:40:00.000 — inclusive-vs-half-open boundary delta is 5 at minute 15:40 (known model defect class, Codex 003 §4.1)
+  - t_ms* same-second AND same-millisecond pause/resume (reverse file order) — zero time may be lost (ADR 0009)
+  - t_mid session crosses midnight and the file boundary (partition + day-grain edge)
+  - DST: N/A by design — timestamps are UTC epochs and IST has no DST; noted, not planted
+
+UNDEFINED — spec projection recorded, needs an organiser ruling:
+  - session 'vs_cr_t_ebs0': VideoSessionEnd 5 min BEFORE VideoSessionStart — meaning undefined
+  - session 'vs_cr_t_ebs1': VideoSessionEnd 5 min BEFORE VideoSessionStart — meaning undefined
+
+questions for the organisers:
+  - A VideoSessionEnd timestamped before its VideoSessionStart: is the session invalid, is the end ignored, or is the pair reordered? Our spec treats both as bare timestamps (the early end counts nothing).
+  - An interval ending exactly on a minute boundary (tail lands on :00.000): does that minute count? Inclusive vs half-open moves 5 designed viewers at 15:40 on this file (Codex 003 §12.3 Q11).

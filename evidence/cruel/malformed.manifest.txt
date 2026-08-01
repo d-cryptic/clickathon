@@ -1,0 +1,17 @@
+CRUEL knob 'malformed' · seed 20260822 · day 2026-08-22 UTC · data/cruel-malformed-raw.csv
+events 183 (+header) · sessions 6 · truth minutes 44 (17 SPEC_ONLY)
+designed peak 4 @ 2026-08-22 10:05 UTC (spec projection; SPEC_ONLY minutes are a policy, not a truth)
+
+hazards:
+  - m00 empty platform, whitespace country, 'NULL' audio — must load and stay distinct buckets
+  - m01 platform \N (CSV NULL -> non-Nullable String default '') , audio 'null', sub 'NaN'
+  - m02 500-char platform · app_version with embedded commas · country with embedded quote
+  - m03 EMPTY user_id — user tier must not lose or merge it silently
+  - m04+m05 EMPTY video_session_id from two devices -> spec merges (SPEC_ONLY)
+  - m06 empty event_type/event rows bridge gaps as anonymous timestamps (fail-open)
+
+UNDEFINED — spec projection recorded, needs an organiser ruling:
+  - session '(empty)': two devices share an EMPTY video_session_id; spec merges them into one session (counts 1, true viewers 2)
+
+questions for the organisers:
+  - Two rows with an empty/garbage session id from different devices: one viewer or two? Our spec merges them into one.

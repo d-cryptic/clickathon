@@ -1,0 +1,103 @@
+UNSEEN-DAY RUN
+generated 2026-08-01T19:20:35Z   commit 1f45aab
+target database cruel_scratch   ·   raw data/cruel-structural-raw.csv   ·   content data/cruel-content.csv
+--------------------------------------------------------------------------
+reset: DROP DATABASE cruel_scratch — re-loading without this DOUBLES ev_raw (measured; see the note in this script)
+preflight ok · server 26.2.1.525 · database cruel_scratch ready and empty
+raw CSV header matches the loader · 507 data rows
+
+SQL fingerprint (sha256, first 12) — the exact model this run exercised:
+  4a8377de1e08  sql/00_schema.sql
+  de80eaf031af  sql/10_intervals.sql
+  4ffca75940bf  sql/20_views.sql
+  6ba8c21fb5f8  sql/30_build_intervals.sql
+  d1dfeb14c894  sql/40_deltas.sql
+  764ee4c5d810  sql/45_user_concurrency.sql
+  20fefccc4705  sql/50_hour_agg.sql
+  15525d8870b4  sql/80_content.sql
+  0e278f3516e3  sql/85_windows.sql
+  be6a7a4f2e0f  sql/90_reconcile.sql
+  fffb7ab3ea43  tools/load.sh
+  git 1f45aab (sql+tools clean)
+
+--------------------------------------------------------------------------
+PHASE — 1 schema (00_schema, 10_intervals) — tables + the stateless MV
+--------------------------------------------------------------------------
+  objects: 6 created
+
+--------------------------------------------------------------------------
+PHASE — 2 load (tools/load.sh, unmodified)
+--------------------------------------------------------------------------
+target=cloud  database=cruel_scratch  (from --database)  mode=refuse
+loading content_dim from /Users/barun/.superconductor/worktrees/clickathon-project/sc-coherent-fluxon-4bad/data/cruel-content.csv ...
+loading ev_raw from /Users/barun/.superconductor/worktrees/clickathon-project/sc-coherent-fluxon-4bad/data/cruel-structural-raw.csv ...
+loaded into TARGET=cloud, database cruel_scratch:
+   ┌─t───────────┬─before─┬─rows─┬─added─┐
+1. │ ev_raw      │      0 │  507 │   507 │
+2. │ content_dim │      0 │   30 │    30 │
+   └─────────────┴────────┴──────┴───────┘
+  ev_raw 507 = CSV data rows 507
+  16 sessions · 10 users · 4 content ids · 2026-08-22 03:00:00.512 -> 2026-08-22 17:55:00.137
+  content_dim 30 rows
+  cc_minute_stateless 131 rows (mv_stateless fired during the load)
+  data spans 2026-08-22 03:00:00 .. 2026-08-22 17:55:00  (1 calendar day(s))
+
+--------------------------------------------------------------------------
+PHASE — 3 intervals (30_build_intervals.sql)
+--------------------------------------------------------------------------
+  17 intervals over 16 sessions · 0 still open · 4.9 active hours
+
+--------------------------------------------------------------------------
+PHASE — 4 user tier (45_user_concurrency.sql)
+--------------------------------------------------------------------------
+  cc_user_minute 106 rows
+
+--------------------------------------------------------------------------
+PHASE — 5 deltas (40_deltas.sql)
+--------------------------------------------------------------------------
+  16 delta rows · opens 17 · closes 17
+
+--------------------------------------------------------------------------
+PHASE — 6 views (20) + hour agg (50) + content (80) + windows (85)
+--------------------------------------------------------------------------
+  cc_hour_agg 24 rows
+  hour tier says peak 10 @ 2026-08-22 17:40:00
+
+--------------------------------------------------------------------------
+PHASE — 7 the answer (this is what we would submit)
+--------------------------------------------------------------------------
+  session concurrency  peak 10 @ 2026-08-22 17:40:00  (earliest tied minute — ADR 0014)
+  user concurrency     peak 5
+  stateless baseline   peak 10
+  minutes tied at the peak: 7  (dense spine; the change-point count under-reports)
+
+--------------------------------------------------------------------------
+PHASE — 8 THE GATE — truth recomputed from ev_raw
+--------------------------------------------------------------------------
+
+sql/90_reconcile.sql, verbatim (SUMMARY + up to 20 mismatches + 5 samples):
+     0	SUMMARY	minutes_compared=896	mismatched=0	max_abs_diff=0	peak=10	PASS
+     2	sample	2026-08-22 03:00:00	1	1	0	PASS
+     2	sample	2026-08-22 03:46:00	0	0	0	PASS
+     2	sample	2026-08-22 06:10:00	0	0	0	PASS
+     2	sample	2026-08-22 17:40:00	10	10	0	PASS
+     2	sample	2026-08-22 17:55:00	1	1	0	PASS
+
+     asserted: minutes_compared=896 equals the day's spine (2026-08-22 03:00:00 .. 2026-08-22 17:55:00)
+
+--------------------------------------------------------------------------
+TIMINGS — wall clock, this run, 507 events
+--------------------------------------------------------------------------
+  1 schema (00_schema, 10_intervals) — tables + the stateless MV     6s
+  2 load (tools/load.sh, unmodified)                             9s
+  3 intervals (30_build_intervals.sql)                           5s
+  4 user tier (45_user_concurrency.sql)                          4s
+  5 deltas (40_deltas.sql)                                       3s
+  6 views (20) + hour agg (50) + content (80) + windows (85)    16s
+  7 the answer (this is what we would submit)                    3s
+  8 THE GATE — truth recomputed from ev_raw                    3s
+  TOTAL                                                         53s
+
+--------------------------------------------------------------------------
+VERDICT — GATE PASSED on cruel_scratch. peak 10 @ 2026-08-22 17:40:00 (earliest tied minute).
+--------------------------------------------------------------------------

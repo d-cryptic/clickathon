@@ -1,0 +1,13 @@
+    ┌─name───────────────┬─engine─┐
+ 1. │ INFORMATION_SCHEMA │ Memory │
+ 2. │ default            │ Shared │
+ 3. │ information_schema │ Memory │
+ 4. │ sonyliv            │ Shared │
+ 5. │ sonyliv_q29vis     │ Shared │
+ 6. │ sonyliv_q8scratch  │ Shared │
+ 7. │ sonyliv_trunc      │ Shared │
+ 8. │ sonyliv_unseen     │ Shared │
+ 9. │ sonyliv_unseen_q26 │ Shared │
+10. │ sonyliv_verify     │ Shared │
+11. │ system             │ Atomic │
+    └────────────────────┴────────┘
