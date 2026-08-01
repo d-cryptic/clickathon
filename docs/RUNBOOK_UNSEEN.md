@@ -3,11 +3,12 @@
 > **Summary:** One command runs the whole path on a dataset we have never seen —
 > `tools/unseen-run.sh <raw.csv> <content.csv>` — into the isolated database `sonyliv_unseen`,
 > ending on the correctness gate. **Measured end to end: 47 s for 30,097 events, 58 s for 849,888
-> events**; the path is fixed-cost dominated, so budget ~3 min even for a 5x-bigger day. **The
-> committed gate `sql/90_reconcile.sql` does NOT work on a new day** — its five target minutes are
-> 2026-07-26 literals, so it returns zero rows and `tools/reconcile.sh` reports PASS having compared
-> nothing. That, plus nine more unseen-day assumptions (A1-A10) and five human decisions, is the body of
-> this document. Evidence for every claim: [`evidence/unseen-rehearsal.txt`](../evidence/unseen-rehearsal.txt).
+> events**; the path is fixed-cost dominated, so budget ~3 min even for a 5x-bigger day. **The gate
+> works on any day** — `sql/90_reconcile.sql` derives its target minutes from the data, compares a
+> dense spine so idle minutes are checked too, and asserts `minutes_compared` so silence can never be
+> read as success (fixed in `81c0161`; it previously hard-coded five 2026-07-26 literals and reported
+> PASS having compared nothing). Nine unseen-day assumptions (A1-A10) and five human decisions are the
+> body of this document. Evidence: [`evidence/unseen-rehearsal.txt`](../evidence/unseen-rehearsal.txt).
 
 **Rehearsed:** 2026-08-01, holdout day 2026-07-25 (204 sessions, 30,097 events, peak 13) and a
 full-size replay of 2026-07-26 (10,524 sessions, 849,888 events, peak 2,887). Both gates green.
@@ -96,7 +97,7 @@ claims.
 | `database '<db>' does not exist on TARGET=local` | `.env` has no `CH_DATABASE_LOCAL` and `CH_DATABASE` names the Cloud database (A5) | Add `CH_DATABASE_LOCAL=default` to `.env`, or pass `--database default`. Do **not** create a local `sonyliv` — it would be empty and every local number would read 0. |
 | `--database X contradicts CH_DATABASE=Y` | the flag and the exported variable disagree (A5) | One of the two is not what you think. Make them agree or unset `CH_DATABASE` for that command. |
 | `the 'ch' docker container is not running` | docker down | `docker compose up -d`, wait for healthy, re-run. |
-| G0 prints `ZERO ROWS` | expected on any day that is not 2026-07-26 | See assumption **A1** below. Not a failure of this run. |
+| G0 prints `ZERO ROWS` | **should no longer happen** — the gate derives its targets from the data since `81c0161` | If you genuinely see it, the gate has regressed: check `sql/90_reconcile.sql` still derives `targets` from `ev_raw`. Treat as a FAILURE, not a quirk. |
 
 ---
 
@@ -105,16 +106,31 @@ claims.
 Ordered by how much damage each does. Every one is measured in
 [`evidence/unseen-rehearsal.txt`](../evidence/unseen-rehearsal.txt).
 
-### A1 — the gate's target minutes are 2026-07-26 literals · **breaks silently, reports success**
+### A1 — ~~the gate's target minutes are 2026-07-26 literals~~ · **FIXED in `81c0161`**
 
-`sql/90_reconcile.sql:24-30` hard-codes five minutes. On 2026-07-25 the file returns **zero rows**;
-`tools/reconcile.sh:86` decides with `grep -q MISMATCH`, finds none, and prints
-`reconcile PASSED`. It also degrades *partially*: on the 2026-07-26 day-file it returned **four** rows
-instead of five, because the `2026-07-14 15:43:00` target does not exist in a one-day load — and
-nothing asserts the row count. **`make reconcile` is worthless on the unseen day until those five
-literals are re-targeted.** `tools/unseen-run.sh` works around it by templating the `targets` CTE.
+*Kept as a record because it is the sharpest example in this repo of a test that reported success
+while measuring nothing — and because the failure was invisible until the unseen-day rehearsal ran.*
 
-### A2 — the gate never compares a minute in which nobody was watching
+**What was wrong.** `sql/90_reconcile.sql` hard-coded five minutes. On 2026-07-25 the file returned
+**zero rows**; `tools/reconcile.sh` decides with `grep -q MISMATCH`, found none, and printed
+`reconcile PASSED` having compared **nothing**. It also degraded *partially*: on the 2026-07-26
+day-file it returned **four** rows instead of five, because the `2026-07-14 15:43:00` target does not
+exist in a one-day load — and nothing asserted the row count.
+
+**What it does now.** Target minutes are derived from `ev_raw`, so the gate re-targets itself on any
+day. A dense minute spine means idle minutes are compared as `0 = 0` (see A2, also fixed). A `SUMMARY`
+row carries `minutes_compared`, and `tools/reconcile.sh` fails if it is missing or zero — silence can
+no longer be read as success. Coverage went from **5 minutes to 17,028**, still zero mismatches, and
+the fabricated-500 injection that used to PASS now fails with 25 mismatched minutes.
+
+**What to check on the day:** that the `SUMMARY` row reports a `minutes_compared` in the thousands.
+If it reports zero, or the row is absent, the gate has regressed — that is a failure, not a quirk.
+
+### A2 — ~~the gate never compares a minute in which nobody was watching~~ · **FIXED in `81c0161`**
+
+*Kept as a record. The gate now builds a dense minute spine, so an idle minute is compared as `0 = 0`.
+The fabricated-500 injection described below used to PASS; it now fails with 25 mismatched minutes and
+`max_abs_diff=500`. What follows is what was wrong.*
 
 `sql/90_reconcile.sql:153-161` ends `FROM truth AS t LEFT JOIN served AS s`, and `truth` is a
 `GROUP BY` over a `CROSS JOIN`, so an idle minute produces no row. **207 of 2026-07-25's 1,364

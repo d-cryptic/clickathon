@@ -54,7 +54,7 @@ gate() {
 
 echo "== target: $TARGET"
 
-echo "== 1/4  session_intervals + cc_user_minute (gap + pause, ADR 0001/0007)"
+echo "== 1/5  session_intervals + cc_user_minute (gap + pause, ADR 0001/0007)"
 # mv_user_minute is what repopulates cc_user_minute, and it only fires on an
 # INSERT into session_intervals. Truncating the table without the MV in place
 # would leave the user tier serving zeros — silently, since every view still
@@ -70,18 +70,28 @@ TARGET="$TARGET" tools/apply-sql.sh sql/30_build_intervals.sql >/dev/null
 q "SELECT concat('   intervals: ', toString(count()), ' over ', toString(uniqExact(video_session_id)), ' sessions') FROM session_intervals FINAL FORMAT TSVRaw"
 q "SELECT concat('   user-minute rows: ', toString(count())) FROM cc_user_minute FORMAT TSVRaw"
 
-echo "== 2/4  cc_minute_delta (hour-clipped, ADR 0003)"
+echo "== 2/5  cc_minute_delta (hour-clipped, ADR 0003)"
 q "TRUNCATE TABLE cc_minute_delta" >/dev/null
 TARGET="$TARGET" tools/apply-sql.sh sql/40_deltas.sql >/dev/null
 q "SELECT concat('   delta rows: ', toString(count()), '  opens ', toString(sum(starts)), '  closes ', toString(sum(ends))) FROM cc_minute_delta FORMAT TSVRaw"
 
-echo "== 3/4  cc_hour_agg (the hour tier, ADR 0003)"
+echo "== 3/5  cc_hour_agg (the hour tier, ADR 0003)"
 q "TRUNCATE TABLE IF EXISTS cc_hour_agg" >/dev/null   # IF EXISTS: 50_hour_agg.sql creates it just below
 TARGET="$TARGET" tools/apply-sql.sh sql/50_hour_agg.sql >/dev/null
 q "SELECT concat('   hour rows: ', toString(count()), '  peak ', toString(max(peak))) FROM cc_hour_agg FINAL WHERE platform='*' AND country='*' AND content_id=-1 FORMAT TSVRaw"
 
-echo "== 4/4  views"
+echo "== 4/5  views"
 TARGET="$TARGET" tools/apply-sql.sh sql/20_views.sql >/dev/null
+echo "   ok"
+
+# Normalisation is READ-SIDE only (ADR 0011): UDFs plus views over cc_minute_delta.
+# It stores nothing and rewrites no byte, so it cannot move the headline or the gate —
+# but until it is applied, `hin` / `HIN` / `hin-hindi` / `hin-Hindi` stay four separate
+# filter buckets and the drift audit does not exist. Everything in the file is
+# CREATE OR REPLACE, so re-running is free. It comes last because its views read
+# cc_minute_delta, which stage 2 builds.
+echo "== 5/5  normalisation UDFs + views (ADR 0011)"
+TARGET="$TARGET" tools/apply-sql.sh sql/15_normalise.sql >/dev/null
 echo "   ok"
 
 echo "== reconcile: delta serving layer vs interval expansion, every minute"
