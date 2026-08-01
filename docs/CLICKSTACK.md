@@ -4,9 +4,10 @@
 > query latency) and it *is* the concurrency visualization the statement asks for, so we ship no
 > custom frontend. **Two ways to run it. We use Option B:** HyperDX built into ClickHouse Cloud
 > (confirm via the `hyperdx-alert-internal` user) reads `sonyliv` directly — no connection string, no
-> IP allowlist. It **is** scriptable through the Cloud control-plane API
-> (`tools/clickstack-cloud.sh`); the only manual step is opening HyperDX once, because a
-> source needs a `connection` id and no API creates one. **Option A** is the local all-in-one
+> IP allowlist. It is **fully scriptable** — `tools/clickstack-cloud.sh` provisions sources, the
+> dashboard and saved searches over the Cloud control-plane API. The one value that API cannot yield
+> on an empty service is the `connection` id; get it once from the clickstack MCP and put it in
+> `.env` as `CLICKSTACK_CONNECTION_ID`. **Option A** is the local all-in-one
 > (`make stack-up && make clickstack`). Both chart `sql/20_views.sql`, because no chart tool can read
 > an `AggregateFunction` column. Data ends **2026-07-26**: the default 15-minute window renders empty.
 
