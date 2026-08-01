@@ -9,7 +9,8 @@
 > [ARCHITECTURE.md](ARCHITECTURE.md) for the model, [adr/](adr/) for the decisions,
 > [DATA_DICTIONARY.md](DATA_DICTIONARY.md) for the field-level detail.
 
-**Status:** A–E complete. B is measured against a **fresh reload of both CSVs**
+**Status:** A–E complete, validated against commits through `cf80acc`. B is measured against a
+**fresh reload of both CSVs**
 into a local `csv_audit` database with every column typed `String`, so nothing was coerced or rejected
 by the parser — that is how the findings marked 🔴 were found at all.
 
@@ -508,23 +509,35 @@ background and paused time — the comparison is structural, not bolted on.
  window views vs  brute-force join       every window   0 mismatches
 ```
 
-**Level 2 — does the gate prove that? No, and this is the emergency.**
+**Level 2 — does the gate prove that? It did not. It does now (`81c0161`).**
 
-`sql/90_reconcile.sql` hard-codes five `2026-07-26` timestamps. Run against any other day it returns
-**zero rows**, and `tools/reconcile.sh` decides the verdict with `grep -q MISMATCH`:
+The unseen-day rehearsal found the gate was worth far less than it looked. `sql/90_reconcile.sql`
+hard-coded five `2026-07-26` timestamps, so on any other day it returned **zero rows** — and
+`tools/reconcile.sh` decides the verdict with `grep -q MISMATCH`:
 
 ```
  zero rows  →  no MISMATCH string  →  exit 0  →  "reconcile PASSED"
  minutes actually compared: 0.      verdict printed: PASS.
 ```
 
-It is blind a second way: the gate joins truth to served, and a minute where nobody was watching emits
-no truth row, so it is never compared. Injecting **500 fabricated viewers** onto an idle minute in an
-isolated database produced `PASS` from the committed shape and `MISMATCH` from the spine-driven shape.
-207 of 1,364 minutes on 2026-07-25 are such minutes. Evidence: `evidence/unseen-rehearsal.txt`.
+It was blind a second way: truth was a `GROUP BY` over a `CROSS JOIN`, so a minute where nobody was
+watching emitted no row and could not disagree — 207 of 1,364 on the holdout day. And nothing asserted
+*how much* had been checked; on a one-day 07-26 file it silently returned four rows instead of five.
 
-The hardened spine-driven form works but lives only in `tools/unseen-run.sh`; it has not been promoted
-into the file `make reconcile` runs.
+All three are closed and each was negative-tested:
+
+```
+ target minutes   now DERIVED from ev_raw          → 1,364 minutes on the holdout day
+ idle minutes     now a DENSE SPINE, served as a running sum along it
+                  → the fabricated-500 insert that used to PASS now fails with
+                    25 mismatched minutes, max_abs_diff 500
+ coverage         a SUMMARY row carries minutes_compared; reconcile.sh fails if
+                  it is missing or zero rather than treating silence as success
+
+ coverage on production:   5 minutes  →  17,028 minutes.   Still zero mismatches.
+```
+
+Evidence: `evidence/unseen-rehearsal.txt` for the discovery, `81c0161` for the fix.
 
 **Level 3 — do we match the private answer key? Unknown, with a measured envelope.**
 
@@ -545,19 +558,35 @@ pipeline, never the input.*
 
 ## C.5 · What is broken, ranked
 
-| # | Fault | Why it matters |
-|---|---|---|
-| 1 | **Gate passes vacuously off-day** | zero-minute PASS on the graded input |
-| 2 | **Gate blind to idle minutes** | fabricated 500 → PASS |
-| 3 | **`interval-math` skill teaches the discarded model** | *"Emitted every 60s"*, no pause — agents write SQL from it |
-| 4 | **ADR 0008 shipped un-normalised dimensions** | `WHERE audio_language='hin'` misses 13% of Hindi |
-| 5 | `DATA_DICTIONARY` — *"periodic, every 60s"*, *"≈78 min average session"* | both disproven in §B |
-| 6 | `MENTOR_QUESTIONS` calls unclosed-pause the largest unresolved number | `resume` is ~2× bigger |
-| 7 | `TESTS.md` still says absorption **"FAIL as shipped"** | fixed at `388a845`; evidence reads `CONVERGES` |
-| 8 | `TAIL_S = 60` contradicts its own justification | the cadence exists and is 40 s |
-| 9 | `45_user_concurrency.sql` stale comments | `ReplacingMergeTree(interval_end)`; "297 sessions" (301) |
-| 10 | Peak minute ambiguous under ties | hour tier said 16:35, answer phase said 16:59 |
-| 11 | `v_concurrency_minute_title` merges distinct assets | 2,773 colliding titles |
+| # | Fault | Why it matters | State |
+|---|---|---|---|
+| — | ~~Gate passes vacuously off-day~~ | zero-minute PASS on the graded input | ✅ fixed `81c0161` |
+| — | ~~Gate blind to idle minutes~~ | fabricated 500 → PASS | ✅ fixed `81c0161` |
+| 1 | **Same-second tie bug** | `toUnixTimestamp` truncates to seconds, then strict `>` skips a resume in that second. **2,697 pauses · 41.5 h · 2.1%.** `90_reconcile.sql` carries the identical expression, so the gate agrees with it | open |
+| 2 | **`interval-math` skill teaches the discarded model** | *"Emitted every 60s"*, no pause — agents write SQL from it | open |
+| 3 | **Un-normalised dimensions** | `WHERE audio_language='hin'` misses 13% of Hindi | open |
+| 4 | **`any()` still on 4 of 7 dimensions** | `user_id`, `content_id`, `platform`, `country`. `any()` was *proven non-deterministic* in `8bfeeb2` (three hashes at `max_threads` 1/8/32); 95 sessions carry 2 platforms, 120 carry 2 user_ids. The code comment still says "not worth it until something measures it" — something did, in that same commit | open |
+| 5 | `DATA_DICTIONARY` — *"periodic, every 60s"*, *"≈78 min average session"* | both disproven in §B | open |
+| 6 | `MENTOR_QUESTIONS` calls unclosed-pause the largest unresolved number | `resume` is ~2× bigger on hours; and the *peak* framing is now measured (below) | open |
+| 7 | `TESTS.md` still says absorption **"FAIL as shipped"** | fixed at `388a845`, test repaired at `1dee090`; evidence reads `CONVERGES` | open |
+| 8 | `TAIL_S = 60` contradicts its own justification | the cadence exists and is 40 s | open |
+| 9 | `45_user_concurrency.sql` stale comments | `ReplacingMergeTree(interval_end)`; "297 sessions" (301) | open |
+| 10 | Peak minute ambiguous under ties | hour tier said 16:35, answer phase said 16:59 | open |
+| 11 | `v_concurrency_minute_title` merges distinct assets | 2,773 colliding titles | open |
+
+**The unclosed-pause rule, now measured where it counts.** It was left open on a 5.09% *hours*
+difference. `cf80acc` measured the number that is actually graded — the **peak**:
+
+```
+ conservative (shipped)   2,887          permissive   3,018
+                                                      ─────
+                                          +131 viewers · +4.5% on the headline
+```
+
+It is now one constant (`UNCLOSED_PAUSE_TO_RUN_END`) rather than an open question, and the gate
+*catches* a model-only flip (240 mismatched minutes) because it shares the **spec** but not the
+**code**. Default stays conservative: under-counting is visible and explainable; over-counting invents
+viewers that demonstrably were not receiving playback events.
 
 ## C.6 · What is not built
 
@@ -632,6 +661,24 @@ identical 30,769 intervals, **0 of 3,725 minutes differ**; restricted to only th
 sessions so it could not wash out, 834 minutes, 0 differing. *"We proved the step unnecessary" is a
 stronger answer than "we added the step."* (`evidence/dedup.txt`)
 
+**`any()` — rejected after it turned out to be picking a sentinel.** Collapsing a session's dimensions
+with `any()` looked like a tie-break detail; the code comment called it "accurate for 98.8%". Measured
+in `8bfeeb2`, it was not: the player emits a sentinel *before* it resolves a track — `VideoSessionStart`
+carries a sentinel `subtitle_language` on **10,880 of 10,880 sessions** — so `any()` picks the sentinel
+more often than the truth. **44.5% of `audio_language` and 47.6% of `subtitle_language` attributions
+wrong** across 139,800 session-minute cells, and **73.5% wrong at the graded peak minute**. Worse, it is
+**non-deterministic**: the same data at `max_threads` 1/8/32 produced three different hashes, so two
+rebuilds would serve two different filtered answers. Replaced with dominant-value-per-interval,
+tie-broken by value → 3.3% and 1.8%, and identical hashes across thread counts and a full rebuild.
+*(Still applied to only 4 of the 7 dimensions — see §C.5 fault 4.)*
+
+**And the extensibility claim is a hard bound, not a hopeful measurement.** `cc_minute_delta` stores at
+most one open and one close per (merged run, hour), so its size is capped at **36,930 rows on this file
+no matter how many dimensions exist**. Three dimensions used 24,951 (67.6% of the ceiling); seven use
+28,139 (76.2%). A hundred could not exceed 36,930. That is what makes *"the solution should work even
+if the number of dimensions increases"* true rather than aspirational — and it only holds because the
+serving layer is deltas rather than a per-minute explosion, which has no such ceiling.
+
 **Three more, each with a number:** the gap-only model (heartbeats survive a pause at 0.756/min);
 `uniq` HyperLogLog (1–2% error against an *exact* private key); `SummingMergeTree` over a distinct
 count (measured **9×** over-count, 45,000 vs a truth of 5,000).
@@ -701,6 +748,10 @@ same discipline applied to the *gate* found it passing on zero rows.
 | The 40-second cadence | p50 = p90 = **40.0 s** on three streams | §B.1 · [doubts/01](../doubts/01-heartbeat-cadence.md) |
 | `resume` overload | **189.2 h · 9.7%** | §B.4 · [doubts/02](../doubts/02-resume-semantics.md) |
 | Same-second tie bug | **41.5 h · 2.1%**, 2,697 pauses affected | §E.2 below |
+| Gate coverage after `81c0161` | **5 → 17,028 minutes**, zero mismatches, negative-tested | commit `81c0161` |
+| Unclosed-pause cost **at the peak** | conservative 2,887 vs permissive **3,018** — **+4.5%** | commit `cf80acc` |
+| `any()` was picking sentinels | **44.5%** audio / **47.6%** subtitle attributions wrong; **73.5%** at the graded peak minute — and non-deterministic across thread counts | commit `8bfeeb2` |
+| Dimension count has a **hard row ceiling** | `cc_minute_delta` ≤ **36,930** rows *regardless of how many dimensions* — 3 dims 24,951 (67.6%), 7 dims 28,139 (76.2%). Whole table 111 KiB | commit `8bfeeb2` |
 
 ## E.2 · Claimed, but not proven
 
@@ -710,7 +761,10 @@ same discipline applied to the *gate* found it passing on zero rows.
         forks, none of which any test we own can detect.
 
  "make reconcile proves we are correct"
-     ✗  PROVEN FALSE — zero rows → PASS on any day but 2026-07-26.
+     ✅ WAS proven false (zero rows → PASS off-day); FIXED in 81c0161.
+        Coverage 5 → 17,028 minutes, idle minutes included, minutes_compared
+        asserted. Still cannot see a DEFINITIONAL error — it recomputes truth
+        from the same spec it is testing.
 
  "the model absorbs late data incrementally"
      🟡 TRUE in an isolated database. No live path: no finalizer, no watermark
@@ -778,12 +832,17 @@ Every sentence there is backed. What we **cannot** say is "it is fast" (unmeasur
 ## E.5 · Highest grade-change per hour
 
 ```
- 1  FIX THE GATE          ~30 min  without it nothing else we claim is backed.
-                                   The working form already exists in
-                                   tools/unseen-run.sh — promote it into
-                                   sql/90_reconcile.sql and assert rows > 0.
- 2  RUN /bench            ~45 min  the only scored criterion with zero evidence.
- 3  TIE BUG + resume call ~1 h     41.5 h, and up to 189.2 h, of the answer.
- 4  NORMALISE DIMENSIONS  ~30 min  or state the limit out loud.
- 5  DECK                  starts at H18 regardless of code state.
+ ✅ FIX THE GATE          DONE in 81c0161. Coverage 5 → 17,028 minutes.
+
+ 1  RUN /bench            ~45 min  the only scored criterion with ZERO evidence.
+                                   Judges read what a query READS, not just ms.
+ 2  TIE BUG               ~15 min  41.5h / 2.1%. A one-character change (> to >=)
+                                   in BOTH 30_build_intervals and 90_reconcile —
+                                   they share the spec, so both must move.
+ 3  RESUME RULE           ~1 h     up to 189.2h / 9.7%. Needs the mentor answer
+                                   (doubts/02) or a stated, measured default.
+ 4  any() ON THE LAST 4   ~30 min  same non-determinism already fixed for the
+                                   other three dimensions in 8bfeeb2.
+ 5  NORMALISE DIMENSIONS  ~30 min  or state the limit out loud.
+ 6  DECK                  starts at H18 regardless of code state.
 ```
