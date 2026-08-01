@@ -1,0 +1,284 @@
+== nothing to publish (0 sessions claimed)
+== nothing to publish (0 sessions claimed)
+== run 1785614278026  ·  10000 session(s) claimed  ·  cursor 1970-01-01 00:00:00.000 -> 2026-08-01 19:57:55.804
+   negated   0 corrective delta rows   52 ms
+   derived   3293 intervals   85 ms   (window 2026-07-26 10:40:00.005 .. 2026-07-26 10:40:59.999)
+   pruned    superseded intervals   142 ms
+   emitted   1832 delta rows   61 ms
+   hours     21878 hour-cube rows re-derived   128 ms
+   users     6314 user-minute buckets re-derived   99 ms
+   committed cursor now 2026-08-01 19:57:55.804
+== run 1785614280870  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:57:55.804 -> 2026-08-01 19:57:58.434
+   negated   1832 corrective delta rows   55 ms
+   derived   10000 intervals   107 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 10:41:59.996)
+   pruned    superseded intervals   44 ms
+   emitted   3640 delta rows   59 ms
+   hours     21878 hour-cube rows re-derived   67 ms
+   users     7712 user-minute buckets re-derived   45 ms
+   committed cursor now 2026-08-01 19:57:58.434
+== nothing to publish (0 sessions claimed)
+== run 1785614284457  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:57:58.434 -> 2026-08-01 19:58:01.422
+   negated   3640 corrective delta rows   136 ms
+   derived   10000 intervals   416 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 10:42:59.999)
+   pruned    superseded intervals   300 ms
+   emitted   3456 delta rows   130 ms
+   hours     21878 hour-cube rows re-derived   171 ms
+   users     9182 user-minute buckets re-derived   64 ms
+   committed cursor now 2026-08-01 19:58:01.422
+== run 1785614288558  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:58:01.422 -> 2026-08-01 19:58:04.102
+   negated   3456 corrective delta rows   85 ms
+   derived   10000 intervals   135 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 10:43:59.999)
+   pruned    superseded intervals   95 ms
+   emitted   3456 delta rows   69 ms
+   hours     21878 hour-cube rows re-derived   70 ms
+   users     10694 user-minute buckets re-derived   53 ms
+   committed cursor now 2026-08-01 19:58:04.102
+== run 1785614291399  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:58:04.102 -> 2026-08-01 19:58:06.986
+   negated   3456 corrective delta rows   69 ms
+   derived   10000 intervals   182 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 10:44:59.999)
+   pruned    superseded intervals   52 ms
+   emitted   3456 delta rows   69 ms
+   hours     21878 hour-cube rows re-derived   76 ms
+   users     12236 user-minute buckets re-derived   54 ms
+   committed cursor now 2026-08-01 19:58:06.986
+== run 1785614294110  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:58:06.986 -> 2026-08-01 19:58:10.378
+   negated   3456 corrective delta rows   60 ms
+   derived   10000 intervals   173 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 10:45:59.997)
+   pruned    superseded intervals   49 ms
+   emitted   3456 delta rows   65 ms
+   hours     21878 hour-cube rows re-derived   71 ms
+   users     13826 user-minute buckets re-derived   64 ms
+   committed cursor now 2026-08-01 19:58:10.378
+== run 1785614296617  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:58:10.378 -> 2026-08-01 19:58:13.133
+   negated   3456 corrective delta rows   56 ms
+   derived   10000 intervals   148 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 10:46:59.998)
+   pruned    superseded intervals   49 ms
+   emitted   3456 delta rows   58 ms
+   hours     21878 hour-cube rows re-derived   63 ms
+   users     15432 user-minute buckets re-derived   45 ms
+   committed cursor now 2026-08-01 19:58:13.133
+== run 1785614299039  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:58:13.133 -> 2026-08-01 19:58:15.928
+   negated   3456 corrective delta rows   78 ms
+   derived   10000 intervals   185 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 10:47:59.999)
+   pruned    superseded intervals   86 ms
+   emitted   3456 delta rows   73 ms
+   hours     21878 hour-cube rows re-derived   109 ms
+   users     17044 user-minute buckets re-derived   97 ms
+   committed cursor now 2026-08-01 19:58:15.928
+== run 1785614301810  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:58:15.928 -> 2026-08-01 19:58:18.645
+   negated   3456 corrective delta rows   76 ms
+   derived   10000 intervals   189 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 10:48:59.999)
+   pruned    superseded intervals   344 ms
+   emitted   3456 delta rows   66 ms
+   hours     21878 hour-cube rows re-derived   70 ms
+   users     18696 user-minute buckets re-derived   126 ms
+   committed cursor now 2026-08-01 19:58:18.645
+== run 1785614304727  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:58:18.645 -> 2026-08-01 19:58:21.486
+   negated   3456 corrective delta rows   67 ms
+   derived   10000 intervals   295 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 10:49:59.993)
+   pruned    superseded intervals   75 ms
+   emitted   3456 delta rows   80 ms
+   hours     21878 hour-cube rows re-derived   76 ms
+   users     20371 user-minute buckets re-derived   104 ms
+   committed cursor now 2026-08-01 19:58:21.486
+== run 1785614307647  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:58:21.486 -> 2026-08-01 19:58:24.257
+   negated   3456 corrective delta rows   67 ms
+   derived   10000 intervals   170 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 10:50:59.999)
+   pruned    superseded intervals   71 ms
+   emitted   3456 delta rows   66 ms
+   hours     21878 hour-cube rows re-derived   143 ms
+   users     22081 user-minute buckets re-derived   95 ms
+   committed cursor now 2026-08-01 19:58:24.257
+== run 1785614310307  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:58:24.257 -> 2026-08-01 19:58:27.174
+   negated   3456 corrective delta rows   71 ms
+   derived   10000 intervals   308 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 10:51:59.995)
+   pruned    superseded intervals   56 ms
+   emitted   3456 delta rows   71 ms
+   hours     21878 hour-cube rows re-derived   72 ms
+   users     23791 user-minute buckets re-derived   62 ms
+   committed cursor now 2026-08-01 19:58:27.174
+== run 1785614313084  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:58:27.174 -> 2026-08-01 19:58:29.875
+   negated   3456 corrective delta rows   86 ms
+   derived   10000 intervals   278 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 10:52:59.999)
+   pruned    superseded intervals   47 ms
+   emitted   3456 delta rows   60 ms
+   hours     21878 hour-cube rows re-derived   91 ms
+   users     25540 user-minute buckets re-derived   66 ms
+   committed cursor now 2026-08-01 19:58:29.875
+== run 1785614315848  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:58:29.875 -> 2026-08-01 19:58:32.846
+   negated   3456 corrective delta rows   76 ms
+   derived   10000 intervals   367 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 10:53:59.998)
+   pruned    superseded intervals   90 ms
+   emitted   3456 delta rows   72 ms
+   hours     21878 hour-cube rows re-derived   135 ms
+   users     27280 user-minute buckets re-derived   138 ms
+   committed cursor now 2026-08-01 19:58:32.846
+== run 1785614319366  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:58:32.846 -> 2026-08-01 19:58:35.756
+   negated   3456 corrective delta rows   75 ms
+   derived   10000 intervals   274 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 10:54:59.996)
+   pruned    superseded intervals   83 ms
+   emitted   3456 delta rows   71 ms
+   hours     21878 hour-cube rows re-derived   76 ms
+   users     28992 user-minute buckets re-derived   95 ms
+   committed cursor now 2026-08-01 19:58:35.756
+== run 1785614322246  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:58:35.756 -> 2026-08-01 19:58:39.006
+   negated   3456 corrective delta rows   60 ms
+   derived   10000 intervals   211 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 10:55:59.997)
+   pruned    superseded intervals   67 ms
+   emitted   3456 delta rows   61 ms
+   hours     21878 hour-cube rows re-derived   94 ms
+   users     30715 user-minute buckets re-derived   124 ms
+   committed cursor now 2026-08-01 19:58:39.006
+== run 1785614324907  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:58:39.006 -> 2026-08-01 19:58:41.822
+   negated   3456 corrective delta rows   76 ms
+   derived   10000 intervals   258 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 10:56:59.999)
+   pruned    superseded intervals   40 ms
+   emitted   3456 delta rows   56 ms
+   hours     21878 hour-cube rows re-derived   74 ms
+   users     32445 user-minute buckets re-derived   87 ms
+   committed cursor now 2026-08-01 19:58:41.822
+== run 1785614327545  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:58:41.822 -> 2026-08-01 19:58:44.547
+   negated   3456 corrective delta rows   61 ms
+   derived   10000 intervals   261 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 10:57:59.998)
+   pruned    superseded intervals   62 ms
+   emitted   3456 delta rows   67 ms
+   hours     21878 hour-cube rows re-derived   100 ms
+   users     34184 user-minute buckets re-derived   91 ms
+   committed cursor now 2026-08-01 19:58:44.547
+== run 1785614330281  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:58:44.547 -> 2026-08-01 19:58:47.277
+   negated   3456 corrective delta rows   65 ms
+   derived   10000 intervals   285 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 10:58:59.997)
+   pruned    superseded intervals   118 ms
+   emitted   1728 delta rows   66 ms
+   hours     21878 hour-cube rows re-derived   83 ms
+   users     35920 user-minute buckets re-derived   96 ms
+   committed cursor now 2026-08-01 19:58:47.277
+== run 1785614333169  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:58:47.277 -> 2026-08-01 19:58:50.022
+   negated   1728 corrective delta rows   71 ms
+   derived   10000 intervals   327 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 10:59:59.999)
+   pruned    superseded intervals   105 ms
+   emitted   5184 delta rows   67 ms
+   hours     21878 hour-cube rows re-derived   97 ms
+   users     37606 user-minute buckets re-derived   196 ms
+   committed cursor now 2026-08-01 19:58:50.022
+== run 1785614336298  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:58:50.022 -> 2026-08-01 19:58:52.719
+   negated   5184 corrective delta rows   93 ms
+   derived   10000 intervals   521 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 11:00:59.999)
+   pruned    superseded intervals   161 ms
+   emitted   5184 delta rows   106 ms
+   hours     21878 hour-cube rows re-derived   100 ms
+   users     39269 user-minute buckets re-derived   288 ms
+   committed cursor now 2026-08-01 19:58:52.719
+== run 1785614340057  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:58:52.719 -> 2026-08-01 19:58:55.563
+   negated   5184 corrective delta rows   86 ms
+   derived   10000 intervals   384 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 11:01:59.999)
+   pruned    superseded intervals   160 ms
+   emitted   5184 delta rows   74 ms
+   hours     21878 hour-cube rows re-derived   114 ms
+   users     40923 user-minute buckets re-derived   222 ms
+   committed cursor now 2026-08-01 19:58:55.563
+== run 1785614343690  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:58:55.563 -> 2026-08-01 19:58:58.704
+   negated   5184 corrective delta rows   75 ms
+   derived   10000 intervals   620 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 11:02:59.999)
+   pruned    superseded intervals   116 ms
+   emitted   5184 delta rows   124 ms
+   hours     21878 hour-cube rows re-derived   170 ms
+   users     42546 user-minute buckets re-derived   188 ms
+   committed cursor now 2026-08-01 19:58:58.704
+== run 1785614347605  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:58:58.704 -> 2026-08-01 19:59:05.146
+   negated   5184 corrective delta rows   75 ms
+   derived   10000 intervals   430 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 11:04:59.998)
+   pruned    superseded intervals   88 ms
+   emitted   5184 delta rows   87 ms
+   hours     21878 hour-cube rows re-derived   110 ms
+   users     45737 user-minute buckets re-derived   135 ms
+   committed cursor now 2026-08-01 19:59:05.146
+== run 1785614350806  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:59:05.146 -> 2026-08-01 19:59:08.417
+   negated   5184 corrective delta rows   85 ms
+   derived   10000 intervals   526 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 11:05:59.999)
+   pruned    superseded intervals   310 ms
+   emitted   5184 delta rows   63 ms
+   hours     21878 hour-cube rows re-derived   94 ms
+   users     47297 user-minute buckets re-derived   108 ms
+   committed cursor now 2026-08-01 19:59:08.417
+== run 1785614354076  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:59:08.417 -> 2026-08-01 19:59:11.317
+   negated   5184 corrective delta rows   80 ms
+   derived   10000 intervals   460 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 11:06:59.999)
+   pruned    superseded intervals   72 ms
+   emitted   5184 delta rows   60 ms
+   hours     21878 hour-cube rows re-derived   93 ms
+   users     48846 user-minute buckets re-derived   110 ms
+   committed cursor now 2026-08-01 19:59:11.317
+== run 1785614357044  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:59:11.317 -> 2026-08-01 19:59:14.296
+   negated   5184 corrective delta rows   59 ms
+   derived   10000 intervals   377 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 11:07:59.997)
+   pruned    superseded intervals   55 ms
+   emitted   5184 delta rows   63 ms
+   hours     21878 hour-cube rows re-derived   82 ms
+   users     50333 user-minute buckets re-derived   97 ms
+   committed cursor now 2026-08-01 19:59:14.296
+== run 1785614359834  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:59:14.296 -> 2026-08-01 19:59:17.192
+   negated   5184 corrective delta rows   61 ms
+   derived   10000 intervals   369 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 11:08:59.999)
+   pruned    superseded intervals   93 ms
+   emitted   5184 delta rows   73 ms
+   hours     21878 hour-cube rows re-derived   84 ms
+   users     51786 user-minute buckets re-derived   128 ms
+   committed cursor now 2026-08-01 19:59:17.192
+== run 1785614362746  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:59:17.192 -> 2026-08-01 19:59:19.968
+   negated   5184 corrective delta rows   65 ms
+   derived   10000 intervals   408 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 11:09:59.997)
+   pruned    superseded intervals   107 ms
+   emitted   5184 delta rows   77 ms
+   hours     21878 hour-cube rows re-derived   80 ms
+   users     53193 user-minute buckets re-derived   119 ms
+   committed cursor now 2026-08-01 19:59:19.968
+== run 1785614365647  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:59:19.968 -> 2026-08-01 19:59:22.724
+   negated   5184 corrective delta rows   75 ms
+   derived   10000 intervals   405 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 11:10:59.996)
+   pruned    superseded intervals   148 ms
+   emitted   5184 delta rows   56 ms
+   hours     21878 hour-cube rows re-derived   73 ms
+   users     54573 user-minute buckets re-derived   106 ms
+   committed cursor now 2026-08-01 19:59:22.724
+== run 1785614368457  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:59:22.724 -> 2026-08-01 19:59:25.454
+   negated   5184 corrective delta rows   64 ms
+   derived   10000 intervals   387 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 11:11:59.999)
+   pruned    superseded intervals   49 ms
+   emitted   5184 delta rows   66 ms
+   hours     21878 hour-cube rows re-derived   79 ms
+   users     55894 user-minute buckets re-derived   95 ms
+   committed cursor now 2026-08-01 19:59:25.454
+== run 1785614371179  ·  10000 session(s) claimed  ·  cursor 2026-08-01 19:59:25.454 -> 2026-08-01 19:59:28.102
+   negated   5184 corrective delta rows   54 ms
+   derived   10000 intervals   467 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 11:12:59.999)
+   pruned    superseded intervals   62 ms
+   emitted   5184 delta rows   61 ms
+   hours     21878 hour-cube rows re-derived   87 ms
+   users     57144 user-minute buckets re-derived   128 ms
+   committed cursor now 2026-08-01 19:59:28.102
+== run 1785614374094  ·  9965 session(s) claimed  ·  cursor 2026-08-01 19:59:28.102 -> 2026-08-01 19:59:30.823
+   negated   5175 corrective delta rows   63 ms
+   derived   9965 intervals   471 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 11:13:59.998)
+   pruned    superseded intervals   65 ms
+   emitted   5175 delta rows   60 ms
+   hours     21878 hour-cube rows re-derived   90 ms
+   users     58335 user-minute buckets re-derived   124 ms
+   committed cursor now 2026-08-01 19:59:30.823
+== run 1785614377021  ·  9983 session(s) claimed  ·  cursor 2026-08-01 19:59:30.823 -> 2026-08-01 19:59:33.482
+   negated   5204 corrective delta rows   60 ms
+   derived   9983 intervals   473 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 11:14:59.999)
+   pruned    superseded intervals   94 ms
+   emitted   5181 delta rows   68 ms
+   hours     21878 hour-cube rows re-derived   88 ms
+   users     59485 user-minute buckets re-derived   121 ms
+   committed cursor now 2026-08-01 19:59:33.482
+== run 1785614379956  ·  5027 session(s) claimed  ·  cursor 2026-08-01 19:59:33.482 -> 2026-08-01 19:59:36.111
+   negated   3208 corrective delta rows   57 ms
+   derived   5027 intervals   254 ms   (window 2026-07-26 10:40:00.000 .. 2026-07-26 11:15:59.995)
+   pruned    superseded intervals   107 ms
+   emitted   3195 delta rows   53 ms
+   hours     21878 hour-cube rows re-derived   90 ms
+   users     60587 user-minute buckets re-derived   158 ms
+   committed cursor now 2026-08-01 19:59:36.111
+== nothing to publish (0 sessions claimed)

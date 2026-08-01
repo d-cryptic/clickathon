@@ -1,0 +1,499 @@
+SPIKE EVIDENCE — the cricketer spike: N viewers arriving in ONE minute
+generated 2026-08-01T19:55:50Z   commit 6758f67
+host: 26.7.1.1315  cores 10  mem 7.82 GiB
+magnitudes: 1000 10000 100000 spike sessions   seed 20260802   chunk pace 2s   server memory budget 5.40 GiB
+--------------------------------------------------------------------------
+THE SHAPE UNDER TEST — same load, different shape (what scale.txt cannot see)
+  Baseline: the REAL provided file (905,558 events, peak 2,917 @ 10:56).
+  Spike:    N sessions ALL starting inside 2026-07-26 10:40:00..+60s, all on ONE
+            content_id (the match), heartbeats every ~40s with the real
+            burst shape (mean 3.4 events/beat), sentinel-then-resolved
+            audio/subtitle on the first beat (the ADR 0008 behaviour),
+            NO mid-session gaps — a cricket audience is foreground.
+  Wicket:   2026-07-26 11:14:00 — every spike session ends inside 120 s.
+  Boundary: the plateau crosses 11:00, so every spike interval is
+            hour-clipped in two (ADR 0003) — the doubling is measured.
+  Streaming: minute-chunks of the spike are inserted 2s apart while
+  tools/publish.sh loops beside them (settle 2s) — a time-compressed
+  replay. Stability verdicts are read at the REAL 60s heartbeat cadence:
+  the publisher keeps up with a live spike iff one run absorbs one
+  minute's markings in under 60 s.
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
+SPIKE 1000 — 1,000 sessions arriving in one minute, on the real day
+--------------------------------------------------------------------------
+  [base]  905,558 real events loaded from /Users/barun/Developers/personal/clickathon-project/data/ch-hackathon-raw-data.csv
+  [base]  building the four tiers on the normal day (the published state a spike hits)
+  [intervals]  502 ms  ·  peak mem 347.28 MiB  ·  read 905,558 rows  ·  wrote 30,323 rows
+  [users]  267 ms  ·  peak mem 113.82 MiB  ·  read 30,323 rows  ·  wrote 91,692 rows
+  [deltas]  132 ms  ·  peak mem 80.84 MiB  ·  read 60,646 rows  ·  wrote 28,073 rows
+  [houragg]  91 ms  ·  peak mem 41.98 MiB  ·  read 28,073 rows  ·  wrote 26,254 rows
+  [base]  baseline peak 2917  (repo number 2917 — must match or this is not the same model)
+  [base]  idle serving probes: peak query 4.2 ms · dashboard hour curve 4.6 ms
+  [gen]  172,960 spike events staged in 258 ms  ·  1000 sessions · 1000 users · span 2026-07-26 10:40:00.009 .. 2026-07-26 11:15:59.984
+
+  STREAMING REPLAY — one spike minute per chunk, publisher looping beside it.
+  probes are ONE-SHOT reads taken mid-ingest: contention is the measurement.
+  minute         rows     ins ms   parts  merges    pending    lag s     Q1 ms     Q7 ms
+  10:40         2,031         91       8       0      1,000        -       5.3      17.9
+  10:41         4,646         99       9       0      1,000        -       3.6       2.7
+  10:42         5,443        195      10       0      1,000        6       3.9       3.9
+  10:43         4,527         82      11       0      1,000        6       3.3       2.1
+  10:44         5,664         87      12       0      1,000        5       3.0       2.0
+  10:45         4,645         84       8       0      1,000        5       3.5       2.4
+  10:46         5,426        172       9       0      1,000        5      12.3       3.7
+  10:47         4,764        157      10       0      1,000        5       4.9       2.6
+  10:48         5,571        143      11       0      1,000        6       3.6       2.9
+  10:49         4,742        105      12       0      1,000        5       4.0       2.4
+  10:50         5,398        110       8       0      1,000        5       3.6       2.6
+  10:51         4,683        114       9       0      1,000        6       3.4       2.4
+  10:52         5,512        123      10       0      1,000        6       3.9       2.9
+  10:53         4,622        135      11       0      1,000        5       5.0       3.0
+  10:54         5,495        152      12       0      1,000        5       5.3       5.0
+  10:55         4,670        123       8       0      1,000        6       4.2       3.5
+  10:56         5,408        137       9       0      1,000        5       4.6       3.1
+  10:57         4,629        193      10       0      1,000        5      12.2       5.4
+  10:58         5,452        135      11       0      1,000        6       4.1       2.8
+  10:59         4,522        134      12       0      1,000        6       7.3       4.1
+  11:00         5,614        161       8       0      1,000        6       5.9       3.6
+  11:01         4,467        184       9       0      1,000        6       5.7       2.3
+  11:02         5,468        129      10       0      1,000        5      15.8       8.8
+  11:03         4,504        717      11       0      1,000        6       4.1       2.9
+  11:04         5,512        318      12       0      1,000        7      10.2       7.3
+  11:05         4,553         97       8       0      1,000        6       5.5       3.4
+  11:06         5,454        128       9       0      1,000        6       3.5       2.2
+  11:07         4,661        165      10       0      1,000        6       3.5       2.5
+  11:08         5,515        119      11       0      1,000        6       4.0       2.2
+  11:09         4,582        108      12       0      1,000        5       3.6       2.3
+  11:10         5,623        140       8       0      1,000        5       4.2       5.2
+  11:11         4,754        161       9       0      1,000        6       4.0       2.9
+  11:12         5,548        166      10       0      1,000        5       6.8       2.3
+  11:13         4,383        139      11       0      1,000        5       4.1       3.1
+  11:14         3,643        220      12       0        998        6      10.3       4.0
+  11:15           829        359       8       0        515        6      15.2       4.1
+  ingest wall 101.2 s for 172,960 events (1,708 ev/s inserted)
+  publisher DRAINED 2424 ms after the last insert — the serving layer has absorbed the spike
+
+  PUBLISH RUNS through the spike (cc_publish_runs — the finalizer's own log):
+  run    sessions    negate    derive     prune      emit     hours     users   total ms
+     1      1000       51       56       58       48       80       53       346
+     2      1000       48       88       59       84       84       43       406
+     3      1000       44       61       70       43       76       42       336
+     4      1000       43       53       47       44       68       37       292
+     5      1000       46       62       47       51       81       48       335
+     6      1000       77       71       75       44       85       44       396
+     7      1000       56       78       70       48       73       42       367
+     8      1000       69       78       39       50       81       79       396
+     9      1000       74       95       94       51      104       50       468
+    10      1000       46       80       49       50       88       53       366
+    11      1000       46       82       62       49       80       53       372
+    12      1000       75      151       60       81      100       55       522
+    13      1000       46      104       60       55       93       56       414
+    14      1000       83      154       64       56      146       79       582
+    15      1000       49      130       61       65       88       55       448
+    16      1000       66      102       59       50       84       63       424
+    17      1000      104      231       60       72      165      161       793
+    18      1000       58      129       37       45       86       54       409
+    19      1000       78      150       50       54       82       92       506
+    20      1000       84      135       55       58       78       70       480
+    21      1000       62      135       61       49       73       70       450
+    22      1000       50      143       80      133      108      188       702
+    23      1000      128      371      483       62      108       92      1244
+    24      1000      108      307       59       53       96       92       715
+    25      1000       51      148       54       61       73       74       461
+    26      1000       45      146       44       47       89       75       446
+    27      1000       48      244      121       55       86       89       643
+    28      1000       45      208       67       58      113       92       583
+    29      1000       48      193       63       46       80       79       509
+    30      1000       51      204       56       51      117      155       634
+    31      1000       53      118       44       49       81       64       409
+    32      1000       49      135       77       54      106       83       504
+    33      1000       60      125      125       59      107      109       585
+    34       992      118      324      190       74       97       99       902
+    35       998      214      191       61       68      138      125       797
+    36       515       58      124       41       56      148      122       549
+
+  worst run: 1244 ms  ·  biggest claim: 1,000 sessions  ·  36 runs total
+  VERDICT at the real 60s heartbeat cadence: STABLE — worst run 1.2 s < 60 s: the publisher outruns a live spike of this size
+  user-tier churn: 152,288 physical rows over 91,701 logical buckets — every re-publish of a touched minute appends superseding versions
+
+  GATE (incremental path — publisher-maintained deltas vs interval expansion): PASS  3732 minutes compared, peak 3917
+  peak on the spike day: 3917 @ 2026-07-26 10:56:00  (baseline was 2917; spike adds ~1,000)
+
+  DELTA ACCOUNTING — what a spike actually does to cc_minute_delta.
+  The naive fear: '+1 at open, -1 at close means a huge number of rows at
+  one minute key'. Measured: the ADR 0008 grain collapses N sessions into
+  the DIMS fan-out at that minute — the magnitude lands in sum(starts),
+  not in row count.
+  delta rows in the spike window (10:40..11:16): 30,184
+  minute                        opens       closes          net
+  2026-07-26 10:40:00           1280         162        1118
+  2026-07-26 10:41:00            300         167         133
+  2026-07-26 10:59:00            354         319          35
+  2026-07-26 11:00:00           3873           0        3873
+  2026-07-26 11:14:00            243         288         -45
+  2026-07-26 11:15:00            255         311         -56
+  2026-07-26 11:16:00            210         804        -594
+  intervals crossing 11:00: 3,463 — each is hour-clipped in two (ADR 0003):
+  the 10:59/11:00 rows above carry a close+reopen for every one of them.
+
+  STORAGE after the spike (active parts; no OPTIMIZE FINAL first):
+  table                            rows      on disk    parts
+  ev_raw                  1.08 million    7.93 MiB       8
+  session_intervals     31.32 thousand    1.88 MiB       1
+  cc_user_minute        152.29 thousan  779.14 KiB       8
+  session_dirty         35.51 thousand  739.11 KiB       1
+  cc_hour_agg           48.13 thousand  356.49 KiB       2
+  cc_minute_delta       41.78 thousand  256.04 KiB       8
+  merge pressure (system.part_log, this database):
+    NewPart             1399    100.43 MiB    369 ms slowest
+    MutatePart           252    157.47 MiB    373 ms slowest
+    MutatePartStart      252        0.00 B      0 ms slowest
+    MergeParts           238     62.54 MiB    157 ms slowest
+    MergePartsStart      238        0.00 B      0 ms slowest
+    RemovePart            19      3.30 MiB      0 ms slowest
+
+  BATCH REBUILD on the spike day — the scale.txt ladder, spike-shaped.
+  [intervals]  532 ms  ·  peak mem 483.10 MiB  ·  read 1,078,518 rows  ·  wrote 31,323 rows
+  [users]  145 ms  ·  peak mem 114.94 MiB  ·  read 31,323 rows  ·  wrote 91,701 rows
+  [deltas]  102 ms  ·  peak mem 81.09 MiB  ·  read 62,646 rows  ·  wrote 29,248 rows
+  [houragg]  55 ms  ·  peak mem 43.74 MiB  ·  read 29,248 rows  ·  wrote 26,254 rows
+  GATE (batch path — rebuilt deltas vs interval expansion): PASS  3732 minutes compared, peak 3917
+  GATE (user tier vs interval expansion): PASS  3732 minutes compared, user peak 3844
+  settled serving probes: peak 3.9 ms · dashboard hour curve 3.2 ms  (idle baseline: 4.2 / 4.6 ms)
+--------------------------------------------------------------------------
+SPIKE 10000 — 10,000 sessions arriving in one minute, on the real day
+--------------------------------------------------------------------------
+  [base]  905,558 real events loaded from /Users/barun/Developers/personal/clickathon-project/data/ch-hackathon-raw-data.csv
+  [base]  building the four tiers on the normal day (the published state a spike hits)
+  [intervals]  222 ms  ·  peak mem 347.04 MiB  ·  read 905,558 rows  ·  wrote 30,323 rows
+  [users]  74 ms  ·  peak mem 113.48 MiB  ·  read 30,323 rows  ·  wrote 91,692 rows
+  [deltas]  147 ms  ·  peak mem 80.84 MiB  ·  read 60,646 rows  ·  wrote 28,073 rows
+  [houragg]  89 ms  ·  peak mem 41.99 MiB  ·  read 28,073 rows  ·  wrote 26,254 rows
+  [base]  baseline peak 2917  (repo number 2917 — must match or this is not the same model)
+  [base]  idle serving probes: peak query 4.1 ms · dashboard hour curve 5.7 ms
+  [gen]  1,733,653 spike events staged in 939 ms  ·  10000 sessions · 10000 users · span 2026-07-26 10:40:00.005 .. 2026-07-26 11:15:59.995
+
+  STREAMING REPLAY — one spike minute per chunk, publisher looping beside it.
+  probes are ONE-SHOT reads taken mid-ingest: contention is the measurement.
+  minute         rows     ins ms   parts  merges    pending    lag s     Q1 ms     Q7 ms
+  10:40        20,757        115       8       0     10,000        -       3.7       2.4
+  10:41        45,956        156       9       0     10,000        -       5.9       3.5
+  10:42        55,847        198      10       0     10,000        6       4.2       3.0
+  10:43        45,438        180      11       0     10,000        6       4.5       2.5
+  10:44        55,787        289      12       0     10,000        5       8.2       4.8
+  10:45        45,559        298      13       0     10,000        6       3.5       2.8
+  10:46        56,053        211       9       0     10,000        7       4.1       6.4
+  10:47        45,315        170      10       0     10,000        5       3.6       2.4
+  10:48        56,238        233      11       0     10,000        5       5.6       9.2
+  10:49        45,796        220      12       0     10,000        6       3.8       4.4
+  10:50        55,478        295      13       1     10,000        6       5.4       4.3
+  10:51        45,791        185       9       0     10,000        6       3.5       3.1
+  10:52        55,835        210      10       0     10,000        5       6.4       2.2
+  10:53        46,088        218      11       0     10,000        5       3.9       3.0
+  10:54        55,798        318      12       0     10,000        6       3.5       4.9
+  10:55        45,458        330      13       0     10,000        7       6.9       4.3
+  10:56        56,091        156      14       1     10,000        6       3.9       3.4
+  10:57        45,605        165       9       0     10,000        5       3.1       2.6
+  10:58        55,902        261      10       0     10,000        6       8.9       2.7
+  10:59        45,006        185      11       0     10,000        6       3.9       2.2
+  11:00        56,579        152      12       0     10,000        5       4.2       2.9
+  11:01        45,385        349      13       0     10,000        5       5.9       4.4
+  11:02        56,079        413      14       0     10,000        6       4.0       8.9
+  11:03        45,368        281      10       0     10,000        9      14.7       6.5
+  11:04        56,352        452      11       0     10,000       10      12.0      12.7
+  11:05        44,964        197      12       0     10,000       10       8.7       5.7
+  11:06        55,846        237      13       1     10,000        6       6.6       6.1
+  11:07        45,730        181       8       0     10,000        6      11.1       3.4
+  11:08        55,996        194       9       0     10,000        6       5.4       5.4
+  11:09        45,707        136      10       0     10,000        5       5.9       4.0
+  11:10        56,377        119      11       0     10,000        5       3.2       6.3
+  11:11        45,630        155      12       0     10,000        6       3.9       2.8
+  11:12        56,460        127      13       1     10,000        6       3.5       2.5
+  11:13        43,581        226       9       0     10,000        5       3.9       2.5
+  11:14        35,537        154      10       0     10,000        5       4.1       3.5
+  11:15         8,264        140      11       0     10,000        6       3.7       2.8
+  ingest wall 103.0 s for 1,733,653 events (16,830 ev/s inserted)
+  publisher DRAINED 4339 ms after the last insert — the serving layer has absorbed the spike
+
+  PUBLISH RUNS through the spike (cc_publish_runs — the finalizer's own log):
+  run    sessions    negate    derive     prune      emit     hours     users   total ms
+     1     10000       52       85      142       61      128       99       567
+     2     10000       55      107       44       59       67       45       377
+     3     10000      136      416      300      130      171       64      1217
+     4     10000       85      135       95       69       70       53       507
+     5     10000       69      182       52       69       76       54       502
+     6     10000       60      173       49       65       71       64       482
+     7     10000       56      148       49       58       63       45       419
+     8     10000       78      185       86       73      109       97       628
+     9     10000       76      189      344       66       70      126       871
+    10     10000       67      295       75       80       76      104       697
+    11     10000       67      170       71       66      143       95       612
+    12     10000       71      308       56       71       72       62       640
+    13     10000       86      278       47       60       91       66       628
+    14     10000       76      367       90       72      135      138       878
+    15     10000       75      274       83       71       76       95       674
+    16     10000       60      211       67       61       94      124       617
+    17     10000       76      258       40       56       74       87       591
+    18     10000       61      261       62       67      100       91       642
+    19     10000       65      285      118       66       83       96       713
+    20     10000       71      327      105       67       97      196       863
+    21     10000       93      521      161      106      100      288      1269
+    22     10000       86      384      160       74      114      222      1040
+    23     10000       75      620      116      124      170      188      1293
+    24     10000       75      430       88       87      110      135       925
+    25     10000       85      526      310       63       94      108      1186
+    26     10000       80      460       72       60       93      110       875
+    27     10000       59      377       55       63       82       97       733
+    28     10000       61      369       93       73       84      128       808
+    29     10000       65      408      107       77       80      119       856
+    30     10000       75      405      148       56       73      106       863
+    31     10000       64      387       49       66       79       95       740
+    32     10000       54      467       62       61       87      128       859
+    33      9965       63      471       65       60       90      124       873
+    34      9983       60      473       94       68       88      121       904
+    35      5027       57      254      107       53       90      158       719
+
+  worst run: 1293 ms  ·  biggest claim: 10,000 sessions  ·  35 runs total
+  VERDICT at the real 60s heartbeat cadence: STABLE — worst run 1.3 s < 60 s: the publisher outruns a live spike of this size
+  user-tier churn: 91,701 physical rows over 91,701 logical buckets — every re-publish of a touched minute appends superseding versions
+
+  GATE (incremental path — publisher-maintained deltas vs interval expansion): PASS  3732 minutes compared, peak 12917
+  peak on the spike day: 12917 @ 2026-07-26 10:56:00  (baseline was 2917; spike adds ~10,000)
+
+  DELTA ACCOUNTING — what a spike actually does to cc_minute_delta.
+  The naive fear: '+1 at open, -1 at close means a huge number of rows at
+  one minute key'. Measured: the ADR 0008 grain collapses N sessions into
+  the DIMS fan-out at that minute — the magnitude lands in sum(starts),
+  not in row count.
+  delta rows in the spike window (10:40..11:16): 87,853
+  minute                        opens       closes          net
+  2026-07-26 10:40:00          10280         162       10118
+  2026-07-26 10:41:00            300         167         133
+  2026-07-26 10:59:00            354         319          35
+  2026-07-26 11:00:00          12873           0       12873
+  2026-07-26 11:14:00            243         288         -45
+  2026-07-26 11:15:00            255         311         -56
+  2026-07-26 11:16:00            210        5292       -5082
+  intervals crossing 11:00: 12,463 — each is hour-clipped in two (ADR 0003):
+  the 10:59/11:00 rows above carry a close+reopen for every one of them.
+
+  STORAGE after the spike (active parts; no OPTIMIZE FINAL first):
+  table                            rows      on disk    parts
+  session_dirty         354.98 thousan   25.34 MiB       4
+  ev_raw                  2.64 million   24.80 MiB      11
+  cc_user_minute        91.70 thousand    4.55 MiB       7
+  session_intervals     40.32 thousand    3.16 MiB       1
+  cc_minute_delta       102.72 thousan  336.30 KiB      11
+  cc_hour_agg           26.25 thousand  215.58 KiB       1
+  merge pressure (system.part_log, this database):
+    NewPart              667    348.74 MiB    374 ms slowest
+    MutatePart           120    214.28 MiB    181 ms slowest
+    MutatePartStart      120        0.00 B      0 ms slowest
+    MergePartsStart      112        0.00 B      0 ms slowest
+    MergeParts           111    129.99 MiB    857 ms slowest
+
+  BATCH REBUILD on the spike day — the scale.txt ladder, spike-shaped.
+  [intervals]  717 ms  ·  peak mem 1.12 GiB  ·  read 2,639,211 rows  ·  wrote 40,323 rows
+  [users]  145 ms  ·  peak mem 137.56 MiB  ·  read 40,323 rows  ·  wrote 91,701 rows
+  [deltas]  88 ms  ·  peak mem 83.92 MiB  ·  read 80,646 rows  ·  wrote 33,679 rows
+  [houragg]  45 ms  ·  peak mem 41.75 MiB  ·  read 33,679 rows  ·  wrote 26,254 rows
+  GATE (batch path — rebuilt deltas vs interval expansion): PASS  3732 minutes compared, peak 12917
+  GATE (user tier vs interval expansion): PASS  3732 minutes compared, user peak 12844
+  settled serving probes: peak 4.9 ms · dashboard hour curve 4.0 ms  (idle baseline: 4.1 / 5.7 ms)
+--------------------------------------------------------------------------
+SPIKE 100000 — 100,000 sessions arriving in one minute, on the real day
+--------------------------------------------------------------------------
+  [base]  905,558 real events loaded from /Users/barun/Developers/personal/clickathon-project/data/ch-hackathon-raw-data.csv
+  [base]  building the four tiers on the normal day (the published state a spike hits)
+  [intervals]  255 ms  ·  peak mem 367.71 MiB  ·  read 905,558 rows  ·  wrote 30,323 rows
+  [users]  65 ms  ·  peak mem 113.27 MiB  ·  read 30,323 rows  ·  wrote 91,692 rows
+  [deltas]  84 ms  ·  peak mem 80.83 MiB  ·  read 60,646 rows  ·  wrote 28,073 rows
+  [houragg]  45 ms  ·  peak mem 42.80 MiB  ·  read 28,073 rows  ·  wrote 26,254 rows
+  [base]  baseline peak 2917  (repo number 2917 — must match or this is not the same model)
+  [base]  idle serving probes: peak query 3.2 ms · dashboard hour curve 4.9 ms
+  [gen]  17,308,567 spike events staged in 9554 ms  ·  100000 sessions · 100000 users · span 2026-07-26 10:40:00.000 .. 2026-07-26 11:15:59.997
+
+  STREAMING REPLAY — one spike minute per chunk, publisher looping beside it.
+  probes are ONE-SHOT reads taken mid-ingest: contention is the measurement.
+  minute         rows     ins ms   parts  merges    pending    lag s     Q1 ms     Q7 ms
+  10:40       209,989        796       8       2    100,000        -      11.3       8.0
+  10:41       451,625       1303       9       0    100,000        -      12.1       8.6
+  10:42       559,830       1336      10       0    100,000        9      16.6       6.5
+  10:43       453,248        612      11       0    100,000        8       5.4       4.8
+  10:44       560,809       2590      12       1    100,000        9       6.5       7.5
+  10:45       452,557       1605       8       0    100,000       10       6.2       6.5
+  10:46       559,843       2412       9       0    100,000       10      27.9       4.5
+  10:47       452,714       1023      10       0    100,000       10      13.2      14.5
+  10:48       561,944       1074      11       0    100,000        9      17.8       8.7
+  10:49       452,986        822      12       0    100,000        9       5.7       2.8
+  10:50       560,355        807      13       1    100,000       12       4.3       3.4
+  10:51       453,883        853       9       0    100,000       11      12.7       5.1
+  10:52       560,290        793      10       0    100,000       11       6.9       4.5
+  10:53       453,933        703      11       0    100,000        7       5.0       2.8
+  10:54       560,172       4410      12       0    100,000       13       6.7       9.0
+  10:55       452,200        873      13       0    100,000       15       8.8       7.0
+  10:56       562,715       2929      14       1    100,000       19      14.5       9.3
+  10:57       453,023        651      10       0    100,000       16       4.0       3.2
+  10:58       559,670       1732      11       0    100,000       21       7.3       6.3
+  10:59       452,000       1351      12       0    100,000       15       8.6      40.0
+  11:00       560,470       3858      13       1    100,000       22      35.7      13.7
+  11:01       452,830       1343      14       1    100,000       17       7.6       3.7
+  11:02       560,599       2280       9       0    100,000       22       8.6       3.8
+  11:03       454,478        576      10       0    100,000       15       2.9       2.6
+  11:04       562,358       5200      11       0    100,000       22      48.1      10.6
+  11:05       453,144        883      12       0    100,000       18       4.4       3.5
+  11:06       561,646       3809      13       1    100,000       23      18.9      92.1
+  11:07       454,048       3111       9       1    100,000       33       5.8       6.4
+  11:08       561,478       2290      10       0    100,000       27      35.8       9.4
+  11:09       452,773        752      11       0    100,000       32       6.9       5.4
+  11:10       561,826       2763      12       0    100,000       25      32.1      97.5
+  11:11       452,668       1827      13       0    100,000       33      13.7       4.2
+  11:12       561,797       1257      14       1    100,000       18       8.5      28.6
+  11:13       438,947       1841      10       0    100,000       23      56.5      14.3
+  11:14       353,692       2021      11       0    100,000       30       5.2       9.9
+  11:15        82,027        904      12       0    100,000       34       8.9       4.0
+  ingest wall 184.7 s for 17,308,567 events (93,715 ev/s inserted)
+  publisher DRAINED 8839 ms after the last insert — the serving layer has absorbed the spike
+
+  PUBLISH RUNS through the spike (cc_publish_runs — the finalizer's own log):
+  run    sessions    negate    derive     prune      emit     hours     users   total ms
+     1    100000      169      368       98      136      160      104      1035
+     2    100000      116      567      197      299      115      111      1405
+     3    100000      204      505      155      222      164      169      1419
+     4    100000      160     2157      196      290      113      188      3104
+     5    100000      166     1132      317      325       98      216      2254
+     6    100000      167     2242      338      326      137      235      3445
+     7    100000      234     2344      220      265       95      151      3309
+     8    100000      188     1688      170      202      100      203      2551
+     9    100000      163     1295      191      175      132      166      2122
+    10    100000      156     1366      332      166      104      254      2378
+    11    100000      247     1929      102      159       99      353      2889
+    12    100000      169     6099      343      247      203      548      7609
+    13    100000      368     6542      155      223      118      239      7645
+    14    100000      212     3606     1092      242      132      867      6151
+    15    100000      448     8546      417      202      147      826     10586
+    16    100000      162     4940     1013      173      103      437      6828
+    17    100000      278     9643      445      309      171      544     11390
+    18    100000      227     9328      221      688      311     1842     12617
+    19    100000      168     5606      804      224      147      605      7554
+    20    100000      199    11996      196      226      137      476     13230
+    21    100000      313    11022     1701      247      223     1684     15190
+    22    100000      162     5531      226      192      129      545      6785
+
+  worst run: 15190 ms  ·  biggest claim: 100,000 sessions  ·  22 runs total
+  VERDICT at the real 60s heartbeat cadence: STABLE — worst run 15.2 s < 60 s: the publisher outruns a live spike of this size
+  user-tier churn: 261,370 physical rows over 91,701 logical buckets — every re-publish of a touched minute appends superseding versions
+
+  GATE (incremental path — publisher-maintained deltas vs interval expansion): PASS  3732 minutes compared, peak 102917
+  peak on the spike day: 102917 @ 2026-07-26 10:56:00  (baseline was 2917; spike adds ~100,000)
+
+  DELTA ACCOUNTING — what a spike actually does to cc_minute_delta.
+  The naive fear: '+1 at open, -1 at close means a huge number of rows at
+  one minute key'. Measured: the ADR 0008 grain collapses N sessions into
+  the DIMS fan-out at that minute — the magnitude lands in sum(starts),
+  not in row count.
+  delta rows in the spike window (10:40..11:16): 212,310
+  minute                        opens       closes          net
+  2026-07-26 10:40:00         100280         162      100118
+  2026-07-26 10:41:00            300         167         133
+  2026-07-26 10:59:00            354         319          35
+  2026-07-26 11:00:00         102873           0      102873
+  2026-07-26 11:14:00            243         288         -45
+  2026-07-26 11:15:00            255         311         -56
+  2026-07-26 11:16:00            210       50336      -50126
+  intervals crossing 11:00: 102,463 — each is hour-clipped in two (ADR 0003):
+  the 10:59/11:00 rows above carry a close+reopen for every one of them.
+
+  STORAGE after the spike (active parts; no OPTIMIZE FINAL first):
+  table                            rows      on disk    parts
+  session_dirty           3.55 million  253.05 MiB       4
+  ev_raw                 18.21 million  199.92 MiB      12
+  cc_user_minute        261.37 thousan  186.97 MiB      10
+  session_intervals     230.32 thousan   28.50 MiB       2
+  cc_minute_delta       232.45 thousan  513.06 KiB      10
+  cc_hour_agg           70.01 thousand  498.38 KiB       3
+  merge pressure (system.part_log, this database):
+    NewPart              487      2.68 GiB   1878 ms slowest
+    MergeParts            77      1.99 GiB   9799 ms slowest
+    MergePartsStart       77        0.00 B      0 ms slowest
+    MutatePart            68    828.40 MiB    424 ms slowest
+    MutatePartStart       68        0.00 B      0 ms slowest
+
+  BATCH REBUILD on the spike day — the scale.txt ladder, spike-shaped.
+  [intervals]  5090 ms  ·  peak mem 1.80 GiB  ·  read 18,214,125 rows  ·  wrote 130,323 rows  ·  SPILLED 151.07 MiB of aggregation state to disk (1.98 MiB read back)
+  [users]  570 ms  ·  peak mem 480.90 MiB  ·  read 130,323 rows  ·  wrote 91,701 rows
+  [deltas]  209 ms  ·  peak mem 113.15 MiB  ·  read 260,646 rows  ·  wrote 50,716 rows
+  [houragg]  49 ms  ·  peak mem 42.11 MiB  ·  read 50,716 rows  ·  wrote 26,254 rows
+  GATE (batch path — rebuilt deltas vs interval expansion): PASS  3732 minutes compared, peak 102917
+  GATE (user tier vs interval expansion): PASS  3732 minutes compared, user peak 102844
+  settled serving probes: peak 3.7 ms · dashboard hour curve 2.7 ms  (idle baseline: 3.2 / 4.9 ms)
+--------------------------------------------------------------------------
+SUMMARY — INGESTION under the spike
+--------------------------------------------------------------------------
+N              events     wall s       ev/s   parts  merges  worst ins   idle Q1   worst Q1   worst Q7
+1000          172,960      101.2      1,708      12       0     717 ms    4.2 ms    15.8 ms    17.9 ms
+10000       1,733,653      103.0     16,830      14       1     452 ms    4.1 ms    14.7 ms    12.7 ms
+100000     17,308,567      184.7     93,715      14       2    5200 ms    3.2 ms    56.5 ms    97.5 ms
+--------------------------------------------------------------------------
+SUMMARY — the PUBLISHER through the spike (the part scale.txt said would hurt)
+--------------------------------------------------------------------------
+N          runs      max claim    worst run     drain ms    outcome
+1000         36          1,000      1244 ms         2424    drained
+10000        35         10,000      1293 ms         4339    drained
+100000       22        100,000     15190 ms         8839    drained
+
+  Read 'worst run' against the REAL 60s heartbeat cadence: during a live
+  spike every open session re-marks itself dirty every minute, so each
+  run's claim is the WHOLE spike audience and the publisher is stable
+  only while one run finishes inside one minute.
+--------------------------------------------------------------------------
+SUMMARY — the GATES on a spike day (correctness under skew is not implied
+by correctness under uniform load; here it is measured)
+--------------------------------------------------------------------------
+  N=1000
+    incremental path : PASS  3732 minutes compared, peak 3917
+    batch path       : PASS  3732 minutes compared, peak 3917
+    user tier        : PASS  3732 minutes compared, user peak 3844
+    peak             : 3917 @ 2026-07-26 10:56:00
+  N=10000
+    incremental path : PASS  3732 minutes compared, peak 12917
+    batch path       : PASS  3732 minutes compared, peak 12917
+    user tier        : PASS  3732 minutes compared, user peak 12844
+    peak             : 12917 @ 2026-07-26 10:56:00
+  N=100000
+    incremental path : PASS  3732 minutes compared, peak 102917
+    batch path       : PASS  3732 minutes compared, peak 102917
+    user tier        : PASS  3732 minutes compared, user peak 102844
+    peak             : 102917 @ 2026-07-26 10:56:00
+--------------------------------------------------------------------------
+BATCH REBUILD COST — per stage (compare shapes against evidence/scale.txt)
+--------------------------------------------------------------------------
+run                    stage                              ms    peak memory
+spike_1000_base        intervals                         502     347.28 MiB
+spike_1000_base        users                             267     113.82 MiB
+spike_1000_base        deltas                            132      80.84 MiB
+spike_1000_base        houragg                            91      41.98 MiB
+spike_1000_rebuild     intervals                         532     483.10 MiB
+spike_1000_rebuild     users                             145     114.94 MiB
+spike_1000_rebuild     deltas                            102      81.09 MiB
+spike_1000_rebuild     houragg                            55      43.74 MiB
+spike_10000_base       intervals                         222     347.04 MiB
+spike_10000_base       users                              74     113.48 MiB
+spike_10000_base       deltas                            147      80.84 MiB
+spike_10000_base       houragg                            89      41.99 MiB
+spike_10000_rebuild    intervals                         717       1.12 GiB
+spike_10000_rebuild    users                             145     137.56 MiB
+spike_10000_rebuild    deltas                             88      83.92 MiB
+spike_10000_rebuild    houragg                            45      41.75 MiB
+spike_100000_base      intervals                         255     367.71 MiB
+spike_100000_base      users                              65     113.27 MiB
+spike_100000_base      deltas                             84      80.83 MiB
+spike_100000_base      houragg                            45      42.80 MiB
+spike_100000_rebuild   intervals                        5090       1.80 GiB
+spike_100000_rebuild   users                             570     480.90 MiB
+spike_100000_rebuild   deltas                            209     113.15 MiB
+spike_100000_rebuild   houragg                            49      42.11 MiB
+--------------------------------------------------------------------------
+scratch databases dropped · sonyliv never written
+regenerate: tools/spike-test.sh 1000 10000 100000
