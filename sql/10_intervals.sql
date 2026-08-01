@@ -79,7 +79,11 @@ CREATE TABLE IF NOT EXISTS cc_minute_stateless
     platform     LowCardinality(String),
     country      LowCardinality(String),
     content_id   Int64,
-    active_state AggregateFunction(uniq, String)   -- uniq of video_session_id seen active
+    -- uniqEXACT, not uniq. `uniq` is a HyperLogLog-family estimator carrying ~1-2% error;
+    -- against an EXACT private ground truth that is a silent correctness bug on every number
+    -- that passes through here. Memory is proportional to distinct sessions per minute bucket,
+    -- which is affordable at this grain. See ADR 0005.
+    active_state AggregateFunction(uniqExact, String)
 )
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMMDD(minute)
@@ -88,13 +92,20 @@ SETTINGS min_bytes_for_wide_part = 0;
 
 -- Any heartbeat in a minute means that session was active in that minute.
 -- This is deliberately naive — it is the baseline the accurate model is measured against.
+--
+-- NOTE (ADR 0004/0005): this evolves into the HOT TIER. The change is to grant each heartbeat a
+-- LEASE [t, t + HEARTBEAT_GAP_S) and arrayJoin it across the minutes that lease covers, rather
+-- than crediting only the minute the beat landed in. That one change makes this model agree with
+-- the gap model on every interior minute (overlapping leases bridge a missed beat exactly as the
+-- gap threshold does), differing only at the tail. It stays stateless and idempotent, which is
+-- what lets it absorb open sessions and late arrivals with no compensation mechanism at all.
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_stateless TO cc_minute_stateless AS
 SELECT
     toStartOfMinute(event_timestamp) AS minute,
     platform,
     country,
     content_id,
-    uniqState(video_session_id)      AS active_state
+    uniqExactState(video_session_id) AS active_state
 FROM ev_raw
 WHERE event_type IN ('VideoHeartbeat', 'VideoPlay')
 GROUP BY minute, platform, country, content_id;
