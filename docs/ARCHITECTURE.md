@@ -1,13 +1,13 @@
 # ARCHITECTURE — the concurrency model
 
 > **Summary:** Raw events → active intervals (heartbeat-gap derived) → **hour-clipped** minute deltas per
-> dimension combination → concurrency as a running sum within each hour. Serving is **one exact tier**,
-> published **incrementally**: a change-log MV marks the sessions each INSERT touched, and a finalizer
-> re-derives only those, appending the difference ([ADR 0013](adr/0013-continuous-publication-by-incremental-finalizer.md)).
+> dimension combination → concurrency as a running sum within each hour. Serving is **one exact tier**.
+> Incremental publication ([ADR 0013](adr/0013-continuous-publication-by-incremental-finalizer.md)) maintains
+> `session_intervals` + `cc_minute_delta` **only** — the hour/day and user tiers still rebuild in batch.
 > The hot tier of [ADR 0004](adr/0004-two-tier-lambda-serving.md)/[0005](adr/0005-heartbeat-lease-semantics.md)
-> is **declined**, and `cc_minute_stateless` remains the session-independent half of the mandated
-> comparison. Peak is never stored — it is not summable across dimensions — but hour-clipping makes it
-> summable across time, so hour-grain maxes pre-aggregate. Nothing is ever updated or rebuilt.
+> is **declined**; `cc_minute_stateless` is the session-independent half of the mandated comparison.
+> Peak is never stored — not summable across dimensions; hour-clipping makes it summable across time. The
+> delta table is append-only; the finalizer's one mutation is a lightweight `DELETE` pruning superseded interval rows.
 
 ## Layers
 
@@ -25,7 +25,9 @@ dashboard shape than leading with the session id).
 
 **2 · `session_intervals`** — one row per contiguous *active* range. Derived by walking a session's
 events in time order and closing an interval when the heartbeat gap exceeds `HEARTBEAT_GAP_S`.
-`ReplacingMergeTree(interval_end)` so a re-derivation replaces rather than duplicates. `is_open` marks
+`ReplacingMergeTree(build_version)` — a monotonic version — so a re-derivation replaces rather than
+duplicates. *(Versioning on `interval_end` was proven wrong and fixed at `388a845`: a provisional
+interval's 60 s tail grace can overshoot the true end, so the stale row won forever.)* `is_open` marks
 sessions with no `VideoSessionEnd` yet. Produced by the **finalizer**, not by a materialized view —
 interval derivation is a cross-block, per-session, time-ordered computation and a streaming MV cannot
 express it ([ADR 0004](adr/0004-two-tier-lambda-serving.md)).
@@ -61,6 +63,16 @@ and appends `−deltas(old) + deltas(new)`. `v_cc_publish_lag` is the freshness 
 still reports event-time staleness. See [ADR 0013](adr/0013-continuous-publication-by-incremental-finalizer.md)
 and `evidence/publish.txt`.
 
+**Scope of the finalizer — read this before quoting "continuously updated".** It maintains
+`session_intervals` and `cc_minute_delta` only; `sql/12_publish.sql` and `tools/publish.sh` contain
+**zero** references to `cc_hour_agg` or `cc_user_minute`, so hour/day peaks and user concurrency still
+come from the batch rebuild (`tools/build-model.sh`) — see `docs/WORKTREE_QUEUE.md` Q2 (ADR 0015,
+pre-assigned). Each run also schedules one lightweight `DELETE` pruning interval rows superseded by
+`build_version`; the pipeline is append-only *except* for that prune. And on the graded `sonyliv`
+database the publisher is **installed but has never committed a run** (publish cursor at epoch,
+`last_committed_run = 0`, re-verified read-only 2026-08-01) — every live number there comes from
+batch rebuilds.
+
 ## The three arithmetic rules
 
 1. **Peak is not summable across dimensions.** platform+content and platform+country peak at different
@@ -91,9 +103,11 @@ had no way back; correction-by-diff *is* the way back, so nothing has to be held
 freshness *label*. The metric to instrument in ClickStack is now `v_cc_publish_lag` — **ingest-time**
 staleness and queue depth — alongside `v_cc_watermark`'s event-time view.
 
-The proof is `evidence/publish.txt` (`tools/publish-test.sh`): at every stage the incrementally
-published tables are byte-identical to a from-scratch rebuild, including the case where a straggler
-makes an `interval_start` vanish.
+The proof is `evidence/publish.txt` (`tools/publish-test.sh`): at every stage the two tables the
+finalizer maintains — `session_intervals` and `cc_minute_delta` — are byte-identical to a
+from-scratch rebuild, in a scratch database, including the case where a straggler makes an
+`interval_start` vanish. The test compares nothing else; "byte-identical" is proven for those two
+tables only.
 
 ## Trade-offs to defend
 
@@ -112,10 +126,20 @@ makes an `interval_start` vanish.
 
 ## The premise this all rests on
 
-**Unverified:** that heartbeats *stop* while the app is backgrounded. If they continue, gap detection is
-blind, and both ADR 0001 and the lease model need a state-machine layer over background/foreground and
-pause events. Measure it before writing model SQL — see [TODOS.md](../TODOS.md) `[H1]` gates and
-[docs/artifacts/](artifacts/) for the query.
+**Measured** (GATE ①, [ADR 0007](adr/0007-gate-answers-pause-needs-explicit-handling.md)): heartbeats
+drop 100× while the app is backgrounded — 4.72/min active vs 0.047/min backgrounded — so gap detection
+stands. What remains unverifiable from the data is which gap/tail/pause policy the **private ground
+truth** assumed (`GAP_S`, `TAIL_S`, the unclosed-pause rule, and the inclusive minute-boundary
+convention); each is a [doubts/](../doubts/) dossier or `docs/WORKTREE_QUEUE.md` Q3, and a wrong guess
+is silently wrong on every answer.
+
+One semantic limit to state plainly: only exact lowercase `pause`/`resume` sub-events and
+`VideoSessionEnd` (for `is_open`) carry explicit meaning in the derivation. `VideoSessionStart`,
+`VideoPlay`, `AppBackgrounded`, `AppForegrounded` and `VideoError` participate **only** as generic
+timestamps in the gap arithmetic — an observed `AppBackgrounded` does not itself close active state
+and can even earn tail grace. Deliberate (bg/fg are not guaranteed to pair), but it is a modeling
+policy, not a fact from the data dictionary — see
+[docs/codex-validation/002.md](codex-validation/002.md) §4.
 
 Full reasoning, with diagrams for every step above:
 [docs/artifacts/2026-08-01-concurrency-model-deep-dive.html](artifacts/2026-08-01-concurrency-model-deep-dive.html).

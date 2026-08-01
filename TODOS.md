@@ -16,13 +16,22 @@
       PASSED. It also never compares an IDLE minute (207 of 1,364 on the holdout) — proven by
       fabricating 500 viewers at an idle minute and watching the gate pass. Derive the minutes from
       the data, assert the row count, add a spine. See docs/SESSION-2026-08-01.md §4.
-- [x] **[H*]** **Continuously updated aggregates — DONE** (ADR 0013). `sql/12_publish.sql` +
-      `tools/publish.sh`: an MV marks which sessions each INSERT touched, a finalizer re-derives only
-      those and appends `-deltas(old) + deltas(new)`. Nothing truncated, nothing rebuilt. Proven in
-      `evidence/publish.txt` — byte-identical to a from-scratch rebuild at every stage, including a
-      straggler 46 min behind the watermark corrected in **3.4 s** reading 11.6% of `ev_raw`.
-      **NOT applied to `sonyliv`** — going live is a human's call, see ADR 0013's last section.
-      Two follow-ons it deliberately did not do:
+- [~] **[H*]** **Continuous publication — DONE for the interval + minute-delta tier ONLY** (ADR 0013).
+      `sql/12_publish.sql` + `tools/publish.sh`: an MV marks which sessions each INSERT touched, a
+      finalizer re-derives only those and appends `-deltas(old) + deltas(new)`. Nothing truncated; the
+      one mutation is a lightweight `DELETE` pruning superseded interval rows per run. Proven in
+      `evidence/publish.txt` — `session_intervals` and `cc_minute_delta` (the only tables it maintains)
+      byte-identical to a from-scratch rebuild at every stage, including a straggler 46 min behind the
+      watermark corrected in **3.4 s** reading 11.6% of `ev_raw`.
+      ⚠️ **The publisher has ZERO references to `cc_hour_agg` or `cc_user_minute`** — hour/day peaks and
+      user concurrency still require the batch rebuild, so "continuously updated aggregates" is NOT
+      done as a whole (docs/WORKTREE_QUEUE.md **Q2**, ADR 0015 pre-assigned). Installed on `sonyliv`
+      but has **never committed a run** there (publish cursor at epoch, verified read-only 2026-08-01);
+      every live number comes from batch rebuilds. Follow-ons it deliberately did not do:
+  - [ ] **[H*]** Make the publisher maintain `cc_user_minute` and `cc_hour_agg` (or state loudly at
+        serving time that those tiers are only as fresh as the last batch rebuild). `mv_user_minute`'s
+        set union can add a user to a minute but cannot retract one, which is why `build-model.sh`
+        truncates it — Q2's convergence tests are the acceptance bar.
   - [ ] **[H*]** Make `session_intervals` a view over an append-only per-run ledger, so the
         per-run lightweight `DELETE` (1.4 s, the dominant cost of a small batch) goes away. Touches
         tables other agents own.
@@ -31,9 +40,11 @@
         storage — the shelved "1.00x" was measured on a shape that full-scanned. Also
         `sql/60_projection.sql` hard-codes `sonyliv.` and cannot be applied elsewhere (same defect
         ADR 0010 fixed in `sql/80_content.sql`).
-- [ ] **[FIX]** Re-loading the same CSV DOUBLES the data — `non_replicated_deduplication_window`
-      is for non-replicated MergeTree and Cloud is SharedMergeTree.
-- [ ] **[FIX]** `CH_DATABASE` in the environment is silently ignored by every tool.
+- [x] **[FIX]** ~~Re-loading the same CSV DOUBLES the data~~ **FIXED** (`6355048`) — `tools/load.sh`
+      now REFUSES by default when the tables already hold rows (`MODE=refuse|replace|append`);
+      evidence in `evidence/load-guard.txt`.
+- [x] **[FIX]** ~~`CH_DATABASE` in the environment is silently ignored~~ **FIXED** (`6355048`) —
+      explicit precedence in `internal/config`, the environment wins over `.env`.
 
 - [x] **[H0]** Provision ClickHouse Cloud service; fill `.env`; verify against Cloud
       Cloud is live: db `sonyliv`, schema applied, `sonyliv verify -target cloud` green.
@@ -75,7 +86,8 @@
 ## Next
 
 - [x] **[H3]** `cc_minute_delta` hour-clipped (ADR 0003) + `v_concurrency_minute` — **done**.
-      `sql/40_deltas.sql`; **28,074** delta rows from **30,323** intervals. Reconcile PASSES on all
+      `sql/40_deltas.sql`; **28,073** delta rows from **30,323** intervals *(live count re-read
+      2026-08-01 after the tier-coherence rebuild; was 28,074 on the prior build)*. Reconcile PASSES on all
       **3,732** minutes against the interval expansion, peak **2,917** both ways *(re-run 2026-08-01)*.
       Serving reads 299 KB vs 2.55 MB for the expansion — 8.5x less I/O, 23 ms *(I/O and latency not
       re-measured at the new row count)*. Rebuild: `tools/build-model.sh`.
@@ -109,7 +121,8 @@
       straggler path are point lookups by session, which ADR 0002's key no longer serves. ADR 0002
       names this remedy explicitly. **Measure it; do NOT revert ADR 0002.**
 - [ ] **[H5]** Hot tier: `mv_lease` → `cc_minute_hot` (`uniqExact`) + the stitched serving view (ADR 0004/0005)
-- [x] **[H6]** DONE — `cc_hour_agg` 26,162 rows, 8-level cube, 98 hours reconciled 0 mismatches
+- [x] **[H6]** DONE — `cc_hour_agg` 8-level cube, 98 hours reconciled 0 mismatches *(26,254 rows on
+      the current live build, re-read 2026-08-01; was 26,162 when first shipped)*
 - [x] **[H7]** ClickStack up **and** observing us — `make stack-up && make clickstack` charts our
       concurrency views off Cloud (docs/CLICKSTACK.md); `sonyliv observe -target cloud` emits
       watermark lag, build-stage timing and the reconcile gate outcome over OTLP, verified by reading
@@ -119,21 +132,21 @@
       it more accurately than a client span could.
 - [ ] **[H8]** Straggler correction-by-diff path (ADR 0006) + the live late-arrival demo
 - [ ] **[H8]** Tail-sensitivity sweep (gap × tail grid) — the ground truth is private and unfittable
-- [~] **[DIMS]** Filter-dimension value normalisation — **decided and built, NOT wired**.
-      `sql/15_normalise.sql` (UDFs + `v_cc_minute_delta_norm`, `v_concurrency_minute_audio_norm`,
-      `v_dimension_drift`) and [ADR 0011](docs/adr/0011-normalise-filter-dimensions-at-query-time.md).
-      Measured at `ac04975`: peak Hindi **1,768 → 2,180 (+23.3%)**; total peak **2,887 unchanged**;
-      query cost **zero** (both filters read the same 28,101 rows / 137 KiB). *(That branch forked
-      from `8af15cb`, before the ADR 0009 tie fix. Re-measured 2026-08-01 on the current model: peak
-      Hindi **1,791 → 2,213, +23.6%**, total peak **2,917 unchanged** — same conclusion.)*
-      Normalising inside the derivation
-      was built and measured as **worse** — 202 intervals degraded onto a sentinel — so
-      `30_build_intervals.sql` needs no change. **Remaining, for the derivation owner:**
-      (a) add `apply sql/15_normalise.sql` to `tools/build-model.sh` between `10` and `20`;
-      (b) decide whether per-language benchmark queries read the raw column or the normalised view —
+- [~] **[DIMS]** Filter-dimension value normalisation — **built, wired AND deployed; the decision
+      that remains is a mentor's**. `sql/15_normalise.sql` (UDFs + `v_cc_minute_delta_norm`,
+      `v_concurrency_minute_audio_norm`, `v_dimension_drift`) and
+      [ADR 0011](docs/adr/0011-normalise-filter-dimensions-at-query-time.md). Applied as stage 5/5 of
+      `tools/build-model.sh`, and **live on `sonyliv`** since the 2026-08-01 tier-coherence rebuild
+      (all 5 UDFs + 4 views verified read-only). Current live pair: raw `hin` peak **1,774 →
+      normalised 2,196 (+23.8%)**; total peak **2,917 unchanged**. *(Older pairs — 1,768 → 2,180 at
+      `ac04975`, 1,791 → 2,213 quoted earlier on 2026-08-01 — were measured on pre-rebuild models;
+      the Codex 002 audit independently measured 1,774 → 2,196 on an isolated current rebuild, which
+      matches live.)* Normalising inside the derivation was built and measured as **worse** — 202
+      intervals degraded onto a sentinel — so `30_build_intervals.sql` needs no change. **Remaining:**
+      (a) decide whether per-language benchmark queries read the raw column or the normalised view —
       that is [doubts/04](doubts/04-dimension-normalisation.md) / Q18, and it is the only part that
       needs a mentor;
-      (c) run `v_dimension_drift` against the unseen day before trusting any filtered number from it
+      (b) run `v_dimension_drift` against the unseen day before trusting any filtered number from it
       (belongs in `docs/RUNBOOK_UNSEEN.md`).
 
 ## Then

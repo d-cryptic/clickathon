@@ -24,7 +24,7 @@ Both files are gitignored (223 MB). Get them with `tools/fetch_data.sh` — chec
 | `app_version`, `player_version` | LowCardinality(String) | filter dimensions |
 | `country` | LowCardinality(String) | filter dimension · **only 1 value in the provided file** |
 | `audio_language`, `subtitle_language` | LowCardinality(String) | filter dimensions |
-| `session_start_epoch` | DateTime64(3) | session start, repeated on every event of the session |
+| `session_start_epoch` | DateTime64(3) | session start, repeated on every event of the session. **Stored, never modeled** — the derivation takes run starts from the min/gap-split event timestamps instead. On this file that is provably harmless (every session's value matches its `VideoSessionStart` timestamp exactly, 0 mismatches, max diff 0 ms); it is *not* a validated invariant for an unseen file ([codex-validation/002.md](codex-validation/002.md) §3.3) |
 
 ### `event_type` enum, with measured counts
 
@@ -37,6 +37,19 @@ Both files are gitignored (223 MB). Get them with `tools/fetch_data.sh` — chec
 | `VideoSessionEnd` | 10,881 | 1.20% | session closed |
 | `VideoSessionStart` | 10,880 | 1.20% | session opened |
 | `VideoError` | 293 | 0.03% | playback error |
+
+**How the model actually treats these** — only two things carry explicit semantics in the accurate
+derivation (`sql/30_build_intervals.sql`): exact lowercase `pause`/`resume` sub-events, and
+`VideoSessionEnd` (solely to set `is_open`). `VideoSessionStart`, `VideoPlay`, `AppBackgrounded`,
+`AppForegrounded` and `VideoError` participate **only as generic timestamps** in the gap arithmetic —
+there is no branch on any of them. That means an observed `AppBackgrounded` does not itself close
+active state (it can even renew a run and earn tail grace), and an unknown new `event_type` on the
+unseen day silently becomes a generic activity timestamp rather than failing for review. Deliberate
+(bg/fg are not guaranteed to pair — trap 1), but it is a modeling *policy*; whether the private truth
+expects immediate inactivity at a background event is an open mentor question
+([codex-validation/002.md](codex-validation/002.md) §4). Of `VideoHeartbeat`'s 41 sub-event names,
+only `pause` (27,340 rows) and `resume` (31,780) are matched; look-alikes such as `speed-pause`,
+`AdPause` and `download_resumed` are intentionally not.
 
 ## Content dimension — `content_dim`
 
@@ -123,6 +136,17 @@ still emit 0.756/min — one event every ~79 s, comfortably inside any sane gap 
 model therefore counts paused time as watching, which the statement forbids. The shipped model is a
 **hybrid**: gaps for backgrounding, explicit `pause`/`resume` subtraction for pausing
 ([ADR 0007](adr/0007-gate-answers-pause-needs-explicit-handling.md), `sql/30_build_intervals.sql`).
+
+**8 · Identifiers and dimensions are not stable inside a session — the model votes.** In this file
+120 sessions change `user_id` mid-session, 95 change `platform`, 1 changes `content_id`. The model
+does **not** split an interval at the change point: each interval carries the single **dominant**
+value per dimension (most frequent, deterministic value tie-break — ADR 0009). Totals stay additive
+and rebuilds deterministic, but a filtered cell can disagree with true multi-bucket occupancy, and
+whole-interval attribution to one user/platform is a policy, not a data-dictionary fact
+([codex-validation/002.md](codex-validation/002.md) §3.2, §8.3). Related: 4,210 byte-duplicate rows
+plus exactly **one** duplicate group that conflicts on `subtitle_language` — dedup is proven inert
+for totals/peak but **not at filter grain** (6 attributions and three audio curves move;
+`WORKTREE_QUEUE.md` Q5).
 
 ## Traffic is extremely concentrated — this is a live-event dataset
 
