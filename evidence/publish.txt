@@ -544,3 +544,163 @@ PHASE 12 — CRASH MATRIX (Q8, ADR 0019). Kill the publisher at EVERY phase
        pruned    superseded intervals   1760 ms
        emitted   2 delta rows   1277 ms
     publish.sh: INJECTED CRASH at hours_stmt
+  crash@hours_stmt   recovered: end -> 2026-07-26 12:18:10.000 (+30s), in-flight 0, pending 0
+    == run 1785621422185  ·  1 session(s) claimed  ·  cursor 2026-08-01 21:55:08.312 -> 2026-08-01 21:56:39.156
+       negated   2 corrective delta rows   636 ms
+       derived   1 intervals   1616 ms   (window 2026-07-26 12:10:10.000 .. 2026-07-26 12:18:10.000)
+       pruned    superseded intervals   1670 ms
+       emitted   2 delta rows   736 ms
+    publish.sh: INJECTED CRASH at hours
+  crash@hours        recovered: end -> 2026-07-26 12:18:40.000 (+30s), in-flight 0, pending 0
+    == run 1785621514494  ·  1 session(s) claimed  ·  cursor 2026-08-01 21:56:39.156 -> 2026-08-01 21:58:17.786
+       negated   2 corrective delta rows   741 ms
+       derived   1 intervals   1294 ms   (window 2026-07-26 12:10:10.000 .. 2026-07-26 12:18:40.000)
+       pruned    superseded intervals   1488 ms
+       emitted   2 delta rows   1309 ms
+       hours     8 hour-cube rows re-derived   1236 ms
+    publish.sh: INJECTED CRASH at users_stmt
+  crash@users_stmt   recovered: end -> 2026-07-26 12:19:10.000 (+30s), in-flight 0, pending 0
+    == run 1785621595537  ·  1 session(s) claimed  ·  cursor 2026-08-01 21:58:17.786 -> 2026-08-01 21:59:39.639
+       negated   2 corrective delta rows   562 ms
+       derived   1 intervals   622 ms   (window 2026-07-26 12:10:10.000 .. 2026-07-26 12:19:10.000)
+       pruned    superseded intervals   1440 ms
+       emitted   2 delta rows   590 ms
+       hours     8 hour-cube rows re-derived   1169 ms
+    publish.sh: INJECTED CRASH at users
+  crash@users        recovered: end -> 2026-07-26 12:19:40.000 (+30s), in-flight 0, pending 0
+
+  convergence after all sixteen crash/recover cycles:
+
+  CONVERGENCE — incremental (sonyliv_pub) vs from-scratch rebuild (sonyliv_pub_ctl)
+    ┌─ord─┬─check─────────────────────────────────────────────────────────────┬─value─┐
+ 1. │   1 │ delta cells differing                                             │ 0     │
+ 2. │   2 │ interval rows differing                                           │ 0     │
+ 3. │   3 │ served minutes differing (running sum over union of minutes)      │ 0     │
+ 4. │   4 │ served minutes compared                                           │ 1589  │
+ 5. │   5 │ peak — incremental                                                │ 2917  │
+ 6. │   6 │ peak — rebuild                                                    │ 2917  │
+ 7. │   7 │ cc_minute_delta rows — incremental (incl. cancelling corrections) │ 29796 │
+ 8. │   8 │ cc_minute_delta rows — rebuild                                    │ 28076 │
+ 9. │   9 │ user cells differing (minute x dims)                              │ 0     │
+10. │  10 │ user minutes differing (total)                                    │ 0     │
+11. │  11 │ user peak — incremental                                           │ 2844  │
+12. │  12 │ user peak — rebuild                                               │ 2844  │
+13. │  13 │ hour-cube rows differing (peak, peak_minute or integral)          │ 0     │
+14. │  14 │ day rows differing (peak, peak_minute or integral)                │ 0     │
+15. │  15 │ hour-tier peak — incremental                                      │ 2917  │
+16. │  16 │ hour-tier peak — rebuild                                          │ 2917  │
+    └─────┴───────────────────────────────────────────────────────────────────┴───────┘
+
+--------------------------------------------------------------------------
+PHASE 13 — TWO PUBLISHERS AT ONCE (Q9, ADR 0019). The lease admits one.
+
+  Without the lease this exact scenario was reproduced corrupting the tier:
+  two publishers both claimed the same marking under different run_ids, both
+  negated the SAME published contribution X and both emitted X-prime, so the
+  served number landed at 2X'-X — one viewer became two. Both runs were
+  green; nothing detected it; only a full rebuild could repair it.
+
+  probe session adr19-lease-probe ends 2026-07-26 12:31:40.000; probe minute 2026-07-26 12:32:00 serves 3176 before
+    A: == lost the acquisition lottery to 7bdfa4e6-d359-428f-9e79-05197e13dfac — declining.
+    B: == run 1785621764371  ·  1 session(s) claimed  ·  cursor 2026-08-01 22:01:18.087 -> 2026-08-01 22:02:25.525
+    B:    negated   2 corrective delta rows   587 ms
+    B:    derived   1 intervals   559 ms   (window 2026-07-26 12:30:10.000 .. 2026-07-26 12:31:40.000)
+    B:    pruned    superseded intervals   1495 ms
+    B:    emitted   2 delta rows   664 ms
+    B:    hours     8 hour-cube rows re-derived   466 ms
+    B:    users     3 user-minute buckets re-derived   475 ms
+    B:    committed cursor now 2026-08-01 22:02:25.525
+
+  commits: 1 (must be 1)   declines: 1 (must be 1)
+  probe minute 2026-07-26 12:32:00: 3176 -> 3177 (single-publisher answer 3177; the
+  pre-lease double application produced 3178)
+
+  CONVERGENCE — incremental (sonyliv_pub) vs from-scratch rebuild (sonyliv_pub_ctl)
+    ┌─ord─┬─check─────────────────────────────────────────────────────────────┬─value─┐
+ 1. │   1 │ delta cells differing                                             │ 0     │
+ 2. │   2 │ interval rows differing                                           │ 0     │
+ 3. │   3 │ served minutes differing (running sum over union of minutes)      │ 0     │
+ 4. │   4 │ served minutes compared                                           │ 1592  │
+ 5. │   5 │ peak — incremental                                                │ 2917  │
+ 6. │   6 │ peak — rebuild                                                    │ 2917  │
+ 7. │   7 │ cc_minute_delta rows — incremental (incl. cancelling corrections) │ 29802 │
+ 8. │   8 │ cc_minute_delta rows — rebuild                                    │ 28078 │
+ 9. │   9 │ user cells differing (minute x dims)                              │ 0     │
+10. │  10 │ user minutes differing (total)                                    │ 0     │
+11. │  11 │ user peak — incremental                                           │ 2844  │
+12. │  12 │ user peak — rebuild                                               │ 2844  │
+13. │  13 │ hour-cube rows differing (peak, peak_minute or integral)          │ 0     │
+14. │  14 │ day rows differing (peak, peak_minute or integral)                │ 0     │
+15. │  15 │ hour-tier peak — incremental                                      │ 2917  │
+16. │  16 │ hour-tier peak — rebuild                                          │ 2917  │
+    └─────┴───────────────────────────────────────────────────────────────────┴───────┘
+
+--------------------------------------------------------------------------
+PHASE 14 — SAME-MILLISECOND IDENTITY (Q10, ADR 0019).
+
+  Two inserts can share a marked_at — now64(3) is per-query, and two loads
+  can land in the same millisecond. cc_publish_consumed used to key on the
+  timestamp ALONE: if the slower insert's rows became visible after the
+  faster was consumed, its marking matched the consumed set and was skipped
+  for ever, with pending_sessions reading 0 (reproduced). The key is now
+  the (marked_at, insert_id) pair — initialQueryID() of the firing INSERT,
+  captured by mv_session_dirty.
+
+  probe session adr19-samems-probe published (end 2026-07-26 12:41:40.000); both markings stamped marked_at = 2026-08-01 22:04:24.690
+  fast marking consumed: 1 run(s) digested it
+    == run 1785621944853  ·  1 session(s) claimed  ·  cursor 2026-08-01 22:04:24.690 -> 2026-08-01 22:04:24.690
+       negated   2 corrective delta rows   689 ms
+       derived   1 intervals   547 ms   (window 2026-07-26 12:40:10.000 .. 2026-07-26 12:41:40.000)
+       pruned    superseded intervals   1417 ms
+       emitted   2 delta rows   1276 ms
+       hours     8 hour-cube rows re-derived   496 ms
+       users     3 user-minute buckets re-derived   539 ms
+       committed cursor now 2026-08-01 22:04:24.690
+
+  slow marking claimed: 1 (timestamp-only identity claimed 0)
+  session end: 2026-07-26 12:41:40.000 -> 2026-07-26 12:42:10.000 (wanted 2026-07-26 12:42:10.000)
+
+  CONVERGENCE — incremental (sonyliv_pub) vs from-scratch rebuild (sonyliv_pub_ctl)
+    ┌─ord─┬─check─────────────────────────────────────────────────────────────┬─value─┐
+ 1. │   1 │ delta cells differing                                             │ 0     │
+ 2. │   2 │ interval rows differing                                           │ 0     │
+ 3. │   3 │ served minutes differing (running sum over union of minutes)      │ 0     │
+ 4. │   4 │ served minutes compared                                           │ 1595  │
+ 5. │   5 │ peak — incremental                                                │ 2917  │
+ 6. │   6 │ peak — rebuild                                                    │ 2917  │
+ 7. │   7 │ cc_minute_delta rows — incremental (incl. cancelling corrections) │ 29807 │
+ 8. │   8 │ cc_minute_delta rows — rebuild                                    │ 28080 │
+ 9. │   9 │ user cells differing (minute x dims)                              │ 0     │
+10. │  10 │ user minutes differing (total)                                    │ 0     │
+11. │  11 │ user peak — incremental                                           │ 2844  │
+12. │  12 │ user peak — rebuild                                               │ 2844  │
+13. │  13 │ hour-cube rows differing (peak, peak_minute or integral)          │ 0     │
+14. │  14 │ day rows differing (peak, peak_minute or integral)                │ 0     │
+15. │  15 │ hour-tier peak — incremental                                      │ 2917  │
+16. │  16 │ hour-tier peak — rebuild                                          │ 2917  │
+    └─────┴───────────────────────────────────────────────────────────────────┴───────┘
+
+--------------------------------------------------------------------------
+PHASE 15 — RETENTION HEADROOM (Q11, ADR 0019). The TTL is a deadline.
+
+  session_dirty, cc_publish_batch and cc_publish_consumed carry 7-day TTLs.
+  A marking that outlives them expires SILENTLY and the tiers are wrong with
+  no signal — and a marking older than the claim lookback (PUBLISH_LOOKBACK_S,
+  default 900 s behind the cursor) is already unreachable long before the TTL
+  eats it. v_cc_publish_lag now carries the signal: retention_headroom_s is
+  seconds until the oldest undigested marking hits the TTL, and
+  retention_alert trips a full day before the cliff. This phase plants a
+  6.5-day-old marking and reads the alarm.
+
+  healthy: headroom NULL, alert 0
+  planted:  age 561601s, headroom 43198s, alert 1 (1 = a rebuild is due before the queue lies)
+    == nothing to publish (no unconsumed settled markings)
+  a publish run against it claimed: 0 (0 — beyond the lookback the
+  ALERT is the path to repair, not the claim; the repair is a forced
+  republication or a rebuild, both idempotent)
+  cleared:  alert 0
+
+--------------------------------------------------------------------------
+Every 'differing' row above is 0 or this run failed. cc_minute_delta was never
+truncated after PHASE 2 and session_intervals was never rebuilt: every number
+moved by appending a correction and re-deriving the sessions that changed.
