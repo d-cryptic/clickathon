@@ -2,11 +2,11 @@
 
 > **Summary:** Version 0 is the **submittable floor**: a correct, fast, defensible foreground-only
 > concurrency system that survives the unseen day, with every known-wrong thing either fixed or stated
-> out loud. Re-evaluated against commits through `50ab153`. **Both proven defects are now fixed**, and
-> content, user and window tiers all shipped — v0 is close. What is left is **not modeling work**: it
-> is one stale evidence file, one incomplete build path, and the unseen-day rehearsal.
+> out loud. Re-evaluated 2026-08-01 against the Codex audits ([docs/codex-validation/](docs/codex-validation/)).
+> **Both proven defects are fixed, §B2's evidence file is regenerated (CONVERGES), and §D1's build gap
+> is closed** — `build-model.sh` now runs all five stages. What is left: the `/bench` evidence bundle,
+> the unseen-day rehearsal from a clean checkout, and the scoped-out items in the deferred table.
 > Scoring view is [checklist.md](checklist.md); status is [WALKTHROUGH.md](WALKTHROUGH.md).
-> **V0 is done when §A–§F are green and `make reconcile` exits 0.**
 
 **The v0 bet:** we cannot out-build a missing correctness gate. A submission that is *correct, fast,
 evidenced and honest about its gaps* outscores one that is feature-complete and silently wrong on the
@@ -14,10 +14,10 @@ unseen day. So v0 buys correctness and evidence first, features last.
 
 **What changed since the last pass** — `388a845` fixed both schema defects and applied them to the
 graded database; `34c3f05` landed content enrichment via `COMPLEX_KEY_HASHED` dictionary + title /
-category / video_type concurrency; `4a89399` landed nine window views and **proved dedup unnecessary**
-rather than bolting it on; `0bc2fda` refreshed WALKTHROUGH. Five of my previous open items closed.
-**Two new risks surfaced in their place — §B2 and §D1. Both are single-command fixes and both are
-silent-wrong on the unseen day if missed.**
+category / video_type concurrency; `4a89399` landed nine window views and proved dedup unnecessary
+**at total/peak grain** (a 2026-08-01 re-measure found it is *not* inert at filter grain — Q5);
+`0bc2fda` refreshed WALKTHROUGH. The two risks from the previous pass — §B2 (stale truncation
+evidence) and §D1 (incomplete build path) — **are both closed and marked so below.**
 
 ---
 
@@ -28,14 +28,21 @@ silent-wrong on the unseen day if missed.**
 - [x] `make reconcile` recomputes truth from `ev_raw` alone; exits non-zero on mismatch.
 - [x] The gate is negative-tested — it demonstrably *can* fail.
 - [x] Session-aware (`cc_minute_delta`) and session-independent (`cc_minute_stateless`) both built.
-- [x] **Dedup — resolved, and better than the fix I asked for.** `4a89399` ran the full derivation
-      twice, raw vs `LIMIT 1 BY` the event key, `any()` pinned to `min()` so dedup was the only
-      variable: identical 30,769 intervals, **0 of 3,725 minutes differ**; re-run restricted to only
-      the 863 duplicate-bearing sessions so it could not wash out — 834 minutes, 0 differing.
-      "We proved the step unnecessary" is a stronger defence than "we added the step."
-      Evidence: [`evidence/dedup.txt`](evidence/dedup.txt).
-- [x] **Non-summability measured, not asserted** — summing per-platform peaks over the 10:00 hour
-      gives 2,945 vs a true 2,887 (+2.0%); per-content peaks give 4,433 vs 2,887 (**+53.6%**). This
+- [~] **Dedup — resolved at total/peak grain; re-opened at filter grain.** `4a89399` ran the full
+      derivation twice, raw vs `LIMIT 1 BY` the event key: identical 30,769 intervals, **0 of 3,725
+      minutes differ** — totals and the headline peak are proven dedup-independent
+      ([`evidence/dedup.txt`](evidence/dedup.txt), counts as measured at `4a89399`).
+      **That conclusion does not extend to filtered answers on the current 7-dimension model:** a
+      2026-08-01 re-measure found 6 interval dimension attributions change and the `hin`/`non`/`unk`
+      audio curves move on 18/15/26 minutes (UNK audio peak 183 → 184) — exactly the
+      `subtitle_language`-conflict coupling this file predicted below. Policy decision pending:
+      `docs/WORKTREE_QUEUE.md` Q5 — measured in `evidence/dedup.txt` and `doubts/06`.
+- [x] **Non-summability measured, not asserted** — **re-measured 2026-08-01** on the post-ADR-0009
+      model: summing per-platform peaks gives **2,988** vs a true **2,917** (+2.4%); per-content peaks
+      give **5,680** vs 2,917 (**+94.7%**). *(Was 2,945 / 4,433 against a true 2,887 before the tie
+      fix. Per-content moved far more than the headline because it sums 3,357 independent maxima,
+      2,827 of them peaking at exactly 1 — restoring active time to a long tail bumps many by +1 at
+      once; mean per-content peak went 1.32 → 1.69.)* This
       was my biggest silent-wrong worry and it is now a defended number.
 - [ ] **Unclosed-pause rule decided and recorded** in ADR 0007. Conservative is the shipped default
       and the safer bet against an exact ground truth; v0 needs the *decision written down*, not
@@ -46,25 +53,27 @@ silent-wrong on the unseen day if missed.**
 ### B1. Both defects are fixed ✅
 
 - [x] `session_intervals` → `ReplacingMergeTree(build_version)`. Applied to the graded database,
-      gate re-run green, delta layer vs interval expansion 0 mismatches over 3,725 minutes.
+      gate re-run green, delta layer vs interval expansion 0 mismatches over **3,732** minutes
+      (re-run 2026-08-01; it was 3,725 before ADR 0009).
 - [x] `cc_minute_delta.starts`/`ends` → `Int64`. Counters verified sane post-rebuild
       (20,035 starts / 16,895 ends, max single-row 231 — no wrap).
-- [x] `cc_user_minute` survived the source-table recreate — `uniqExactMerge` 9,517 = 9,517 distinct
-      users. `uniqExact` state is idempotent under re-insertion, so the MV re-firing cannot double count.
+- [x] `cc_user_minute` survived the source-table recreate — `uniqExactMerge` **9,531** = 9,531 distinct
+      users (re-measured 2026-08-01; 9,517 before ADR 0009). `uniqExact` state is idempotent under
+      re-insertion, so the MV re-firing cannot double count. ⚠️ Idempotent on the *user set* only —
+      ADR 0009 records that `cc_user_minute` is never truncated by `tools/build-model.sh`, so stale
+      intervals accumulate and the user **peak** drifts up across rebuilds (2,953 after five, against
+      a true 2,844). The equality above is exactly the check that cannot see it.
 
-### B2. …but the evidence file still says they aren't 🔴
+### B2. …and the evidence file now agrees ✅
 
-- [ ] **Re-run `tools/truncation-test.sh` and commit the result.**
-      [`evidence/truncation.txt`](evidence/truncation.txt) was last written by `5db36ed`
-      — *"finds a real convergence bug (not yet fixed)"* — and `388a845` did not regenerate it. Its
-      RESULT table still reads `2924 | 2887 | 37` and its **VERDICT still reads "Incremental
-      absorption as the schema stands today does NOT converge."**
-      WALKTHROUGH now claims absorption converges; that claim currently rests on the *simulation arm*
-      inside the old run, not on a post-fix execution.
-      **WALKTHROUGH §6 states the tiebreak itself: "If a number in this document disagrees with
-      `evidence/`, `evidence/` is right."** By our own rule, the committed evidence says the model is
-      broken. A judge who opens `evidence/` — which we invite them to do — reads a failing verdict on
-      the criterion we are weakest on. This is the cheapest high-stakes fix on the board.
+- [x] **`tools/truncation-test.sh` re-run 2026-08-01 on the current model and committed.**
+      [`evidence/truncation.txt`](evidence/truncation.txt) now shows the shipped `build_version`
+      variant **CONVERGES — versioned incremental == production truth on all 1,579 minutes, peak
+      2,917**. The file deliberately keeps a `ReplacingMergeTree(interval_end)` variant that still
+      diverges (+36 at the peak) — that is the test proving it can still *detect* the historical
+      defect, not a report that we have it. One residual: the generated VERDICT prose still quotes
+      pre-ADR-0009 figures (2,887 / 1,578) in its narrative items while the tables above it carry the
+      current run — cosmetic, lives in `tools/` (not this file's owner), worth a one-line fix there.
 
 ## C. Serving + performance evidence
 
@@ -81,23 +90,15 @@ silent-wrong on the unseen day if missed.**
 
 Weighted heavily, and it fails on plumbing rather than modeling — which is exactly what D1 is.
 
-### D1. `make model` does not rebuild the whole model 🔴
+### D1. `make model` now rebuilds the whole model ✅
 
-`tools/build-model.sh` runs three steps: `30_build_intervals` → `40_deltas` → `20_views`. Nothing in
-`Makefile` or `tools/` references `50_hour_agg.sql`, `80_content.sql` or `85_windows.sql` by name —
-I grepped. That is fine for 80 and 85 (dictionary + views, self-current) and fine for `45` (MV on
-`session_intervals`, idempotent `uniqExact`). **It is not fine for `50_hour_agg.sql`**, which is a
-plain `INSERT INTO cc_hour_agg` with no MV feeding it.
+Closed. `tools/build-model.sh` runs five stages — `30_build_intervals` → `40_deltas` →
+`50_hour_agg` → `20_views` → `15_normalise` — and guards that `mv_user_minute` exists before
+starting (re-verified by reading the script 2026-08-01). The unseen-day failure mode this section
+described — a green gate over a stale `cc_hour_agg` — is gone.
 
-So on the unseen day: `make model` rebuilds intervals and deltas, `make reconcile` passes — **because
-the gate checks the minute tier** — and `cc_hour_agg` still holds the *old* day's hours. Hour- and
-day-grain peak/average are graded benchmark shapes, and they would be answered from a stale tier
-behind a green gate. `ReplacingMergeTree(computed_at)` means re-running is safe and non-doubling; the
-only defect is that nothing runs it.
-
-- [ ] Add `50_hour_agg.sql` to `tools/build-model.sh` (and confirm 45/80/85 need no rebuild step, or
-      add them for symmetry). One line; removes an entire class of silent-wrong.
-- [ ] Then: **one command builds everything**, and `make model && make reconcile` is the whole story.
+- [x] `50_hour_agg.sql` is in `tools/build-model.sh` (stage 3 of 5).
+- [x] **One command builds everything**: `make model && make reconcile` is the whole story.
 
 ### D2. The rehearsal
 
@@ -116,21 +117,23 @@ only defect is that nothing runs it.
 - [x] Watermark view exists and its two sign traps were caught in build rather than shipped — the
       sealed tier legitimately **leads** raw by ~2 min (TAIL_S grace), so negative `sealed_lag_s`
       is healthy; and `max(hour)+1h` is not a watermark.
-- [ ] **Make it non-superficial** — nothing of ours emits OTLP; ClickStack is still read-only
-      charting, which is the "superficial inclusion won't count" bar. One freshness panel fed by our
-      own watermark telemetry converts "we installed it" into "we observed our pipeline with it."
-      The view already computes the number — only the emit path is missing.
+- [x] **Non-superficial** — `sonyliv observe -target cloud` emits our watermark lag, build-stage
+      timing and the reconcile-gate outcome over OTLP, verified by reading the rows back out of
+      `otel_metrics_gauge`/`otel_logs`/`otel_traces` (docs/OBSERVABILITY.md); six hosted dashboards
+      chart the serving layer. ⚠️ Residual: two persisted user-tier sources select `concurrent`
+      against views exposing `concurrent_users`, so the signed-in user chart path is unvalidated —
+      `docs/WORKTREE_QUEUE.md` Q13.
 
 ## F. Submission hygiene
 
 - [x] LICENSE present. No credentials in git.
 - [x] WALKTHROUGH refreshed after the fix and the three new tiers.
-- [ ] **WALKTHROUGH §2's SQL table is stale** — it lists nine files and omits `45_user_concurrency`,
-      `80_content` and `85_windows`, the three newest tiers. §3's diagram *does* show them, so the
-      file contradicts itself. Small, but §2 is the map a judge follows.
+- [x] **WALKTHROUGH §2's SQL table fixed 2026-08-01** — now lists all fourteen files including
+      `12_publish`, `15_normalise`, `45_user_concurrency`, `80_content` and `85_windows`, with the
+      dimension-grain of each tier stated in its Notes cell.
 - [ ] `evidence/` fully regenerated — see **B2**, which is the one file that is not.
-- [ ] Deck: 15 slides mapped to C1–C5, including the **business framing** (34.5% of apparent watch
-      time is backgrounded or paused; 3,708 naive vs 2,887 actual at the peak).
+- [ ] Deck: 15 slides mapped to C1–C5, including the **business framing** (33.6% of apparent watch
+      time is backgrounded or paused; 3,708 naive vs 2,917 actual at the peak).
 - [ ] Demo rehearsed twice.
 - [ ] **Team Captain confirmed and awake before the freeze.**
 
@@ -142,22 +145,25 @@ Four rows left this table since the last pass. What remains:
 
 | Deferred | Why it can wait | Why it still matters |
 |---|---|---|
-| **True continuous publishing** | We batch-rebuild in ~11 s; `mv_stateless` and `mv_user_minute` are real MVs | **The biggest architectural gap** — blueprint step 4, and it is what C3 grades. Now the *only* unmet README requirement |
-| **Filter dimensions: 3 of 10** | The three shipped cover the benchmark shapes | Spec says the design "should work even if dimensions increase" — and see the coupling below |
+| **Continuous publishing of the hour/user tiers** | ADR 0013's finalizer keeps `session_intervals`+`cc_minute_delta` current and is proven byte-identical for those two tables; hour/user rebuild in ~11 s batch | **Closed by ADR 0016**: the `hours`/`users` phases re-derive the touched hour-cube rows and user-minute buckets, and all four tiers converge to a from-scratch rebuild. ⚠️ On `sonyliv` the publisher has still never committed a run (cursor at epoch), so every live number comes from a batch rebuild |
+| **Uniform dimension support across grains** | All 7 raw dims are carried in the interval/delta tier (ADR 0008) and answer minute-grain filters; content dims join at query time | Hour/day, user, window and stateless paths expose only platform/country/content_id — a benchmark asking e.g. *user concurrency by audio language* needs custom SQL, not a shipped shape ([codex-validation/002.md](docs/codex-validation/002.md) §8) — and see the coupling below |
 | Session-aware vs session-independent **numeric** comparison | Both tables exist and both are verified | The comparison *is* the deliverable, not the two tables. Cheap now: one query, one paragraph |
 | 100× scale story | No code — a growth law per tier | Judges *will* ask; an honest whiteboard answer suffices |
 | Stress matrix (bursty, long-running, concurrent-query) | Costs time, not correctness | Cheap credibility if any of it gets run |
 
-**A coupling worth stating in the defence:** dedup is inert *only while `subtitle_language` is not a
-dimension*. Exactly one duplicate group is not a byte-identical replay — it differs on that column,
-and `dataset_details` names it as a filter dimension. So "dedup unnecessary" and "3 of 10 dimensions"
-are the same decision seen twice: widening dimensions makes the duplicate order-dependent and turns
-dedup back on. Say it before a judge finds it. (Same shape as ADR 0007's `GAP_S=150`: its p99 of 49 s
-was computed on duplicate-bearing data, so 150 stays conservative — but must be recomputed on
+**A coupling worth stating in the defence — now confirmed by measurement:** dedup was inert *only
+while `subtitle_language` was not a dimension*. Exactly one duplicate group differs on that column,
+ADR 0008 then widened the model to all 7 raw dimensions, and the predicted effect materialised: the
+2026-08-01 filter-grain re-measure shows 6 attribution changes and moving audio-language curves (Q5)
+while totals stay fixed. "Dedup unnecessary" was a total-grain conclusion, and widening dimensions is
+what re-opened it. Say it before a judge finds it. (Same shape as ADR 0007's `GAP_S=150`: its p99 of
+49 s was computed on duplicate-bearing data, so 150 stays conservative — but must be recomputed on
 deduplicated input if ever retuned.)
 
 ## Not in v0, deliberately
 
-Langfuse and LibreChat layers, the `ev_raw` projection (**measured: 1.00× on the real straggler path
-for +94% storage** — rejected on evidence, a better story than shipping it), any polished frontend,
-auth, or deployment. All out of scope per the spec.
+Langfuse and LibreChat layers, the `ev_raw` projection (**re-measured 2026-08-01 on the finalizer's
+real query shape: 12.8× for +91% storage** — the earlier "1.00×" was on a shape that full-scanned;
+still not shipped because the finalizer meets its target without it, operator call — see ADR 0013 and
+`evidence/publish.txt` PHASE 8), any polished frontend, auth, or deployment. All out of scope per the
+spec.

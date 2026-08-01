@@ -40,6 +40,10 @@
 --     Runs of the same session are minute-disjoint by construction, so different
 --     runs MAY carry different tuples: a viewer who switches audio track between
 --     two watch bursts is attributed correctly to both.
+--     ADR 0012: this is now true of ALL SEVEN. platform, country and content_id
+--     were the last three taken with any() over the whole session — the last
+--     non-deterministic step in the pipeline — and they now ride the same fold
+--     in tail slots .7/.8/.9.
 -- ============================================================================
 
 INSERT INTO cc_minute_delta
@@ -75,18 +79,41 @@ WITH
 -- source against a CAST-ed Array(Tuple(..., String)) accumulator does not
 -- type-check.
 --
--- platform / country / content_id keep any(). They are NOT part of this change:
--- 0 sessions carry two content_ids and 95 carry two platforms, and moving those
--- to a different rule would move numbers this task is not allowed to move. The
--- non-determinism of any() on them is real and is written up in ADR 0008 as a
--- separate, owner-facing decision — it shifts the user peak 2,815 -> 2,816.
+-- ALL SEVEN DIMENSIONS NOW RIDE THE FOLD (ADR 0012). platform, country and
+-- content_id used to be taken with any() over the whole session. That was the
+-- last any() in the pipeline and it was wrong twice over:
+--
+--   * it is non-deterministic BY CONSTRUCTION. On this file it happens not to
+--     vary — measured stable at max_threads 1/8/32 and under forced two-level
+--     aggregation, because only 25 of 10,866 sessions carry two platforms and
+--     none carries two countries or content_ids, so the groups that could vary
+--     fit in one block. The identical query over ev_raw (905,558 rows, the same
+--     GROUP BY) returns THREE different answers at those same thread counts.
+--     The property that protects us here is the input's size, not the code's.
+--     ADR 0009 removed any() from the derivation for exactly this reason.
+--
+--   * it COLLAPSES the per-interval attribution back to one value per session,
+--     which is the opposite of what ADR 0008 built. The other four dimensions
+--     are already carried PER RUN through this fold; a session that switches
+--     platform between two watch bursts was correctly attributed to both for
+--     audio_language and wrongly attributed to one for platform.
+--
+-- The rule is NOT a new mechanism: platform/country/content_id are appended to
+-- the fold tuple at the TAIL (slots .7/.8/.9) so the established .1-.6 slots
+-- keep their meaning, and they inherit the SAME first-wins-per-run resolution
+-- ADR 0008 measured and shipped for the other four. That is precisely the move
+-- ADR 0009 made in 30_build_intervals.sql — columns leave the aggregate list,
+-- join the existing array at the tail, and reuse the rule already there.
+--
+-- Run boundaries provably cannot move: the merge predicate and the start/end
+-- arithmetic read only .1 and .2, which are untouched. arraySort now orders on
+-- a 9-slot tuple instead of 6, which can only break ties among intervals that
+-- were already identical in .1-.6 — so the order becomes MORE determined, never
+-- less, and two fully identical tuples are interchangeable by definition.
 merged AS
 (
     SELECT
         video_session_id,
-        any(platform)   AS platform,
-        any(country)    AS country,
-        any(content_id) AS content_id,
         arrayFold(
             (acc, x) -> if(
                 (length(acc.1) = 0) OR (x.1 > (acc.2 + 60)),
@@ -101,7 +128,10 @@ merged AS
                       acc.1[length(acc.1)].3,
                       acc.1[length(acc.1)].4,
                       acc.1[length(acc.1)].5,
-                      acc.1[length(acc.1)].6)]
+                      acc.1[length(acc.1)].6,
+                      acc.1[length(acc.1)].7,
+                      acc.1[length(acc.1)].8,
+                      acc.1[length(acc.1)].9)]
                  ), greatest(acc.2, x.2))
             ),
             arraySort(groupArray((
@@ -110,9 +140,12 @@ merged AS
                 toString(app_version),
                 toString(audio_language),
                 toString(subtitle_language),
-                toString(player_version)
+                toString(player_version),
+                toString(platform),
+                toString(country),
+                content_id
             ))),
-            (CAST([], 'Array(Tuple(UInt32, UInt32, String, String, String, String))'), toUInt32(0))
+            (CAST([], 'Array(Tuple(UInt32, UInt32, String, String, String, String, String, String, Int64))'), toUInt32(0))
         ).1 AS runs
     FROM session_intervals FINAL
     GROUP BY video_session_id
@@ -122,9 +155,9 @@ merged AS
 exploded AS
 (
     SELECT
-        platform,
-        country,
-        content_id,
+        r.7 AS platform,
+        r.8 AS country,
+        r.9 AS content_id,
         r.3 AS app_version,
         r.4 AS audio_language,
         r.5 AS subtitle_language,
