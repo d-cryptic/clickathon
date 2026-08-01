@@ -36,3 +36,18 @@ All model thresholds (`HEARTBEAT_GAP_S`, `TAIL_GRACE_S`, watermark) live at the 
 - Select columns, never `SELECT *`, in anything that ships.
 - Label benchmark runs with `SETTINGS log_comment='...'` so evidence is findable.
 - Prefer `dictGet` over joining a small dimension.
+
+
+## Delta / running-sum queries
+
+- **The running sum over `cc_minute_delta` MUST `PARTITION BY toStartOfHour(minute)`.** Deltas are
+  hour-clipped (ADR 0003) so each hour is absolute and standalone. Omitting the partition produces
+  numbers that look plausible and are wrong, which is the worst failure mode we have.
+- **Never insert into `cc_minute_delta` without truncating first.** It is an AggregatingMergeTree of
+  sums with no dedup: a replayed batch silently doubles every number. Use `tools/build-model.sh`.
+- Deltas ARE summable across dimensions; **peak is not**. One interval carries one dimension tuple,
+  so summing deltas cannot double count a session — but `max()` of two dimensions' peaks is not the
+  peak of their union.
+- A delta view emits a row only where concurrency **changes**. Densify at query time with
+  `ORDER BY minute WITH FILL STEP toIntervalSecond(60) INTERPOLATE (concurrent AS concurrent)`;
+  densifying in the view would defeat the delta model.

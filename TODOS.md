@@ -28,7 +28,10 @@
 
 ## Next
 
-- [ ] **[H3]** `cc_minute_delta` with **hour-clipped** emission (ADR 0003) + `v_concurrency_minute`
+- [x] **[H3]** `cc_minute_delta` hour-clipped (ADR 0003) + `v_concurrency_minute` — **done**.
+      `sql/40_deltas.sql`; 24,958 delta rows from 30,769 intervals. Reconcile PASSES on all 3,725
+      minutes against the interval expansion, peak 2,887 both ways. Serving reads 299 KB vs 2.55 MB
+      for the expansion — 8.5x less I/O, 23 ms. Rebuild: `tools/build-model.sh`.
 - [ ] **[H4]** `/reconcile` passing on 5 minutes — **this is the gate, do not pass it by**
 - [ ] **[H4]** Finalizer + watermark; truncation test proving open-session absorption.
       ← **MVP LINE: sealed tier + stateless baseline is a complete submission from here**

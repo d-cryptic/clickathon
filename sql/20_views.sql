@@ -99,3 +99,46 @@ FROM
     FROM session_intervals FINAL
 )
 GROUP BY minute, platform, country, content_id;
+
+-- ---------------------------------------------------------------------------
+-- THE SERVING PATH (ADR 0003). Concurrency from cc_minute_delta, not from
+-- expanding intervals: O(intervals) rows instead of O(sessions x minutes).
+--
+-- The running sum MUST partition by hour. Deltas are hour-clipped, so each
+-- hour's sum is absolute and standalone — that is what removes the carry-in
+-- scan from t=0. Forgetting the PARTITION BY produces numbers that look
+-- plausible and are wrong; docs/CONVENTIONS.md flags it.
+--
+-- These emit a row only where concurrency CHANGES. A dashboard wanting every
+-- minute should add `ORDER BY minute WITH FILL STEP 60` at query time rather
+-- than densifying here, which would defeat the whole point of a delta model.
+--
+-- The outer aggregate is deliberate: AggregatingMergeTree merges in the
+-- background, so before a merge there can be several parts holding rows for the
+-- same key. Summing inside the window makes the view correct at any merge state.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE VIEW v_concurrency_minute AS
+SELECT
+    minute,
+    platform,
+    country,
+    content_id,
+    toInt64(sum(sum(delta)) OVER (
+        PARTITION BY platform, country, content_id, toStartOfHour(minute)
+        ORDER BY minute
+    )) AS concurrent
+FROM cc_minute_delta
+GROUP BY minute, platform, country, content_id;
+
+-- Headline curve off the delta model. Deltas ARE summable across dimensions
+-- (peak is not) because session_intervals assigns one dimension tuple per
+-- interval, so no session is double counted here.
+CREATE OR REPLACE VIEW v_concurrency_minute_delta_total AS
+SELECT
+    minute,
+    toInt64(sum(sum(delta)) OVER (
+        PARTITION BY toStartOfHour(minute)
+        ORDER BY minute
+    )) AS concurrent
+FROM cc_minute_delta
+GROUP BY minute;

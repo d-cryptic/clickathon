@@ -109,6 +109,11 @@ clickstack:
 clickstack-cloud:
 	tools/clickstack-cloud.sh
 
+## model: rebuild intervals + deltas + views, then reconcile (TARGET=cloud for Cloud)
+.PHONY: model
+model:
+	tools/build-model.sh
+
 ## sql-local: apply sql/*.sql to the local container
 .PHONY: sql-local
 sql-local:

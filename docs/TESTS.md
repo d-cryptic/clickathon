@@ -42,3 +42,18 @@ Recompute from `ev_raw`. A test that compares `cc_minute_delta` against a view o
 - **Trusting approximate aggregates in a correctness test.** `uniq` carries 1–2% error. A reconcile
   that compares two `uniq` results agrees with itself while both are wrong. Use `uniqExact` everywhere
   a number is served or asserted.
+
+
+## Model reconciliation (H2/H3)
+
+Run by `tools/build-model.sh` on every rebuild; it fails loudly rather than printing a warning.
+
+| Test | What it catches |
+|---|---|
+| Delta serving layer vs interval expansion, **every minute** | any error in hour-clipping, merging or the running sum. Currently PASS on 3,725 minutes, peak 2,887 |
+| **Hour-clipping, interior hour** (ADR 0003) | an interval spanning >= 3 hours checked at a minute inside the MIDDLE hour. Worked case: `20:59:48 -> 22:04:49` must emit `+1 @20:59`, `+1 @21:00`, `+1 @22:00`, `-1 @22:05` and NO close in hours 20 or 21 |
+| Same-minute interval merge | a session that pauses and resumes inside one minute. 4,797 sessions (44%) hit this; without the merge the delta model double counts and 556 of 1,903 minutes were wrong |
+
+**Anti-pattern that already bit us:** comparing the two models only on minutes where deltas *change*
+passes trivially (1,466 minutes, 0 mismatches) while the model is still wrong. The comparison must be
+densified with `WITH FILL` so every minute is checked.

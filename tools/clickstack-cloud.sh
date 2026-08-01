@@ -98,8 +98,8 @@ print(next((s.get("id","") for s in json.load(open("/tmp/cs-sources.json"))["res
 echo "sources:"
 # The ACCURATE pair (gap+pause model, ADR 0007) and the STATELESS baseline.
 # Both are charted: the statement asks for the comparison explicitly.
-add_source "Concurrency ACCURATE (minute)"      v_concurrency_minute_intervals     "minute, concurrent"
-add_source "Concurrency ACCURATE by dimension"  v_concurrency_minute_intervals_dim "minute, platform, country, content_id, concurrent"
+add_source "Concurrency ACCURATE (minute)"      v_concurrency_minute_delta_total   "minute, concurrent"
+add_source "Concurrency ACCURATE by dimension"  v_concurrency_minute               "minute, platform, country, content_id, concurrent"
 add_source "Concurrency total (minute)"         v_concurrency_minute_total         "minute, concurrent"
 add_source "Concurrency (minute)"               v_concurrency_minute_stateless     "minute, platform, country, content_id, concurrent"
 refresh_sources
