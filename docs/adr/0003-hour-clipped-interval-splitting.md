@@ -4,11 +4,11 @@
 > emit `+1` at its start within that hour, and `−1` only if it actually ends within that hour. An
 > interval surviving past the hour emits no close; the next hour re-opens it with a fresh `+1`. This
 > makes every hour's running sum absolute — removing the carry-in dependency that otherwise forces a
-> scan from `t=0` — and makes peak pre-aggregable per hour, since `max` over an hour is now a real
-> number rather than a fragment. Status: proposed, 2026-08-01. Supersedes nothing; extends the delta
+> scan from `t=0`. An hour peak is pre-aggregable only after the query's dimensions are already combined;
+> it must never be summed across dimension groups. Status: accepted, 2026-08-01. Supersedes nothing; extends the delta
 > model in [ADR 0001](0001-heartbeat-gaps-over-background-events.md).
 
-**Status** Proposed · 2026-08-01
+**Status** Accepted · 2026-08-01
 
 ## Context
 
@@ -35,17 +35,19 @@ For each hour `H` that an interval `[s, e]` overlaps, emit into `H`:
 All deltas for hour `H` therefore live inside `H`. Concurrency within the hour is
 `sum(delta) OVER (PARTITION BY toStartOfHour(minute) ORDER BY minute)`.
 
-Given that, maintain `cc_hour_agg` keyed `(dims, hour)` storing the hour's `max` of that running sum
-and its `integral` (concurrency-seconds). Peak over an hour-aligned range is the max of stored maxes;
+Given that, an optional hourly **integral** keyed by base dimensions is additive and can accelerate
+full-hour averages. An hourly `max` is valid only if it is materialised for the exact dimension grouping
+the query will request. Peak over an hour-aligned range is the max of those exact-group hour maxima;
 average is `sum(integrals) / range_seconds`.
 
 ## Why
 
 - The carry-in dependency disappears rather than being managed. Each hour reconstructs absolute
   concurrency standalone, so partition pruning becomes exact instead of nominal.
-- Peak becomes summable **over time** (it still is not summable over dimensions — see
-  [ADR 0004](0004-two-tier-lambda-serving.md) and `docs/ARCHITECTURE.md`). A day-grain peak reads 24
-  rows per dimension combination instead of 1,440 — a 60× reduction in the dominant benchmark shape.
+- An exact-group peak becomes reducible **over time**. It is still not summable over dimensions: summing
+  `max(platform A)` and `max(platform B)` invents simultaneous peaks. A day-grain peak reads 24 hourly
+  rows instead of 1,440 minutes only when the hourly rows already match the requested filter cuboid;
+  [ADR 0015](0015-filtered-peak-is-not-additive.md) makes this constraint explicit.
 - Time-weighted average falls out for free, including zero-concurrency minutes, because the integral is
   stored rather than derived from a mean over present rows.
 - The cost is one extra delta pair per interval per crossed hour. At the measured ~78-minute average
@@ -53,9 +55,10 @@ average is `sum(integrals) / range_seconds`.
 
 ## Consequences
 
-- A ragged range such as `10:17 → 14:43` decomposes into `max(` minute-scan of the leading partial
-  hour, hour-maxes of the whole hours, minute-scan of the trailing partial hour `)`. Worst case is two
-  partial hours regardless of range length, so the saving grows with the range.
+- A ragged range such as `10:17 → 14:43` can decompose into `max(` minute-scan of the leading partial
+  hour, exact-cuboid hour-maxes of the whole hours, minute-scan of the trailing partial hour `)`. Worst
+  case is two partial hours regardless of range length, but only after benchmark evidence justifies that
+  exact cuboid's write amplification.
 - Hour is now a structural unit of the model, not just a query grain. Changing it (to 10 minutes, or to
   a day) is a schema change, not a setting — record it here if it ever moves.
 - `/reconcile` must verify the hour-clipping specifically: an interval that spans ≥3 hours, checked at a
