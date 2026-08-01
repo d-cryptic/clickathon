@@ -1,5 +1,5 @@
 LANDING BOUNDARY (ADR 0030) — proof
-commit: 0348267   server: 26.7.1.1315
+commit: 3c2d6db   server: 26.7.1.1315
 raw: data/ch-hackathon-raw-data.csv   content: data/ch-hackathon-content-data.csv
 
 == 1  IDENTITY — the happy path is unchanged, byte for byte
@@ -127,8 +127,8 @@ raw: data/ch-hackathon-raw-data.csv   content: data/ch-hackathon-content-data.cs
   Wall clock is not reported: this container is shared with other worktrees
   and its wall clock swings ~2x run to run. See ADR 0030 for a 14-run series.
    ┌─route───────┬─server_ms─┬─read───────┬─statements─┐
-1. │ landing     │      1848 │ 564.90 MiB │          6 │
-2. │ pre-landing │      1706 │ 333.07 MiB │          2 │
+1. │ landing     │      1744 │ 564.90 MiB │          6 │
+2. │ pre-landing │      2084 │ 333.07 MiB │          2 │
    └─────────────┴───────────┴────────────┴────────────┘
 
   ev_landing is the whole cost and it is reclaimable in one statement once a
