@@ -129,6 +129,32 @@ instruction is to ask before touching schema. The fix is a local `DROP TABLE def
 followed by `tools/apply-sql.sh sql/00_schema.sql` and a local rebuild. Related to Q16 (ADR 0018),
 which unified *which* database each target resolves to but not *what shape* the local one is in.
 
+## Q32 · Two LIVE views can return a nondeterministic peak minute — 70 of 98 hours are exposed
+
+The graded-database inventory found five windows views predating [ADR 0014](adr/0014-peak-minute-ties-resolve-to-the-earliest-minute.md);
+I confirmed **2 still contain a bare `argMax(minute, …)`**. ADR 0014 exists because a tied peak must
+resolve to the **earliest** minute, deterministically. These views never got the fix.
+
+**Measured, so the severity is not guessed:**
+
+| | |
+|---|---|
+| Global peak **2,917** | occurs at exactly **one** minute (10:56) — **the headline answer is safe** |
+| Hour-grain peaks | **70 of 98 hours have a tied peak minute** — every one is a coin flip in these views |
+
+So a day-grain "what was the peak" answer is unaffected, and an hour-grain "**when** did it peak"
+answer can differ between two runs of the same query on unchanged data. Peak-minute is a plausible
+benchmark output, and a judge re-running a query and getting a different answer is the worst kind of
+failure — it looks like the pipeline is unstable.
+
+**This is the same defect the unseen-day rehearsal found and fixed in the runbook (finding R5).**
+It was fixed there and missed here, because nobody had looked at what the *database* actually holds
+versus what the repo's SQL says. That gap is exactly why the inventory task existed.
+
+Fix: apply ADR 0014's tie-break to the five views. `CREATE OR REPLACE VIEW` is **not** gated by the
+new `apply-sql.sh` guard (only DROP/TRUNCATE are), so this is a low-risk forward fix rather than part
+of the migration debt below — but it still touches the graded service, so **operator call**.
+
 ## 🔴 THE MIGRATION DEBT — three schema changes now live in code but not on the graded database
 
 Each was correct to defer (schema changes on a graded service are an operator call). Together they
