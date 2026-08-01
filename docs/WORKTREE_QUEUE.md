@@ -98,6 +98,29 @@ These are **code-inspection findings, not reproduced incidents** — reproduce b
 
 ---
 
+## The v1-hardening wave — 2026-08-02, 10 slots on judge feedback
+
+Spawned after the judges said **more filter columns will appear** and **the unseen data will be more
+real and cruel**, and after re-reading `docs/upstream/` line by line.
+
+| # | Branch | Answers which spec line | ADR |
+|---|---|---|---|
+| T1 | `chore/t1-new-filter-columns` | `dataset_details.md:43` *"should work even if the number of dimensions increases"* — today a new column **loads and is silently dropped**, a missing one silently becomes `''` (both measured) | **0024** |
+| T2 | `chore/t2-a-generator-for` | *"validate against representative OTT viewing scenarios"* — a cruel-data generator with per-hazard knobs, each file carrying its designed truth | — |
+| T3 | `chore/t3-runtime-preprocessing` | operator: *"preprocessing at runtime"* — reject vs quarantine vs normalise, biased toward quarantine because a discarded row is invisible to every check we have | **0025** |
+| T4 | `chore/t4-turn-the-edge-case` | Codex 003 §11 register → executable fixtures, expected values derived **by hand**, each sabotage-checked | — |
+| T5 | `chore/t5-query-robustness` | *"queries should handle those use cases"* — 13 shapes × hostile conditions; the invariant grid | — |
+| T6 | `chore/t6-a-reference-interpreter` | Codex 003 §13.2 — property tests vs an independent interpreter; **batch invariance** is the one nothing else tests | — |
+| T7 | `chore/t7-the-replay-demo` | `PROBLEM_STATEMENT.md:79` *"the concurrency curve builds in near real time"* — we have never shown it building | — |
+| T8 | `chore/t8-the-spec-names` | `dataset_details.md:21` names `AppBackgrounded`/`AppForegrounded`; **29,021 exist and our derivation references them 0 times** | — |
+| T9 | `chore/t9-a-source-contract-gate` | bake-off cherry-pick #1 — assert what is true about a file **before** we trust it | **0026** |
+
+**ADR ledger:** 0019 publisher safety (in flight) · 0020–0023 merged · 0024 T1 · 0025 T3 · 0026 T9.
+
+**Closed by me directly, not spawned:** the organiser's four *"design decisions to confirm"*
+([docs/DESIGN_DECISIONS.md](DESIGN_DECISIONS.md)) — three were decided but scattered; **event
+lateness tolerance is genuinely undecided** and is a mentor question, not something to invent.
+
 ## Q26 · The sentinel collision is latent, not live — and the unseen day is exactly when it fires
 
 The unseen-day rehearsal (R9) demonstrated that a **real** `content_id = -1` session is served as
