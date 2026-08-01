@@ -26,6 +26,30 @@ FILES=(
   "ch-hackathon-content-data.csv e013c4958e9b6396f9cc6cd2681bb6944bb65dc810b7f0925f78254ed9c7ddd4 1181455"
 )
 
+# The spec docs live beside the CSVs upstream. Fetching only the data is how we
+# built for a day and a half against ONE of three spec files: README_START_HERE.md
+# and dataset_details.md were never read, and between them they require content
+# enrichment, user-level concurrency and 10 filter dimensions. Never again — the
+# docs come down with the data.
+DOCS_BASE="${DOCS_BASE_URL:-https://raw.githubusercontent.com/sidagarwal04/click-a-thon-2026/main/SonyLiv}"
+DOCS=(PROBLEM_STATEMENT.md README_START_HERE.md dataset_details.md)
+
+fetch_docs() {
+  mkdir -p docs/upstream
+  for d in "${DOCS[@]}"; do
+    if curl -fsSL --retry 2 -o "docs/upstream/$d.tmp" "$DOCS_BASE/$d"; then
+      if [ -f "docs/upstream/$d" ] && ! cmp -s "docs/upstream/$d.tmp" "docs/upstream/$d"; then
+        echo "  !! UPSTREAM SPEC CHANGED: docs/upstream/$d — re-read it before trusting the model"
+      fi
+      mv "docs/upstream/$d.tmp" "docs/upstream/$d"
+    else
+      rm -f "docs/upstream/$d.tmp"
+      echo "  could not fetch $d (continuing)" >&2
+    fi
+  done
+  echo "spec docs synced to docs/upstream/"
+}
+
 MODE=fetch
 case "${1:-}" in
   --force)  MODE=force ;;
@@ -94,5 +118,8 @@ for entry in "${FILES[@]}"; do
 done
 
 [ $rc -eq 0 ] || exit $rc
+
+fetch_docs
+
 echo
 echo "datasets ready in $DATA_DIR/ — next: tools/load.sh"

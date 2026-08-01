@@ -1,0 +1,238 @@
+-- ============================================================================
+-- 90_reconcile.sql — THE GATE. Recompute concurrency from ev_raw and compare
+-- against the serving layer.
+--
+-- "Truth" is derived from ev_raw ONLY. It never reads session_intervals or
+-- cc_minute_delta, so it exercises the whole pipeline rather than agreeing with
+-- itself. It also uses a DIFFERENT implementation of the same spec: runs are
+-- detected with window functions where 30_build_intervals.sql uses arraySplit,
+-- so an error in either surfaces as a disagreement instead of cancelling out.
+--
+-- ----------------------------------------------------------------------------
+-- REWRITTEN 2026-08-01 after the unseen-day rehearsal found this gate was worth
+-- far less than it appeared. Three defects, all now closed:
+--
+--   1. TARGET MINUTES WERE 2026-07-26 LITERALS. On any other day the query
+--      returned ZERO ROWS, and tools/reconcile.sh — which decides by grepping
+--      for a mismatch token — found none and printed "reconcile PASSED". A gate
+--      that cannot see the data reports success. Minutes are now DERIVED from
+--      ev_raw, so the gate re-targets itself on whatever day it is given.
+--
+--   2. IDLE MINUTES WERE NEVER COMPARED. `truth` was a GROUP BY over a CROSS
+--      JOIN, so a minute with nobody watching produced no row and could not
+--      disagree. 207 of 1,364 minutes on the holdout day. Proven by inserting
+--      500 fabricated viewers at an idle minute: the chart showed 500 and the
+--      gate still passed. There is now a dense SPINE of every minute in range,
+--      and an idle minute is checked as 0 = 0 like any other.
+--
+--   3. NOTHING ASSERTED HOW MUCH WAS CHECKED. On a 07-26 day-file the old gate
+--      silently returned four rows instead of five. The first output row is now
+--      a SUMMARY carrying the number of minutes compared; reconcile.sh fails if
+--      that is zero or missing.
+--
+-- Output is one row set: a SUMMARY row, then every mismatching minute (capped
+-- at 20), then five DERIVED sample minutes as human-readable evidence.
+-- Any row whose verdict is MISMATCH fails the gate.
+-- ============================================================================
+
+WITH
+    150 AS GAP_S,
+    60  AS TAIL_S,
+    -- MUST MATCH sql/30_build_intervals.sql. Changing one without the other is
+    -- a spec divergence, and this gate WILL catch it — verified: flipping the
+    -- model to permissive while leaving this at 1 produces 240 mismatched
+    -- minutes, max_abs_diff 156. That is the gate working as intended, not a
+    -- bug, but it means the unclosed-pause rule is a TWO-FILE change.
+    -- Sharing the CONSTANT is correct; sharing the IMPLEMENTATION would not be
+    -- — truth is still derived from ev_raw with different code.
+    1 AS UNCLOSED_PAUSE_TO_RUN_END,
+
+    -- ---------------------------------------------------------------- truth --
+    -- DISTINCT first: the file contains duplicate events at identical
+    -- timestamps, and run detection depends only on the SET of instants.
+    -- Without this, `prev_ts`/`rn` (ordered by the millisecond timestamp) and
+    -- the running sum (ordered by the second-truncated one) resolve ties
+    -- differently and run boundaries land in the wrong places.
+    distinct_ts AS
+    (
+        SELECT DISTINCT video_session_id, toUInt32(event_timestamp) AS ts
+        FROM ev_raw
+    ),
+    numbered AS
+    (
+        SELECT
+            video_session_id,
+            ts,
+            lagInFrame(ts) OVER (PARTITION BY video_session_id ORDER BY ts) AS prev_ts,
+            row_number()   OVER (PARTITION BY video_session_id ORDER BY ts) AS rn
+        FROM distinct_ts
+    ),
+    runs AS
+    (
+        SELECT video_session_id, run_id, min(ts) AS r_start, max(ts) AS r_end,
+               arraySort(groupArray(ts)) AS run_ts
+        FROM
+        (
+            SELECT
+                video_session_id, ts,
+                sum(if((rn = 1) OR ((ts - prev_ts) > GAP_S), 1, 0)) OVER (
+                    PARTITION BY video_session_id ORDER BY ts
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                ) AS run_id
+            FROM numbered
+        )
+        GROUP BY video_session_id, run_id
+    ),
+    pauses AS
+    (
+        SELECT
+            video_session_id,
+            arraySort(groupArrayIf(toUInt32(event_timestamp), event = 'pause'))  AS ps,
+            arraySort(groupArrayIf(toUInt32(event_timestamp), event = 'resume')) AS rs
+        FROM ev_raw
+        GROUP BY video_session_id
+    ),
+    windowed AS
+    (
+        SELECT
+            r.video_session_id AS video_session_id,
+            r.r_start AS r_start,
+            r.r_end   AS r_end,
+            r.run_ts  AS run_ts,
+            arraySort(arrayMap(
+                p -> (p, least(
+                        if(arrayFirst(x -> x > p, p2.rs) = 0,
+                           if(UNCLOSED_PAUSE_TO_RUN_END = 1,
+                              r.r_end,
+                              if(arrayFirst(x -> x > p, r.run_ts) = 0, r.r_end, arrayFirst(x -> x > p, r.run_ts))),
+                           arrayFirst(x -> x > p, p2.rs)),
+                        r.r_end)),
+                arrayFilter(p -> (p >= r.r_start) AND (p < r.r_end), p2.ps)
+            )) AS wins
+        FROM runs AS r
+        LEFT JOIN pauses AS p2 ON p2.video_session_id = r.video_session_id
+    ),
+    folded AS
+    (
+        SELECT
+            video_session_id, r_start, r_end,
+            arrayFold(
+                (acc, w) -> (if(w.1 > acc.2, arrayPushBack(acc.1, (acc.2, w.1)), acc.1), greatest(acc.2, w.2)),
+                wins,
+                (CAST([], 'Array(Tuple(UInt32, UInt32))'), toUInt32(r_start))
+            ) AS f
+        FROM windowed
+    ),
+    -- Tail grace ONLY on a segment that ends because the run ended. A segment
+    -- ending at a PAUSE gets none — we know to the second when it stopped.
+    segments AS
+    (
+        SELECT
+            video_session_id,
+            seg.1 AS a,
+            seg.2 + if(seg.2 = r_end, TAIL_S, 0) AS b
+        FROM folded
+        ARRAY JOIN arrayFilter(x -> x.2 > x.1, arrayPushBack(f.1, (f.2, toUInt32(r_end)))) AS seg
+    ),
+    -- Expanded to minutes ONCE (~147K rows), not CROSS JOINed per target.
+    truth_min AS
+    (
+        SELECT toDateTime(m) AS minute, uniqExact(video_session_id) AS truth
+        FROM
+        (
+            SELECT video_session_id,
+                   arrayJoin(range(intDiv(a, 60) * 60, (intDiv(b, 60) * 60) + 1, 60)) AS m
+            FROM segments
+        )
+        GROUP BY minute
+    ),
+
+    -- ----------------------------------------------------------------- spine --
+    -- Every minute between the first and last event, so an IDLE minute is
+    -- compared as 0 = 0 rather than silently skipped. Bounds come from the
+    -- data, which is what makes this gate portable to the unseen day.
+    bounds AS
+    (
+        SELECT toStartOfMinute(min(event_timestamp)) AS lo,
+               toStartOfMinute(max(event_timestamp)) AS hi
+        FROM ev_raw
+    ),
+    spine AS
+    (
+        SELECT toDateTime(arrayJoin(range(toUInt32(lo), toUInt32(hi) + 60, 60))) AS minute
+        FROM bounds
+    ),
+
+    -- --------------------------------------------------------------- served --
+    -- Running sum of hour-clipped deltas along the DENSE spine, so the value
+    -- carries across minutes where nothing changed. PARTITION BY hour is
+    -- mandatory: deltas are hour-clipped (ADR 0003) so each hour is absolute.
+    delta_min AS
+    (
+        SELECT minute, sum(delta) AS d FROM cc_minute_delta GROUP BY minute
+    ),
+    served AS
+    (
+        SELECT
+            s.minute AS minute,
+            toInt64(sum(ifNull(dm.d, 0)) OVER (
+                PARTITION BY toStartOfHour(s.minute) ORDER BY s.minute
+                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+            )) AS served
+        FROM spine AS s
+        LEFT JOIN delta_min AS dm ON dm.minute = s.minute
+    ),
+
+    compared AS
+    (
+        SELECT
+            sv.minute                                   AS minute,
+            toInt64(ifNull(t.truth, 0))                 AS truth,
+            sv.served                                   AS served,
+            sv.served - toInt64(ifNull(t.truth, 0))     AS diff
+        FROM served AS sv
+        LEFT JOIN truth_min AS t ON t.minute = sv.minute
+    ),
+
+    -- Sample minutes DERIVED from the data: the peak, both boundaries, and two
+    -- picked by a stable hash so the choice is reproducible but not cherry-picked.
+    samples AS
+    (
+        SELECT arrayJoin([
+            (SELECT argMax(minute, truth) FROM compared),
+            (SELECT min(minute) FROM compared),
+            (SELECT max(minute) FROM compared),
+            (SELECT minute FROM compared ORDER BY cityHash64(minute, 17) LIMIT 1),
+            (SELECT minute FROM compared ORDER BY cityHash64(minute, 99) LIMIT 1)
+        ]) AS minute
+    )
+
+SELECT * FROM
+(
+    -- 1 — the summary. reconcile.sh fails if minutes_compared is 0 or absent.
+    SELECT
+        0 AS ord,
+        'SUMMARY' AS scope,
+        concat('minutes_compared=', toString(count()))                       AS c1,
+        concat('mismatched=', toString(countIf(diff != 0)))                  AS c2,
+        concat('max_abs_diff=', toString(max(abs(diff))))                    AS c3,
+        concat('peak=', toString(max(truth)))                                AS c4,
+        if(countIf(diff != 0) = 0, 'PASS', 'MISMATCH')                       AS verdict
+    FROM compared
+
+    UNION ALL
+
+    -- 2 — every disagreeing minute, capped so a total break stays readable.
+    SELECT 1, 'MISMATCH', toString(minute), toString(truth), toString(served),
+           toString(diff), 'MISMATCH'
+    FROM compared WHERE diff != 0 ORDER BY abs(diff) DESC LIMIT 20
+
+    UNION ALL
+
+    -- 3 — derived sample minutes, as human-readable evidence.
+    SELECT 2, 'sample', toString(c.minute), toString(c.truth), toString(c.served),
+           toString(c.diff), if(c.diff = 0, 'PASS', 'MISMATCH')
+    FROM compared AS c
+    WHERE c.minute IN (SELECT minute FROM samples)
+)
+ORDER BY ord, c1;

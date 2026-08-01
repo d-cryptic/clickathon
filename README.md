@@ -32,6 +32,29 @@ Then verify before trusting anything — a failed init script leaves a container
 tools/ch "SELECT name FROM system.tables WHERE database='default'"
 ```
 
+## Develop it
+
+Go 1.26 pinned by devbox, entered by direnv, driven by make. Full detail in [docs/GO.md](docs/GO.md).
+
+```bash
+direnv allow                  # once — pinned toolchain + .env, no manual PATH
+make hooks                    # fixing pre-commit hook
+make ci                       # tidy, vet, lint, test, build — same as GitHub Actions
+make verify                   # run the CLI against the Cloud service
+```
+
+## See the curve
+
+The concurrency visualization is ClickStack, not a hand-rolled frontend — it doubles as the OSS
+integration. Detail in [docs/CLICKSTACK.md](docs/CLICKSTACK.md).
+
+```bash
+make stack-up && make clickstack   # ClickHouse + HyperDX, team, and our sources
+open http://localhost:8080         # source "Concurrency total (minute)"
+```
+Set the time range to **2026-07-14 → 2026-07-26**. The dataset is not "now", and HyperDX's default
+last-15-minutes window renders an empty chart that looks like a broken pipeline.
+
 ## The model, in one picture
 
 ```

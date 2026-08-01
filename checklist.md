@@ -1,0 +1,192 @@
+# CHECKLIST — what we are scored on, and where we stand
+
+> **Summary:** The judging rubric, compacted from handwritten notes and reconciled against the
+> organiser's actual spec in [docs/upstream/](docs/upstream/). This file is the **scoring view**: what
+> judges grade, what we must be able to defend, and where each answer already lives. It deliberately
+> does **not** re-explain the model — that is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and the
+> ADRs. Task queue is [TODOS.md](TODOS.md); honest status is [WALKTHROUGH.md](WALKTHROUGH.md).
+> For the minimum shippable cut, see [V0_CHECKLIST.md](V0_CHECKLIST.md).
+
+**Golden rule:** optimize ingestion *and* querying while holding correctness, scalability and
+robustness. Every choice — schema, interval representation, aggregation strategy, MVs, computational
+model — must be defensible on performance, maintainability and business value, not just algorithmic
+correctness. **Judges value *why* as much as *how*.**
+
+---
+
+## 1. The five graded criteria
+
+Straight from [PROBLEM_STATEMENT.md](docs/upstream/PROBLEM_STATEMENT.md#how-you-will-be-evaluated).
+Everything in this file exists to serve one of these.
+
+| # | Criterion | What judges actually check | Our state |
+|---|---|---|---|
+| C1 | **Correctness** | Benchmark answers vs private ground truth. Foreground-only means foreground-only; overcounting backgrounded time is *the* failure mode. | Gate passes vs `ev_raw` — [`evidence/reconcile.txt`](evidence/reconcile.txt) |
+| C2 | **Query performance** | Latency at the given volume, **and what the queries read** — not just wall time. | 299 KB / 23 ms vs 2.55 MB / 56 ms (8.5×) |
+| C3 | **Update handling** | Open sessions + late heartbeats absorbed **incrementally**, or recomputed? | ⚠️ **does not converge** — see §5 |
+| C4 | **Design quality** | Schema/representation choices *and the reasoning*. "A team that can defend its trade-offs beats a team with a lucky benchmark." | ADRs 0001–0007 |
+| C5 | **The unseen day** | Results on the sealed dataset, with latencies **and pipeline evidence**. *No pipeline evidence, no credit.* | `/unseen` skill exists, unexercised |
+
+### Hard requirements (not scored — gating)
+
+- [ ] **ClickHouse is the primary datastore** — ingestion, modeling, all concurrency computation.
+- [ ] **Meaningfully integrate** ClickStack, Langfuse **or** LibreChat. *Superficial inclusion won't count.*
+      → ClickStack, charting real concurrency off Cloud. **Still shallow:** we observe ingestion lag but
+      not our own watermark lag; nothing of ours emits OTLP.
+- [ ] **No hand-computed answers.** Every number traceable to a query log or trace.
+- [ ] **No credentials in git.**
+- [ ] LICENSE present.
+
+---
+
+## 2. Correctness (C1)
+
+- [x] **Active-interval definition is precise and defended** — heartbeat gap > 150 s closes an
+      interval (backgrounding), **minus** explicit pause/resume windows. Two signals, because
+      heartbeats *survive* a pause at 0.756/min — inside any sane gap threshold. [ADR 0007](docs/adr/0007-gate-answers-pause-needs-explicit-handling.md)
+- [x] **Truth is recomputed from `ev_raw`**, not asserted against the serving layer. A test that reads
+      the model to check the model proves nothing — [docs/TESTS.md](docs/TESTS.md).
+- [x] **The gate can fail.** Negative-tested: inject one bad delta row → exit 1.
+- [x] Tier agreement: minute ↔ delta expansion (3,725 min, 0 mismatches); hour ↔ minute (98 h, 0).
+- [ ] **Unclosed-pause rule decided** — 23% of pauses never resume. Conservative 1,949.3 h vs
+      permissive 2,048.6 h (**+5.09%**). Unknowable from the file. **Operator/mentor call.**
+- [ ] Session-aware vs session-independent **numerically compared**, not just both built.
+
+### Edge cases — each needs a defined, tested behaviour
+
+Empty strings · NULL timestamps · duplicate records (**4,210 rows, 0.46%, 863 sessions — not yet
+deduped**) · missing session end · missing heartbeat · zero-length and invalid intervals ·
+out-of-order events · overlapping sessions for one user. Traps that actually bite are in
+[docs/DATA_DICTIONARY.md#traps](docs/DATA_DICTIONARY.md) — `event_timestamp` is epoch **ms**,
+backgrounding is universal, bg/fg events are **not guaranteed to pair**.
+
+---
+
+## 3. Query performance (C2)
+
+- [x] Serving layer answers without rescanning session history.
+- [x] Sort keys are dimension-first then time, per [docs/CONVENTIONS.md](docs/CONVENTIONS.md) and
+      [ADR 0002](docs/adr/0002-order-by-time-bucket-then-platform.md).
+- [ ] **`/bench` run on the full benchmark shapes** — peak **and** average concurrency × minute /
+      hour / day × dimension filters. Capture latency **and bytes read** for every shape.
+- [ ] Granule-pruning evidence per shape (`/ch-evidence`).
+
+> **The dimension trap.** Peak is **not summable across dimensions**: platform alone and
+> platform+country peak at *different minutes* in the same range. Peak is never stored pre-combined —
+> hour-clipping is what makes it maxable over *time*. This is the single most likely place to be
+> silently wrong on a filtered benchmark query.
+
+---
+
+## 4. Update handling (C3) — our weakest criterion
+
+- [x] Open sessions represented (`is_open`), watermark sized from measurement: stragglers arrive up
+      to **2,081 s** after `VideoSessionEnd` → W = 2400 s.
+- [x] Late-arrival correction-by-diff designed and arithmetically exact — [ADR 0006](docs/adr/0006-late-arrival-correction-by-diff.md).
+- [x] Absorption is **actually tested**, not asserted — `tools/truncation-test.sh` cuts the stream at
+      the peak and replays 447,081 withheld events.
+- [ ] **…and it does not converge.** +37 on the peak minute (2,924 vs 2,887, +1.3%). Two schema
+      fixes proven in §5.
+- [ ] **"Publish continuously updated aggregates"** — we batch-rebuild. Only `mv_stateless` is a real
+      MV. **The biggest architectural gap**; it is literally step 4 of the organiser's blueprint.
+
+---
+
+## 5. Known defects — proven, unfixed
+
+Both are schema changes to the graded database. **Ask the operator before applying.**
+
+1. `session_intervals` is `ReplacingMergeTree(interval_end)`, which assumes re-derivation only ever
+   *extends* an interval. It doesn't — the `TAIL_S=60s` grace can overshoot, so a stale row wins
+   forever (316 intervals too long, 315 stuck `is_open=1`). → version on monotonic `build_version`.
+   **Fix proven to converge on all 1,578 minutes.**
+2. `cc_minute_delta.starts`/`ends` are `UInt64` and silently wrap on a negative corrective row
+   (`max()` returns 1.8e19). → `SimpleAggregateFunction(sum, Int64)`.
+
+---
+
+## 6. Deliverables from the organiser's blueprint
+
+[README_START_HERE.md](docs/upstream/README_START_HERE.md) — "integration goal: join content and
+event streams in real time to produce one or more aggregated tables."
+
+| Deliverable | State |
+|---|---|
+| Foreground concurrency | ✅ `cc_minute_delta` → `cc_hour_agg` |
+| Session-aware **and** session-independent tables | ✅ both; ⚠️ not yet compared numerically |
+| User-level concurrency (`uniqExact`, **not** deltas — a user holds several sessions) | ✅ `sql/45_user_concurrency.sql` |
+| **Content-level concurrency by title** (metadata enrichment) | ❌ missing |
+| **Time-window trend** — rolling / fixed windows | ❌ missing |
+| **Dedup of repeated events** | ❌ missing — 4,210 rows |
+| Schemas documented from `dataset_details.md` | ✅ [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) |
+| Filter dimensions survive derivation | ⚠️ only **3 of 10** — spec says "should work even if dimensions increase" |
+
+---
+
+## 7. Scale & stress — what "100×" answers require
+
+Judges will ask how the design behaves at 100×. Choices that only work at hackathon size (full
+rescans, per-minute explosion of all history) "will be treated as what they are."
+
+- [ ] High volume — millions of sessions / billions of events; state the growth law per tier.
+- [ ] High update rate — continuous heartbeats, frequent session mutation.
+- [ ] Concurrent queries during ingestion.
+- [ ] Long-running sessions (hours → days) — does hour-clipping hold?
+- [ ] Bursty traffic — mass simultaneous start/end.
+- [ ] Late and out-of-order data.
+- [ ] Duplicate events — idempotency demonstrated.
+- [ ] Missing events — no heartbeat, no session end.
+
+---
+
+## 8. The unseen day (C5)
+
+Released to all teams simultaneously in the final hours. **Build for it, not for the file we tuned on.**
+
+- [ ] `/unseen` runs end to end with **zero** hand edits, on a dataset never seen.
+- [ ] Benchmark answers + latencies captured.
+- [ ] Query-log / trace evidence packaged alongside. *No pipeline evidence, no credit.*
+- [ ] Nothing in the model is fitted to the tuning file's constants (gap threshold, tail, watermark
+      are declared tunables in one place, and the sensitivity sweep is run).
+
+---
+
+## 9. Defence — the questions to be ready for
+
+One list. Each should be answerable in under a minute, pointing at a doc.
+
+**Model.** What is your interval definition, and why two signals instead of one? How are active
+ranges represented — arrays, normalized intervals, minute deltas, hybrid? Why hour-clipping?
+
+**Computation.** How do you compute overlap accurately? Peak vs average — why is peak not stored?
+Why is peak not summable across dimensions but maxable over time?
+
+**Updates.** How are open sessions represented and finalized? How are late events absorbed
+incrementally rather than by rebuild? What is your watermark, and how did you *measure* it?
+
+**Storage.** Aggregate or raw? Session-aware or session-independent — and what did comparing them
+show? Why this ordering key? Why materialized views, and what stays raw?
+
+**Data quality.** Duplicates, NULLs, empty strings, erroneous records — where in the pipeline, and why there?
+
+**Evidence.** Which benchmark queries, which metrics, what did they read? Show the query log.
+
+**Business.** What decision does this change? Naive counting says 2,976.9 h of watch time; the
+foreground-only model says 1,949.3 h — **34.5% of apparent watch time is backgrounded or paused**, and
+ad load, capacity and content calls are all made on that number. At the peak minute: 3,708 naive vs
+**2,887** actual, a 22.1% over-count removed.
+
+**Trade-offs.** For every alternative you rejected — what did you measure? (Good answer on file: the
+`ev_raw` projection gives 27.7× on single-session lookups but **1.00×** on the real straggler path,
+for +94% storage. Measured, documented, deliberately not shipped.)
+
+---
+
+## 10. Submission
+
+- [ ] Every unchecked box above is either done or **consciously accepted and stated**.
+- [ ] [WALKTHROUGH.md](WALKTHROUGH.md) matches reality; `evidence/` regenerated and committed.
+- [ ] Deck: 15 slides mapped to C1–C5.
+- [ ] Demo rehearsed twice — replay a live-event day: ingest → curve builds → apply a filter →
+      minute-grain answers instantly.
+- [ ] **Team Captain confirmed and awake before the freeze.** Only they can submit.
