@@ -1,0 +1,24 @@
+WAVE B (model SQL) — promotion checks run by the orchestrator
+branch promo/waveB-model @ 9240f2e  ·  base main @ 2b551b5
+date 2026-08-01T22:45:16Z
+
+CHECK 1 · isolation — every ADR claim verified ON THIS TREE
+  ADR 0009  no executable any() in 40_deltas.sql          PASS
+  ADR 0009  same-second resume (>=) in the derivation     PASS
+  ADR 0009  the GATE carries the identical expression     PASS  <- the shared-spec check
+  ADR 0014  earliest-wins peak-minute tie-break           PASS
+  ADR 0022  cube_level in the hour key                    PASS
+  ADR 0030  all-String landing table present              PASS
+
+CHECK 2 · make ci — green (lint 0 issues, 5 packages under -race, build ok)
+
+CHECK 4b · THIS BRANCH'S OWN GATE against the graded database, read-only:
+  minutes_compared=17028  mismatched=0  max_abs_diff=0  peak=2917  PASS
+
+  This is the check W1 failed twice. W1 does not carry ADR 0009, so main's
+  gate reported 177 mismatched against a correct database — spec skew, not
+  a defect. Wave B carries it, so its own gate agrees with the deployed
+  state exactly. No excuse needed and none offered.
+
+STILL REQUIRED: checks 3, 5 (Codex, independent) and 6 (docs).
+This is a prepared candidate, NOT a promotion.
