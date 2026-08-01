@@ -227,3 +227,9 @@ scan cost is set by the interval count, not by the dimension count.
   `10_intervals.sql`.
 - **Canonicalising dirty values** (`HIN`/`hin`, `off`/`OFF`, `''`/`UNK`/`UND`/`NON`). A view over the
   raw values is a safe addition; rewriting them in storage is not, while the ground truth is private.
+  → **Now done, exactly that way, in [ADR 0009](0009-normalise-filter-dimensions-at-query-time.md)**
+  (`sql/15_normalise.sql`). It measures the hole this leaves open at **1,768 vs 2,180** peak Hindi
+  concurrency — **23.3%** — and it corrects two numbers on this page: the serving layer rebuilds to
+  **28,101** rows (this ADR says 28,139, `40_deltas.sql` says 28,024), and **39 of 41**
+  `audio_language` values survive the dominant vote, not 36 — only `kor`/`KOR` are lost, not the five
+  listed under *Accepted loss*.
