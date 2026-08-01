@@ -1,0 +1,8 @@
+CRUEL knob 'skew' · seed 20260822 · day 2026-08-22 UTC · data/cruel-skew-raw.csv
+events 45203 (+header) · sessions 1601 · truth minutes 55 (0 SPEC_ONLY)
+designed peak 1200 @ 2026-08-22 20:00 UTC (spec projection; SPEC_ONLY minutes are a policy, not a truth)
+
+hazards:
+  - big 18,003 events in ONE session (100ms cadence) + a real 2-min pause — the groupArray state for this session alone is ~100x the median (Codex 003 §10.1)
+  - h* 1,200 sessions starting inside one minute (live-event shape) — designed peak 1,200 across 20:01-20:10
+  - c* 400 distinct app_version/player_version values in one minute — LowCardinality dictionary pressure + filter-grain cardinality

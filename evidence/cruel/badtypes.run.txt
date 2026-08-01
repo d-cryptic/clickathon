@@ -1,0 +1,57 @@
+UNSEEN-DAY RUN
+generated 2026-08-01T19:23:39Z   commit 1f45aab
+target database cruel_scratch   ·   raw data/cruel-badtypes-raw.csv   ·   content data/cruel-content.csv
+--------------------------------------------------------------------------
+reset: DROP DATABASE cruel_scratch — re-loading without this DOUBLES ev_raw (measured; see the note in this script)
+preflight ok · server 26.2.1.525 · database cruel_scratch ready and empty
+raw CSV header matches the loader · 37 data rows
+
+SQL fingerprint (sha256, first 12) — the exact model this run exercised:
+  4a8377de1e08  sql/00_schema.sql
+  de80eaf031af  sql/10_intervals.sql
+  4ffca75940bf  sql/20_views.sql
+  6ba8c21fb5f8  sql/30_build_intervals.sql
+  d1dfeb14c894  sql/40_deltas.sql
+  764ee4c5d810  sql/45_user_concurrency.sql
+  20fefccc4705  sql/50_hour_agg.sql
+  15525d8870b4  sql/80_content.sql
+  0e278f3516e3  sql/85_windows.sql
+  be6a7a4f2e0f  sql/90_reconcile.sql
+  fffb7ab3ea43  tools/load.sh
+  git 1f45aab (sql+tools clean)
+
+--------------------------------------------------------------------------
+PHASE — 1 schema (00_schema, 10_intervals) — tables + the stateless MV
+--------------------------------------------------------------------------
+  objects: 6 created
+
+--------------------------------------------------------------------------
+PHASE — 2 load (tools/load.sh, unmodified)
+--------------------------------------------------------------------------
+target=cloud  database=cruel_scratch  (from --database)  mode=refuse
+loading content_dim from /Users/barun/.superconductor/worktrees/clickathon-project/sc-coherent-fluxon-4bad/data/cruel-content.csv ...
+loading ev_raw from /Users/barun/.superconductor/worktrees/clickathon-project/sc-coherent-fluxon-4bad/data/cruel-badtypes-raw.csv ...
+Code: 27. DB::Exception: Cannot parse input: expected ',' before: 'NaN,vs_cr_bt2,u_cr_bt2,VideoSessionStart,VideoSessionStart,1787408100900,ANDROID_PHONE,6.34.8,india,hin,eng,1.8.2,1787408100000\r\n12.5,vs_cr_bt3,u_cr_bt3,VideoHe': (at row 35)
+: 
+Row 34:
+Column 0,   name: content_id,          type: Int64,  parsed text: "31000009"
+Column 1,   name: video_session_id,    type: String, parsed text: "vs_cr_bt1"
+Column 2,   name: user_id,             type: String, parsed text: "u_cr_bt1"
+Column 3,   name: event_type,          type: String, parsed text: "VideoSessionEnd"
+Column 4,   name: event,               type: String, parsed text: "VideoSessionEnd"
+Column 5,   name: event_timestamp,     type: UInt64, parsed text: "1787407800250"
+Column 6,   name: platform,            type: String, parsed text: "ANDROID_PHONE"
+Column 7,   name: app_version,         type: String, parsed text: "6.34.8"
+Column 8,   name: country,             type: String, parsed text: "india"
+Column 9,   name: audio_language,      type: String, parsed text: "hin"
+Column 10,  name: subtitle_language,   type: String, parsed text: "eng"
+Column 11,  name: player_version,      type: String, parsed text: "1.8.2"
+Column 12,  name: session_start_epoch, type: UInt64, parsed text: "1787407200000"
+
+Row 35:
+Column 0,   name: content_id,          type: Int64,  ERROR: text "NaN,vs_cr_" is not like Int64
+
+: While executing ParallelParsingBlockInputFormat. (CANNOT_PARSE_INPUT_ASSERTION_FAILED) (version 26.2.1.525 (official build))
+
+CRUEL: run FAILED (exit 22) — this failure is the DESIGNED outcome for 'badtypes'.
+See the manifest for why; the open question is only WHERE it died (above).

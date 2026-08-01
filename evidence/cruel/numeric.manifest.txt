@@ -1,0 +1,11 @@
+CRUEL knob 'numeric' · seed 20260822 · day 2026-08-22 UTC · data/cruel-numeric-raw.csv
+events 125 (+header) · sessions 5 · truth minutes 27 (0 SPEC_ONLY)
+designed peak 5 @ 2026-08-22 13:10 UTC (spec projection; SPEC_ONLY minutes are a policy, not a truth)
+
+hazards:
+  - x00 content_id = -1 IN THE EVENT STREAM — collides with the '*'/-1 sentinel convention (ADR 0022): cube separates by cube_level, sql/85_windows.sql p_* paths do NOT
+  - x01 planted poison id -987654399 · x02 zero · x03 Int64 max · x04 Int64 min
+  - none of the five exist in content_dim -> dictGet must serve blanks, not errors
+
+expected breakage when run:
+  - unseen-run.sh refuses at the SENTINEL AUDIT unless UNSEEN_ACK_SENTINEL=1 — that refusal is the designed behaviour
