@@ -1,0 +1,57 @@
+PROJECTION OVERHEAD vs SPAN — does proj_by_session cost more when history is long?
+generated 2026-08-01T22:12Z   host 26.7.1.1315 (local docker 'ch')
+scratch databases tspan_d12_e694k / tspan_d180_e46k, built by
+  OUT=<scratch> KEEP=1 tools/timespan-gen.sh 12:694000 180:46000
+then sql/60_projection.sql applied to each and the mutation drained before measuring.
+--------------------------------------------------------------------------
+THE QUESTION
+
+evidence/scale.txt prices proj_by_session at +93.9% over the base table, measured
+on the provided ~905K-row file inside one ~99-hour window. A projection is stored
+PER PART, so the worry is that spreading the same rows over 15x the calendar --
+and therefore 12x the parts -- makes the projection compress worse and the
+overhead grow. This is the same volume held at two spans, so anything that moves
+is caused by span alone.
+
+--------------------------------------------------------------------------
+MEASURED — ev_raw, ~8.3M events, active parts only
+
+  span     events      base parts   base compressed   projection parts   projection compressed   overhead
+  12 d     8,295,351           45         72.86 MiB                 45              69.31 MiB      95.1%
+  180 d    8,245,018          548         72.11 MiB                548              69.36 MiB      96.2%
+
+  projection uncompressed:  12 d 1.42 GiB   ·   180 d 1.41 GiB
+  projection rows:          12 d 8,295,351  ·   180 d 8,245,018   (one projection part per data part)
+
+--------------------------------------------------------------------------
+THE ANSWER — the projection does NOT degrade with span
+
+The projection's compressed size is 69.31 MiB at 12 days and 69.36 MiB at 180 days:
+a difference of 0.07% across 12.2x the parts. The overhead RATIO moves 95.1% ->
+96.2%, and that 1.1-point rise is the denominator moving, not the numerator -- the
+base table itself compresses marginally worse at 12 days (72.86 vs 72.11 MiB).
+
+proj_by_session is ORDER BY (video_session_id, event_timestamp). Its compression is
+set by how well session ids cluster WITHIN a part, and a session lives inside one
+day, so a part never contains more than one day's sessions at either span. Cutting
+the calendar finer does not scatter a session across parts, so there is nothing for
+the extra partitioning to spoil. The cost is per ROW, not per PART.
+
+Practical reading: the +93.9% quoted in evidence/scale.txt is a span-invariant
+number. If proj_by_session is worth its storage at 12 days it is worth it at six
+months, and a decision made on the 12-day file does not need revisiting because the
+service has been running longer.
+
+--------------------------------------------------------------------------
+WHAT THIS DOES NOT SAY
+
+- Build cost is not measured here, only storage. MATERIALIZE PROJECTION rewrites
+  every active part, so the mutation IS span-sensitive in the same way every other
+  write stage in evidence/timespan/timespan.txt is (2-4x at 180 days). Only the
+  resulting size is span-invariant.
+- Query benefit is not re-measured; sql/60_projection.sql and evidence/scale.txt
+  own that. The question here was purely whether span erodes the storage trade.
+- One volume (8.3M), two spans. The mechanism argued above predicts the same result
+  at 50M, but that was not run.
+
+scratch databases dropped after measurement.

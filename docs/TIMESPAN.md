@@ -251,7 +251,28 @@ because it comes with a mechanism and a number rather than an assertion of invar
 Partition pruning never stopped working: the one-day minute-tier probe (M2) reads 3 parts of 543 at
 180 days / 50M.
 
-## Finding 6 — a straggler whose events are six months old still publishes
+## Finding 6 — `proj_by_session` costs the same at six months as at twelve days
+
+A projection is stored **per part**, and span multiplies parts 12×, so the +93.9% overhead
+`evidence/scale.txt` measured on a 99-hour file had to be re-checked on a long calendar. Same ~8.3M
+events, two spans, `sql/60_projection.sql` applied and the mutation drained before measuring:
+
+| span | base parts | base compressed | projection parts | projection compressed | overhead |
+|---|---|---|---|---|---|
+| 12 d | 45 | 72.86 MiB | 45 | 69.31 MiB | 95.1% |
+| 180 d | 548 | 72.11 MiB | 548 | 69.36 MiB | 96.2% |
+
+**The projection's compressed size moves 0.07% across 12.2× the parts.** The overhead ratio rises
+1.1 points only because the *base* table compresses marginally worse at 12 days — the numerator is
+flat. The mechanism: `proj_by_session` is `ORDER BY (video_session_id, event_timestamp)`, and a
+session lives inside a single day, so no part at either span holds more than one day's sessions.
+Cutting the calendar finer never scatters a session across parts, so there is nothing for the extra
+partitioning to spoil. **The cost is per row, not per part** — a storage decision taken on the 12-day
+file does not need revisiting because the service has been running for six months. Detail and caveats:
+[evidence/timespan/projection.txt](../evidence/timespan/projection.txt). (Storage only; *building* the
+projection is a full-part rewrite and is span-sensitive like every other write stage above.)
+
+## Finding 7 — a straggler whose events are six months old still publishes
 
 `session_dirty`, `cc_publish_batch` and `cc_publish_consumed` carry 7-day TTLs (queue item Q11).
 Those TTLs are on `marked_at` — **processing time, not event time** — so a correction to a session

@@ -52,7 +52,9 @@ RUNID="${RUNID:-r$(date -u +%m%d%H%M%S)}"
 # of the same point silently reports the PREVIOUS run's timings — which is
 # exactly what happened between the first and second smoke runs of this script.
 RUNID="$(date -u +%Y%m%d%H%M%S)"
-OUT="evidence/timespan/timespan.txt"
+# Overridable so a focused sub-run (one axis, a follow-up question) can write its
+# own evidence file instead of truncating the matrix's.
+OUT="${OUT:-evidence/timespan/timespan.txt}"
 REAL_DB="tspan_real"
 T0DATE="2026-02-01"           # a Sunday; DOW0 below encodes that
 T0=$(python3 -c "from datetime import datetime,timezone;print(int(datetime(2026,2,1,tzinfo=timezone.utc).timestamp()))")
