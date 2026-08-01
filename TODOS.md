@@ -13,13 +13,18 @@
 - [x] **[H1]** Confirm the measured shape matches `docs/DATA_DICTIONARY.md` on OUR load
       Reproduced on Cloud: 10,866 sessions · 3,357 content · 10 platforms · bg/fg 14,700/14,321 ·
       span 2026-07-14→26. **One correction:** events are 905,558, not 905,559 (doc counted the header).
-- [ ] **[H1] GATE ①** Do heartbeats continue while backgrounded? Count beats strictly inside each
-      bg→fg pair. **≈0 → ADR 0001 stands. ≈1/min → gaps are blind and the model becomes a hybrid.**
-      Nothing past H2 starts until this is answered.
-- [ ] **[H1] GATE ②** Census the `event` sub-column for pause states; do heartbeats survive a pause?
-      The statement excludes paused time explicitly and we have no handling for it.
-- [ ] **[H1] GATE ③** Out-of-order arrival frequency — sets the watermark width `W`.
-- [ ] **[H2]** Build `session_intervals` from heartbeat gaps — **one row visible end to end**
+- [x] **[H1] GATE ① PASS** — 0.047 beats/min backgrounded vs 4.72/min active (100x drop).
+      ADR 0001 stands: gaps detect backgrounding. See [ADR 0007](docs/adr/0007-gate-answers-pause-needs-explicit-handling.md).
+- [x] **[H1] GATE ② FAIL** — heartbeats SURVIVE a pause: 0.756/min (16% of active, ~1 event/79s,
+      inside any sane gap threshold). Gap-only counts paused time as watching. **Model is now a
+      hybrid**: gaps for backgrounding + explicit pause/resume. Fixed in `sql/30_build_intervals.sql`.
+- [x] **[H1] GATE ③** — zero events before session_start (no negative skew); 2.2% of sessions emit
+      events up to **2,081 s** after VideoSessionEnd. Watermark W >= ~2,100 s.
+- [x] **[H2]** `session_intervals` built — `sql/30_build_intervals.sql`. 30,769 intervals over all
+      10,866 sessions, 0 invalid. Hand-verified against a raw timeline; reconcile at the peak minute
+      gives 2,886 active vs 3,708 naive session-overlap, with 0 unbacked sessions.
+- [ ] **[H2a]** **DECIDE: unclosed-pause rule.** 23% of pauses never resume. Conservative (current)
+      excludes ~19,800 min; permissive would count it. Worth deciding before /reconcile is trusted.
 
 ## Next
 

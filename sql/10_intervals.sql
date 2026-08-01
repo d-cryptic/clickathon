@@ -12,14 +12,20 @@
 -- provided file: 14,700 backgrounds vs 14,321 foregrounds -> 379 unmatched, and
 -- 418 sessions background and never return. A model that pairs bg->fg is wrong
 -- on ~4% of sessions and will be wrong differently on the unseen day.
--- Heartbeats are emitted every 60s, so a gap > threshold IS the inactivity signal.
+-- MEASURED (ADR 0007): heartbeats are NOT a 60s beat. VideoHeartbeat is discrete
+-- player telemetry (network-activity, buffer-health, video-resize, Seek, pause,
+-- resume) arriving in bursts: inter-arrival p50=0s, p90=40s, p99=49s, 4.72/min
+-- overall. Gaps still work for BACKGROUNDING (0.047 beats/min while backgrounded,
+-- a 100x drop) but NOT for pause (0.756/min — a gap threshold never fires), so
+-- pause is handled explicitly in 30_build_intervals.sql.
 -- bg/fg are used as a CORROBORATING signal, never as the sole one.
 -- ============================================================================
 
 -- ---------------------------------------------------------------------------
 -- Tunables, in one place, so the whole model can be re-tuned from here.
 -- HEARTBEAT_GAP_S : a gap longer than this ends the active interval.
---                   60s cadence + jitter -> 150s is ~2.5 missed beats.
+--                   Derived from the measured inter-arrival p99 of 49s (ADR 0007);
+--                   150s is ~3x p99. The old '2.5 missed 60s beats' was wrong.
 -- TAIL_GRACE_S    : how much credit the last heartbeat of an interval gets.
 --                   One cadence: the viewer was watching until at least the next
 --                   expected beat. Do NOT give a full gap of credit.
