@@ -45,6 +45,37 @@ accept `(unknown)` titles knowingly.
 Multi-statement SQL goes over the native protocol **through the `ch` docker container**
 (`tools/apply-sql.sh` does the same). If docker is not running, nothing in this runbook works.
 
+### Step zero — the source contract, BEFORE the load is trusted (ADR 0026)
+
+Assert what is true about the file before an hour is spent deriving from it. The gate is a
+**read-only report** — a verdict plus a one-screen table of counts — run against a throwaway
+contract database (the gate needs the rows queryable; ~1–2 min total, load-dominated):
+
+```bash
+CONTRACT_DB=sonyliv_contract_<slug>                      # fresh name, NOT in the §0 list, never sonyliv
+tools/ch -c "CREATE DATABASE ${CONTRACT_DB}"
+TARGET=cloud tools/apply-sql.sh --database "$CONTRACT_DB" sql/00_schema.sql
+TARGET=cloud CH_DATABASE="$CONTRACT_DB" tools/load.sh /path/to/unseen-raw.csv /path/to/content.csv
+tools/validate-source-contract.sh -c --database "$CONTRACT_DB"
+tools/ch -c "DROP DATABASE ${CONTRACT_DB}"               # the real run (§1) rebuilds from the CSV
+```
+
+Read the verdict against the committed baseline —
+[`evidence/source-contract/baseline-sonyliv-2026-08-02.txt`](../evidence/source-contract/baseline-sonyliv-2026-08-02.txt),
+three questions in [`evidence/source-contract/README.md`](../evidence/source-contract/README.md):
+
+- **FAIL** → stop. The file is not the protocol we modeled (wrong timestamp units, missing column,
+  empty identity, new `event_type`). Fix the understanding, not the gate.
+- **WARN new vs baseline** → proceed with eyes open. **Vocabulary drift is the one that silently
+  inflates the answer** — unknown events fail open in the model and no other gate can see them
+  (doubts/11); a non-zero drift row goes next to the submitted number.
+- The gate **changes nothing** — treatment of bad rows stays with `sql/15_normalise.sql` (§5.6) and
+  the loader's own guards. If content metadata was not re-delivered, run with the raw CSV only: the
+  gate reports every id as unresolved, which is exactly what serving would do (A9/R10).
+
+This doubles as a dress rehearsal of the loader's positional header check (§2's first failure row)
+on a database whose loss costs nothing.
+
 ---
 
 ## 1. The run
