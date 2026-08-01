@@ -2,7 +2,9 @@
 
 > **Summary:** Click-a-thon India 2026 · SonyLIV **foreground-only concurrency**. Built end to end on
 > ClickHouse Cloud: session, user and content concurrency off a hour-clipped delta serving layer,
-> all 7 raw dimensions, rolling/tumbling windows, ClickStack both charting and self-observing. Peak
+> all 7 raw dimensions, rolling/tumbling windows, ClickStack both charting and self-observing. Aggregates
+> are now **published incrementally** — a change-log MV plus a correction-by-diff finalizer, proven
+> byte-identical to a full rebuild ([ADR 0013](docs/adr/0013-continuous-publication-by-incremental-finalizer.md)). Peak
 > **2,917 @ 2026-07-26 10:56**; naive session-span would say 3,708. The correctness gate compares
 > **every minute in the data — 17,028 of them, idle ones included** — against truth recomputed from
 > `ev_raw` alone, derives its own target minutes so it works on any day, and has been negative-tested
@@ -177,7 +179,7 @@ Found late — `tools/fetch_data.sh` originally pulled only the CSVs, so
 | User-level concurrency | dataset_details | **done** |
 | Time-window trend | core aggregation | **done** |
 | Dedup of repeated events | README step 3 | **proven unnecessary** — see below |
-| **"Publish continuously updated aggregates"** | README step 4 | **STILL MISSING — the biggest gap.** We batch-rebuild via `make model`; only `mv_stateless` and `mv_user_minute` are real MVs |
+| **"Publish continuously updated aggregates"** | README step 4 | **DONE** — `sql/12_publish.sql` + `tools/publish.sh`, [ADR 0013](docs/adr/0013-continuous-publication-by-incremental-finalizer.md). A change-log MV marks what each INSERT touched; the finalizer re-derives only those sessions and appends the difference. Proven byte-identical to a rebuild in `evidence/publish.txt`. **Not yet applied to `sonyliv`** |
 | All 10 filter dimensions | dataset_details ("should work even if dimensions increase") | **done** — 7 raw carried, 3 via `dict_content`. Row count is hard-bounded at 36,930 regardless of dimension count |
 | H7 OTLP self-instrumentation | ClickStack "meaningful integration" bar | **done** — `sonyliv observe` |
 | Unseen-day dry run + evidence packaging | "no pipeline evidence, no credit" | **done** — `tools/unseen-run.sh`, ~2.5 min for a 1 GB day |
@@ -209,6 +211,13 @@ replay — it differs in `subtitle_language` (`UNK` vs `OFF`). That is harmless 
 The `ev_raw` **projection** by `video_session_id` gives 27.7× on single-session lookups with no
 dashboard regression — but the actual straggler path uses `IN (subquery)`, which full-scans anyway, so
 the real gain is **1.00× for +94% storage**. Kept in the tree, documented, **not in the build path**.
+
+> **Re-measured 2026-08-01 on the finalizer's real query shape, and the second half of that does not
+> hold.** `IN (subquery)` does *not* full-scan on 26.2, and with the finalizer's event-time window the
+> projection takes a one-session read from **104,640 rows (11.6% of `ev_raw`) to 8,193 (0.9%)** — a
+> 12.8× reduction, for +91% storage (3.73 → 7.16 MiB). Still **not shipped**: the finalizer meets its
+> target without it and the storage trade is an operator call. Numbers in `evidence/publish.txt`
+> PHASE 8 and [ADR 0013](docs/adr/0013-continuous-publication-by-incremental-finalizer.md).
 
 ---
 
