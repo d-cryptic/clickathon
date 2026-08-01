@@ -26,7 +26,14 @@ touched ten files.
 | ~~Q12~~ | ~~`feat/benchmark-evidence-bundle`~~ | **MERGED** — 13 answers, bytes read, query ids | — |
 | ~~Q4·Q7~~ | ~~`docs/scope-claims`~~ | **MERGED** cf8f1f6 — also converged dev with main (6 commits) | — |
 | ~~Q3·Q5~~ | ~~`docs/validation-dossiers-grain`~~ | **MERGED** — dossiers 05 + 06 | none written |
-| Q13 | `feat/clickstack-dashboards-sources` | `tools/clickstack-*.sh`, `docs/CLICKSTACK*.md`, `evidence/clickstack/` | — |
+| ~~Q13~~ | ~~`feat/clickstack-dashboards-sources`~~ | **MERGED** — 7 dashboards, 53 tiles verified signed-in | — |
+| ~~Q18~~ | ~~`chore/unseen-day-rehearsal`~~ | **MERGED** — 10 defects found, incl. a runbook broken on macOS | — |
+| ~~Q19~~ | ~~`docs/headline-assumption-audit`~~ | **MERGED** — 21 probes; minute membership worth −14.1% | — |
+| Q24 | `docs/problem-space-bakeoff` | `docs/design-bakeoff.md` — adjudicate the 9 unmerged commits | — |
+| Q25 | `docs/query-performance-audit` | `sql/60_projection.sql`, `evidence/query-performance.md` | 0021 |
+| Q26 | `fix/hour-rollup-id-collision` | `sql/50_hour_agg.sql`, `tools/unseen-*.sh` | **0022** |
+| Q27 | `docs/submission-artifact-audit` | `deck/checkpoint1/`, `docs/artifacts/` — claims on `main` predate 12 merges | — |
+| ~~Q13-old~~ | ~~superseded~~ | `tools/clickstack-*.sh`, `docs/CLICKSTACK*.md`, `evidence/clickstack/` | — |
 | ~~Q14~~ | ~~`feat/demo-rehearsal`~~ | **MERGED** — rehearsed live twice, 11 s machine time | — |
 | ~~Q15~~ | ~~`fix/ci-and-coverage`~~ | **MERGED** — `make ci` green, coverage 58.7–95.7% | — |
 | ~~Q16~~ | ~~`fix/target-resolution`~~ | **MERGED** + follow-up: `tools/ch` now reads `TARGET` from the env | 0018 |
