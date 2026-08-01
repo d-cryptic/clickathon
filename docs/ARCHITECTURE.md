@@ -2,8 +2,9 @@
 
 > **Summary:** Raw events → active intervals (heartbeat-gap derived) → **hour-clipped** minute deltas per
 > dimension combination → concurrency as a running sum within each hour. Serving is **one exact tier**.
-> Incremental publication ([ADR 0013](adr/0013-continuous-publication-by-incremental-finalizer.md)) maintains
-> `session_intervals` + `cc_minute_delta` **only** — the hour/day and user tiers still rebuild in batch.
+> Incremental publication maintains **all four tiers**: ADR 0013 covered `session_intervals` +
+> `cc_minute_delta`; [ADR 0016](adr/0016-publisher-owns-the-user-and-hour-tiers.md) added the hour cube
+> and user buckets. ⚠ In the **code** — on the graded database the publisher has never committed a run.
 > The hot tier of [ADR 0004](adr/0004-two-tier-lambda-serving.md)/[0005](adr/0005-heartbeat-lease-semantics.md)
 > is **declined**; `cc_minute_stateless` is the session-independent half of the mandated comparison.
 > Peak is never stored — not summable across dimensions; hour-clipping makes it summable across time. The
@@ -100,7 +101,7 @@ re-derives it and appends the difference ([ADR 0013](adr/0013-continuous-publica
 |---|---|---|
 | In normal order | claimed from `session_dirty`, re-derived, diffed | 5 sessions in 4.6 s |
 | Still open (no `VideoSessionEnd`) | dirty on every batch, so re-derived every batch — no special path | included above |
-| **Straggler, older than `W`** | *the same path.* Correction-by-diff does not care how old the event is | 1 session in **3.4 s**, 0 of 1,579 minutes wrong |
+| **Straggler, older than `W`** | *the same path.* Correction-by-diff does not care how old the event is | delta correction **flat ~0.3 s** at every scale; tier maintenance scales with audience × window (0.25 s at 1× → 7.3 s at 100×), 0 of 1,579 minutes wrong — [ADR 0020](adr/0020-correction-cost-is-delta-flat-plus-tier-proportional.md) |
 | Replay / forced correction | `−deltas(X) + deltas(X) = 0`, so it is a no-op | 200 sessions, 0 minutes moved |
 
 This is why the **watermark is no longer a gate**. ADR 0004 needed `W = 2400 s` because a sealed minute
@@ -123,7 +124,7 @@ tables only.
 | Heartbeat gaps | bg/fg pairing | bg/fg are not guaranteed; 379 unmatched in the sample — **conditional on the gating measurement below** |
 | **One exact tier, published incrementally** | two-tier lambda with a lease hot tier | the hot tier's only job was covering the sealed tier's 40-minute lag; a per-minute finalizer removes the lag, and the tier would have cost 834 h of paused time counted as watching ([ADR 0013](adr/0013-continuous-publication-by-incremental-finalizer.md)) |
 | **Change-log MV** (`session_dirty`) | scan `ev_raw` per batch for what moved | ADR 0006's "compare max event ts per session" is O(history) every run — the hackathon-size shape the statement warns about. An MV sees only the current insert block, which is exactly what needs re-deriving |
-| Correction by diff | `ALTER … UPDATE` / partition rebuild | exactly as correct as a rebuild, of one session; cost scales with stragglers, not history — **measured 3.4 s and 11.6% of `ev_raw` for a 46-minute-late straggler** |
+| Correction by diff | `ALTER … UPDATE` / partition rebuild | exactly as correct as a rebuild, of one session; cost scales with stragglers, not history — **measured flat ~0.3 s for the delta correction at every scale, reading 11.6% of `ev_raw`**; the hour/user tiers ride the same run and scale with audience × window — [ADR 0020](adr/0020-correction-cost-is-delta-flat-plus-tier-proportional.md) |
 | Prune superseded intervals | leave them to `FINAL` | `ReplacingMergeTree` replaces a key, it cannot delete one; a straggler bridging a gap makes an `interval_start` vanish and the orphan would compound into the next run's negation |
 | Dimension-first key **on the serving tables** | time-first | dashboards filter then range-scan; measured 122× on a comparable A/B |
 | Time-bucket-first key **on `ev_raw`** | session-id-first | measured 17.3× better on the dashboard shape, identical on the full interval rebuild ([ADR 0002](adr/0002-order-by-time-bucket-then-platform.md)) |

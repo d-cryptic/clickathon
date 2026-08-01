@@ -96,7 +96,7 @@ buckets ([ADR 0013](docs/adr/0013-continuous-publication-by-incremental-finalize
 database: **0 differing cells vs a from-scratch rebuild across all four tiers**, through
 bootstrap, growth, shrink, a dimension change, a 46-minute straggler, and 200 forced
 republications. Adoption over an existing database is one DDL round-trip and does **not**
-re-derive history. A one-session straggler correction costs ~3.4 s.
+re-derive history. Delta correction is window-bounded and **flat — ~0.3 s at every scale measured**; tier maintenance (hour cube + user buckets) rides along in the same run and scales with audience × window: 0.25 s at 1×, **7.3 s at 100×** on the test box ([ADR 0020](docs/adr/0020-correction-cost-is-delta-flat-plus-tier-proportional.md)). The older "3.4 s" figure is retired — it measured a publisher that maintained two tiers, not four.
 
 **Honesty note — read before crediting this.** The proof ran in scratch databases
 (`sonyliv_pub`/`sonyliv_pub_ctl`). On the **graded** database the publication layer is installed

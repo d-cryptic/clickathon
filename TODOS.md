@@ -21,7 +21,7 @@
       finalizer re-derives only those and appends `-deltas(old) + deltas(new)`. The one mutation is a
       lightweight `DELETE` pruning superseded interval rows per run. Proven in `evidence/publish.txt` —
       byte-identical to a from-scratch rebuild at every stage, including a straggler 46 min behind the
-      watermark corrected in **3.4 s** reading 11.6% of `ev_raw`.
+      watermark corrected with a **flat ~0.3 s delta correction** at every scale measured, plus tier maintenance that scales with audience × window (0.25 s at 1×, 7.3 s at 100×) — ADR 0020. The retired "3.4 s" figure measured the two-tier publisher.
       ADR 0013 alone maintained only `session_intervals` + `cc_minute_delta`, so hour/day peaks went
       stale and user concurrency inflated (a `uniqExact` set union cannot retract). **ADR 0016 closes
       that**: the `hours`/`users` phases re-derive the touched hour-cube rows and user-minute buckets,
