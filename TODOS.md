@@ -32,7 +32,10 @@
       `sql/40_deltas.sql`; 24,958 delta rows from 30,769 intervals. Reconcile PASSES on all 3,725
       minutes against the interval expansion, peak 2,887 both ways. Serving reads 299 KB vs 2.55 MB
       for the expansion — 8.5x less I/O, 23 ms. Rebuild: `tools/build-model.sh`.
-- [ ] **[H4]** `/reconcile` passing on 5 minutes — **this is the gate, do not pass it by**
+- [x] **[H4]** `/reconcile` passing on 5 minutes — **PASSES**. `tools/reconcile.sh` recomputes truth
+      from `ev_raw` alone (window functions, not the model's arraySplit) and compares: peak 2,887,
+      both boundaries, two arbitrary — all zero delta. Evidence in `evidence/reconcile.txt`.
+      Negative-tested: injecting one bad delta row makes it exit 1.
 - [ ] **[H4]** Finalizer + watermark; truncation test proving open-session absorption.
       ← **MVP LINE: sealed tier + stateless baseline is a complete submission from here**
 - [ ] **[H4]** `PROJECTION` on `ev_raw` ordered by `video_session_id` — the finalizer and the

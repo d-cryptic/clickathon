@@ -114,6 +114,11 @@ clickstack-cloud:
 model:
 	tools/build-model.sh
 
+## reconcile: THE GATE — recompute from ev_raw and compare (TARGET=cloud for Cloud)
+.PHONY: reconcile
+reconcile:
+	tools/reconcile.sh
+
 ## sql-local: apply sql/*.sql to the local container
 .PHONY: sql-local
 sql-local:

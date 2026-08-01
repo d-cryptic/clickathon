@@ -10,6 +10,7 @@
 | `stats "SQL"` | run a query and print `X-ClickHouse-Summary` (rows/bytes/ms) — no `FLUSH LOGS` |
 | `load.sh [raw.csv] [content.csv]` | load the datasets, converting epoch **millis** → `DateTime64(3)` |
 | `build-model.sh` | rebuild the model in order: intervals -> deltas -> views, then reconcile. TRUNCATEs first — deltas double if you do not |
+| `reconcile.sh` | **THE GATE** — recompute concurrency from `ev_raw` and compare. Exits 1 on any mismatch; writes `evidence/reconcile.txt` |
 | `apply-sql.sh [file...]` | apply `sql/*.sql` to local or `TARGET=cloud`. initdb only runs on first boot; Cloud has no mount at all |
 | `clickstack-bootstrap.sh` | headless ClickStack setup; prints the OTLP ingestion key |
 | `clickstack-sources.sh` | point the SELF-HOSTED HyperDX at our concurrency views. Idempotent |

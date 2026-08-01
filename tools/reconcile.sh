@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# tools/reconcile.sh — THE GATE. Recompute concurrency from ev_raw and compare
+# against the serving layer. Any non-zero delta is a failure and exits 1.
+#
+# Truth comes from ev_raw only (sql/90_reconcile.sql) — it never reads
+# session_intervals or cc_minute_delta, so it tests the pipeline instead of
+# agreeing with itself. It also uses a different implementation of the same
+# spec (window functions vs arraySplit) so an error in one shows up rather than
+# cancelling out.
+#
+# Writes evidence/reconcile.txt. Commit that file: "no pipeline evidence, no
+# credit."
+#
+#   tools/reconcile.sh                # local
+#   TARGET=cloud tools/reconcile.sh   # the graded service
+set -euo pipefail
+cd "$(dirname "$0")/.."
+[ -f .env ] && set -a && . ./.env && set +a
+TARGET="${TARGET:-local}"
+OUT=evidence/reconcile.txt
+mkdir -p evidence
+
+q() { if [ "$TARGET" = cloud ]; then tools/ch -c "$1"; else tools/ch "$1"; fi; }
+qf() {  # qf <file>  — run a multi-line file
+  if [ "$TARGET" = cloud ]; then
+    local h="${CH_HOST#https://}"; h="${h%/}"
+    curl -sS --fail-with-body "https://${h}:${CH_PORT}/?database=${CH_DATABASE}&default_format=PrettyCompact" \
+      --user "${CH_USER}:${CH_PASSWORD}" --data-binary "@$1"
+  else
+    docker exec -i ch clickhouse-client --format PrettyCompact < "$1"
+  fi
+}
+
+{
+  echo "RECONCILE — serving layer vs ev_raw"
+  echo "target: $TARGET   commit: $(git rev-parse --short HEAD 2>/dev/null || echo n/a)"
+  echo
+  echo "== 1. THE GATE — truth recomputed from ev_raw, five minutes"
+  echo "   (peak, both data boundaries, two arbitrary; any non-zero delta is a failure)"
+  echo
+  qf sql/90_reconcile.sql
+  echo
+  echo "== 2. MODEL COMPARISON — the same minutes under three definitions"
+  echo
+  q "
+  WITH mins AS (SELECT arrayJoin([toDateTime('2026-07-14 15:43:00'),toDateTime('2026-07-26 06:09:00'),
+                                  toDateTime('2026-07-26 10:56:00'),toDateTime('2026-07-26 11:10:00'),
+                                  toDateTime('2026-07-26 11:31:00')]) AS m),
+       spans AS (SELECT video_session_id, min(event_timestamp) AS s, max(event_timestamp) AS e
+                 FROM ev_raw GROUP BY video_session_id),
+       naive AS (SELECT m, uniqExact(spans.video_session_id) AS naive_session_span
+                 FROM mins CROSS JOIN spans
+                 WHERE spans.s < m + INTERVAL 1 MINUTE AND spans.e > m GROUP BY m),
+       aware AS (SELECT m, toInt64(sum(d.delta)) AS session_aware
+                 FROM mins CROSS JOIN cc_minute_delta d
+                 WHERE d.minute >= toStartOfHour(m) AND d.minute <= m GROUP BY m)
+  SELECT a.m AS minute, a.session_aware, sl.concurrent AS stateless, n.naive_session_span,
+         n.naive_session_span - a.session_aware AS naive_overcount,
+         round(100.0*(n.naive_session_span - a.session_aware)/n.naive_session_span, 1) AS pct_overcount
+  FROM aware a
+  LEFT JOIN naive n ON n.m = a.m
+  LEFT JOIN v_concurrency_minute_total sl ON sl.minute = a.m
+  ORDER BY minute FORMAT PrettyCompact"
+  echo
+  echo "== 3. HEADLINE — total counted watch time"
+  echo
+  q "
+  SELECT
+    round((SELECT sum(dateDiff('second', interval_start, interval_end)) FROM session_intervals FINAL)/3600,1) AS session_aware_hours,
+    round((SELECT sum(sp) FROM (SELECT dateDiff('second', min(event_timestamp), max(event_timestamp)) AS sp
+                                FROM ev_raw GROUP BY video_session_id))/3600,1) AS naive_span_hours,
+    round(100 - 100*session_aware_hours/naive_span_hours, 1) AS pct_excluded
+  FORMAT Vertical"
+  echo
+  echo "Note on 2026-07-26 11:31: naive reads 0 while the model reads 5. That is TAIL_S —"
+  echo "the model credits one cadence past the last event, which at the very end of the"
+  echo "dataset extends beyond max(event_timestamp). Expected, not a discrepancy."
+  echo
+  echo "The gap is backgrounded and paused time. Heartbeats stop while backgrounded"
+  echo "(0.047/min vs 4.72/min active) but SURVIVE a pause (0.756/min), so gaps alone"
+  echo "cannot find paused time — it is excluded explicitly. See ADR 0007."
+} > "$OUT" 2>&1
+
+cat "$OUT"
+
+if grep -q MISMATCH "$OUT"; then
+  echo
+  echo "RECONCILE FAILED — see $OUT" >&2
+  exit 1
+fi
+echo
+echo "reconcile PASSED · evidence written to $OUT"
