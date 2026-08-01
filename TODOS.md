@@ -40,5 +40,6 @@
 
 ## Blocked / needs a human
 
-- [ ] **LICENSE** — MIT is in place as a default; confirm or switch (`Apache-2.0`). Required artifact.
+- [ ] **LICENSE** — ⚠ REMOVED for now at your request. It is a **required submission artifact**
+      (MIT or Apache-2.0) and a missing one scores zero. Must be back before 12:00 Sunday.
 - [ ] **Team Captain** — only they can submit. Confirm who, and that they are awake before the freeze.

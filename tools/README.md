@@ -5,6 +5,7 @@
 
 | Tool | Does |
 |---|---|
+| `fetch_data.sh [--force\|--verify]` | download the provided CSVs into `data/`, sha256-pinned. Run this before `load.sh` |
 | `ch [-c] "SQL"` | run a query — local by default, `-c` for Cloud |
 | `stats "SQL"` | run a query and print `X-ClickHouse-Summary` (rows/bytes/ms) — no `FLUSH LOGS` |
 | `load.sh [raw.csv] [content.csv]` | load the datasets, converting epoch **millis** → `DateTime64(3)` |

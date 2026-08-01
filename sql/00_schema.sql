@@ -5,9 +5,12 @@
 
 -- ---------------------------------------------------------------------------
 -- Raw events, exactly as delivered. One row per event.
--- ORDER BY (video_session_id, event_timestamp): every downstream computation is
--- per-session interval reconstruction, so we want a session's events contiguous
--- on disk. Session id first makes that a single range read per session.
+--
+-- ORDER BY (toStartOfHour(event_timestamp), platform, video_session_id, event_timestamp)
+-- Low cardinality first, per the official rule `schema-pk-cardinality-order` (CRITICAL).
+-- An earlier version led with video_session_id for session locality; MEASURED on the real
+-- file, that was 17.3x worse on the dashboard shape and bought nothing, because a full
+-- interval rebuild GROUP BYs every row regardless. See docs/adr/0002.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS ev_raw
 (
@@ -31,7 +34,7 @@ CREATE TABLE IF NOT EXISTS ev_raw
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMMDD(event_timestamp)
-ORDER BY (video_session_id, event_timestamp)
+ORDER BY (toStartOfHour(event_timestamp), platform, video_session_id, event_timestamp)
 SETTINGS index_granularity = 8192,
          -- per-column compression stats read 0 for COMPACT parts; force Wide so the
          -- evidence harness reports real numbers even on a small load. See docs/VERIFIED.md.

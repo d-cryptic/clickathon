@@ -13,9 +13,14 @@ layer, not by rescanning session history.
 ```bash
 cp .env.example .env          # fill in CH_PASSWORD_LOCAL and AGENT_PASSWORD
 docker compose up -d
-cp /path/to/ch-hackathon-*.csv data/
+tools/fetch_data.sh           # downloads the 223 MB of CSVs, checksum-verified
 tools/load.sh
 ```
+The datasets are **not in this repo** — they are 223 MB of organiser-provided data. `fetch_data.sh`
+pulls them from the [organiser repo](https://github.com/sidagarwal04/click-a-thon-2026/tree/main/SonyLiv/data)
+and verifies each against a pinned sha256, so a truncated download fails there rather than surfacing
+as wrong concurrency numbers later. Already have the files? `tools/fetch_data.sh --verify` checks them
+without re-downloading.
 Then verify before trusting anything — a failed init script leaves a container that looks healthy:
 ```bash
 tools/ch "SELECT name FROM system.tables WHERE database='default'"
