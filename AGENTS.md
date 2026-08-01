@@ -38,6 +38,7 @@ what is verified, what is broken, and what is still missing, in one page.
 | **See ClickStack observing OUR pipeline (watermark lag, build timing, reconcile gate)** | [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) — `sonyliv observe -target cloud` |
 | Know what is already **verified** vs assumed | [docs/VERIFIED.md](docs/VERIFIED.md) ← **read before trusting any ClickHouse claim** |
 | **Answer "how does this behave at 100×?"** | [evidence/scale.txt](evidence/scale.txt) — measured at 1×/10×/100×, and what breaks first. Regenerate with `tools/scale-test.sh` |
+| **Answer the organiser's four "design decisions to confirm"** | [docs/DESIGN_DECISIONS.md](docs/DESIGN_DECISIONS.md) — session timeout, lateness tolerance, window size, freshness. Three decided; **lateness is the open one** |
 | Record a design decision | [docs/adr/](docs/adr/) |
 | **Present at a mentor checkpoint** | [docs/artifacts/2026-08-01-mentor-checkpoint.html](docs/artifacts/2026-08-01-mentor-checkpoint.html) — 11 diagrams: what we show, explain, and need answered |
 | **Understand the model in depth, with diagrams** | [docs/artifacts/](docs/artifacts/) — the 4-part deep dive: `deep-1-data` · `deep-2-model` · `deep-3-correctness` · `deep-4-scale-ops` |
