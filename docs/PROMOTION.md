@@ -224,6 +224,40 @@ Two independent reviews had said "two" and the number was three.
 with a caveat. And an attribution agreed by two reviews is still worth re-deriving — "two characters"
 was very nearly right, and very nearly is how a third difference stays invisible.
 
+## ✅ The method changes: promote FILES to `dev`'s state, not COMMITS onto `main`
+
+All three rejections share one cause, and it is the method rather than the agents.
+
+**Cherry-picking commits onto `main` reconstructs a state by hand**, and hand-reconstruction misses
+the follow-ups: `df6e7a2` for ADR 0009, the `build-model.sh` step for ADR 0011, 230 lines of
+`unseen-run.sh` for ADR 0014, wave-1 tooling for W3. Every miss produced a branch where the ADR's
+claim was false — and a green gate, because the gate does not check ADR prose.
+
+**The fix is to stop reconstructing.** For a wave, take **`dev`'s version of every file the wave
+owns**, wholesale:
+
+```bash
+git checkout dev -- sql/30_build_intervals.sql sql/90_reconcile.sql sql/15_normalise.sql \
+                    sql/50_hour_agg.sql sql/85_windows.sql tools/build-model.sh …
+```
+
+`dev` is the state in which those ADRs' claims are **true and gate-green**. Copying that state cannot
+produce a branch where an ADR contradicts its own tree — the failure mode that rejected three
+attempts.
+
+**This keeps everything the second level was for.** The wave is still one coherent feature group; the
+six checks still run; Codex still validates independently; `main` is still built up deliberately
+rather than fast-forwarded in one unexamined jump. What changes is only *how the branch reaches the
+state being validated* — by copy rather than by reconstruction.
+
+**What it gives up, stated honestly:** commit-level provenance on `main`. A wave lands as one commit
+per feature group rather than replaying `dev`'s history. That is a real loss for `git blame`, and it
+is worth it — `dev`'s history remains intact and is where anyone should look.
+
+**The file list per wave must still be derived, not guessed.** Use
+`git diff --name-only main..dev -- sql/ tools/` and assign every file to exactly one wave. A file in
+no wave never reaches `main`; a file in two waves is a conflict waiting to happen.
+
 ## 🔴 Three rejections, three incomplete cherry-picks — this is now THE failure mode
 
 W2's **second** rejection has the same root cause as its first, and W3's was a variant. That makes it
