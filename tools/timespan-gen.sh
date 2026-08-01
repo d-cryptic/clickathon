@@ -42,6 +42,16 @@ done
 POINTS=("$@"); [ ${#POINTS[@]} -eq 0 ] && POINTS=(12:694000 180:46000 12:4170000 60:834000 180:278000)
 SEED="${SEED:-20260202}"
 KEEP="${KEEP:-0}"
+# Every log_comment carries this. system.query_log is server-wide and keeps
+# hours of history, so a bare 'tspan_d12_e20k_gen' comment matches the previous
+# run's rows too — and stage_stats picks the SLOWEST match, which would silently
+# report a stale, larger point's timing as this run's. One run, one namespace.
+RUNID="${RUNID:-r$(date -u +%m%d%H%M%S)}"
+# Every log_comment carries this nonce. stage_stats reads system.query_log by
+# log_comment and takes the slowest match, so WITHOUT a per-run nonce a re-run
+# of the same point silently reports the PREVIOUS run's timings — which is
+# exactly what happened between the first and second smoke runs of this script.
+RUNID="$(date -u +%Y%m%d%H%M%S)"
 OUT="evidence/timespan/timespan.txt"
 REAL_DB="tspan_real"
 T0DATE="2026-02-01"           # a Sunday; DOW0 below encodes that
@@ -57,6 +67,22 @@ find_csv() { local n="$1" c
   done; echo "data/$n"; }
 RAW_CSV="${RAW_CSV:-$(find_csv ch-hackathon-raw-data.csv)}"
 CONTENT_CSV="${CONTENT_CSV:-$(find_csv ch-hackathon-content-data.csv)}"
+
+# --- single-run lock ---------------------------------------------------------
+# Two copies of this script share database names (tspan_*) AND the evidence
+# file, so a second run DROPs the first run's scratch database out from under
+# it mid-build. That is not hypothetical: it happened, and it surfaced as
+# "Database tspan_d12_e694k does not exist" in the middle of the users stage —
+# a failure that reads like a model limit and is nothing of the kind. A stale
+# lock (previous run killed) is taken over rather than obeyed.
+LOCK="evidence/timespan/.run.lock"
+mkdir -p evidence/timespan
+if [ -f "$LOCK" ] && kill -0 "$(cat "$LOCK" 2>/dev/null)" 2>/dev/null; then
+  printf 'timespan-gen.sh: another run is live (pid %s). Refusing to share scratch databases.\n' "$(cat "$LOCK")" >&2
+  exit 1
+fi
+printf '%s' "$$" > "$LOCK"
+trap 'rm -f "$LOCK"' EXIT
 
 say() { printf '%s\n' "$*" | tee -a "$OUT"; }
 hr()  { say "--------------------------------------------------------------------------"; }
@@ -100,7 +126,9 @@ summary() {  # summary <db> <sql> [extra-url] -> "read_rows read_bytes elapsed_n
     "${CH_LOCAL_URL}/?user=app&password=${CH_PASSWORD_LOCAL}&database=${db}&wait_end_of_query=1${extra}" \
     --data-binary "$sql" >/dev/null 2>&1
   local s; s=$(grep -i '^x-clickhouse-summary' "$hdr" | tail -1 | cut -d: -f2-)
-  python3 - "$s" "$(head -c 160 "$body" | tr -d '\n\t')" <<'PY'
+  # tabs -> '/' rather than deleted: a multi-column TSV answer with its tabs
+  # stripped reads as one long meaningless integer.
+  python3 - "$s" "$(head -c 160 "$body" | tr '\t' '/' | tr -d '\n')" <<'PY'
 import json, sys
 try: d = json.loads(sys.argv[1].strip())
 except Exception: d = {}
@@ -172,13 +200,32 @@ done
 RAW_COLS='content_id Int64, video_session_id String, user_id String, event_type String, event String, event_timestamp UInt64, platform String, app_version String, country String, audio_language String, subtitle_language String, player_version String, session_start_epoch UInt64'
 CONTENT_COLS='content_id Int64, title String, video_type String, category String'
 docker exec -i ch clickhouse-client --database "$REAL_DB" --query \
-  "INSERT INTO content_dim SELECT content_id,title,video_type,category FROM input('$CONTENT_COLS') FORMAT CSVWithNames" < "$CONTENT_CSV"
+  "INSERT INTO content_dim (content_id, title, video_type, category) SELECT content_id,title,video_type,category FROM input('$CONTENT_COLS') FORMAT CSVWithNames" < "$CONTENT_CSV"
 docker exec -i ch clickhouse-client --database "$REAL_DB" --query \
-  "INSERT INTO ev_raw SELECT content_id, video_session_id, user_id, event_type, event, toDateTime64(event_timestamp/1000,3), platform, app_version, country, audio_language, subtitle_language, player_version, toDateTime64(session_start_epoch/1000,3) FROM input('$RAW_COLS') FORMAT CSVWithNames" < "$RAW_CSV"
-say "  loaded $(comma "$(qd "$REAL_DB" 'SELECT count() FROM ev_raw')") real events"
+  "INSERT INTO ev_raw (content_id, video_session_id, user_id, event_type, event, event_timestamp, platform, app_version, country, audio_language, subtitle_language, player_version, session_start_epoch) SELECT content_id, video_session_id, user_id, event_type, event, toDateTime64(event_timestamp/1000,3), platform, app_version, country, audio_language, subtitle_language, player_version, toDateTime64(session_start_epoch/1000,3) FROM input('$RAW_COLS') FORMAT CSVWithNames" < "$RAW_CSV"
+REAL_N=$(qd "$REAL_DB" 'SELECT count() FROM ev_raw' | head -1)
+REAL_C=$(qd "$REAL_DB" 'SELECT count() FROM content_dim' | head -1)
+say "  loaded $(comma "$REAL_N") real events, $(comma "$REAL_C") catalog rows"
+# The INSERTs above name their columns EXPLICITLY, and this guard exists,
+# because the positional form silently loaded NOTHING once ADR 0024 added the
+# `extra` Map to both tables: 13 selected columns into a 14-column table is an
+# error the discarded stderr swallowed. The generator then fitted its
+# vocabularies from an empty table and produced a full, plausible-looking,
+# entirely blank-dimensioned stream that PASSED every correctness gate — the
+# exact "plausible garbage" failure tools/scale-gen.sql warns about. A
+# generator whose vocabularies are empty must stop, not measure.
+[ "${REAL_N:-0}" -lt 900000 ] && { say "  ABORT: expected ~905,558 real events, got '${REAL_N:-0}'. Vocabularies would be empty."; exit 1; }
+[ "${REAL_C:-0}" -lt 30000 ]  && { say "  ABORT: expected ~33,464 catalog rows, got '${REAL_C:-0}'. Content vocabulary would be empty."; exit 1; }
 docker exec -i ch clickhouse-client --database "$REAL_DB" --multiquery < tools/scale-gen.sql >/dev/null 2>&1 \
-  && say "  vocabularies fitted (gen_lut / gen_content / gen_ev; gen_start unused — the time axis is the thing replaced here)" \
   || { say "  FAILED to fit vocabularies"; exit 1; }
+VOC=$(qd "$REAL_DB" "SELECT concat(toString((SELECT uniqExact(dim) FROM gen_lut)), ' dims / ',
+                                   toString((SELECT count() FROM gen_lut)), ' values, ',
+                                   toString((SELECT count() FROM gen_content)), ' content ranks, ',
+                                   toString((SELECT count() FROM gen_ev)), ' event slots')" | head -1)
+case "$VOC" in
+  7*) say "  vocabularies fitted: $VOC  (gen_start unused — the time axis is the thing this file replaces)" ;;
+  *)  say "  ABORT: vocabularies did not fit as expected ($VOC)"; exit 1 ;;
+esac
 
 declare -a SUMROWS=() BUILDROWS=() BENCHROWS=()
 PEAK_DISK_TOTAL=0
@@ -217,7 +264,7 @@ run_point() {
   # 65,536-slot inverse-CDF LUTs, same O(1)-per-session idiom as gen_start in
   # tools/scale-gen.sql — but built from the synthetic multi-day profile
   # instead of the provided file's launch-event histogram.
-  run_sql "$DBN" "tspan_${LBL}_luts" <<SQL
+  run_sql "$DBN" "tspan_${RUNID}_${LBL}_luts" <<SQL
 DROP TABLE IF EXISTS ts_day;
 CREATE TABLE ts_day (slot UInt32, d UInt32) ENGINE = MergeTree ORDER BY slot;
 INSERT INTO ts_day
@@ -309,7 +356,7 @@ PY
   BLKS=$(printf '%s\n' "$PROBE_META" | sed -n 2p)
   printf '%s\n' "$PROBE_META" | tail -n +3 > "evidence/timespan/probe-truth-${LBL}.tsv"
   say "  probe days (of $D): $PROBE_DAYS  ·  designed truth in evidence/timespan/probe-truth-${LBL}.tsv"
-  run_sql "$DBN" "tspan_${LBL}_probe" --max_partitions_per_insert_block=400 <<SQL
+  run_sql "$DBN" "tspan_${RUNID}_${LBL}_probe" --max_partitions_per_insert_block=400 <<SQL
 INSERT INTO ev_raw (content_id, video_session_id, user_id, event_type, event,
                     event_timestamp, platform, app_version, country,
                     audio_language, subtitle_language, player_version, session_start_epoch)
@@ -342,14 +389,14 @@ SQL
     PARTLIMIT_SHOWN=1
     say "  [gen] first attempt at DEFAULT settings (max_partitions_per_insert_block=100):"
     GENRC=0
-    run_sql "$DBN" "tspan_${LBL}_gen_default" <<SQL || GENRC=$?
+    run_sql "$DBN" "tspan_${RUNID}_${LBL}_gen_default" <<SQL || GENRC=$?
 $(gen_sql "$S" "$NC" "$D")
 SQL
     if [ "$GENRC" -ne 0 ]; then
       say "    TRIPPED, as a naive $D-day bulk insert would: $(printf '%s' "$LAST_ERR" | tr '\n' ' ' | sed 's/.*DB::Exception: //' | cut -c1-220)"
       qd "$DBN" "TRUNCATE TABLE ev_raw" >/dev/null; qd "$DBN" "TRUNCATE TABLE cc_minute_stateless" >/dev/null
       # the probe rows died with the truncate — put them back
-      run_sql "$DBN" "tspan_${LBL}_probe2" --max_partitions_per_insert_block=400 <<SQL
+      run_sql "$DBN" "tspan_${RUNID}_${LBL}_probe2" --max_partitions_per_insert_block=400 <<SQL
 INSERT INTO ev_raw (content_id, video_session_id, user_id, event_type, event,
                     event_timestamp, platform, app_version, country,
                     audio_language, subtitle_language, player_version, session_start_epoch)
@@ -374,13 +421,13 @@ SQL
   fi
   if [ ${#GEN_SETTINGS[@]} -gt 0 ]; then
     GENRC=0
-    run_sql "$DBN" "tspan_${LBL}_gen" "${GEN_SETTINGS[@]}" <<SQL || GENRC=$?
+    run_sql "$DBN" "tspan_${RUNID}_${LBL}_gen" "${GEN_SETTINGS[@]}" <<SQL || GENRC=$?
 $(gen_sql "$S" "$NC" "$D")
 SQL
     [ "$GENRC" -ne 0 ] && { say "  [gen] FAILED: $(err_line)"; return 1; }
   fi
   local GS NEV
-  GS=$(stage_stats "tspan_${LBL}_gen"); [ -z "$GS" ] && GS=$(stage_stats "tspan_${LBL}_gen_default")
+  GS=$(stage_stats "tspan_${RUNID}_${LBL}_gen"); [ -z "$GS" ] && GS=$(stage_stats "tspan_${RUNID}_${LBL}_gen_default")
   NEV=$(qd "$DBN" 'SELECT count() FROM ev_raw')
   say "  [gen]  $(comma "$NEV") events  ·  $(printf '%s' "$GS" | cut -f1) ms  ·  peak mem $(fmt "$(printf '%s' "$GS" | cut -f2)")$(spill_note "$GS")"
 
@@ -406,6 +453,16 @@ SQL
     FROM (SELECT toDate(min(event_timestamp)) != toDate(max(event_timestamp)) AS cross
           FROM ev_raw WHERE platform != 'TIMESPAN_PROBE' GROUP BY video_session_id)
     FORMAT TSVRaw" )"
+  # Dimension vocabulary actually reaching the stream. Printed because a run
+  # whose vocabularies failed to fit produces blank dimensions everywhere and
+  # still passes every correctness gate — see the guard in PHASE 0.
+  say "$(qd "$DBN" "
+    SELECT concat('    distinct dims in stream: platform ', toString(uniqExact(platform)),
+                  ' · country ', toString(uniqExact(country)),
+                  ' · app ', toString(uniqExact(app_version)),
+                  ' · content ', toString(uniqExact(content_id)),
+                  ' · blank-platform rows ', toString(countIf(platform = '')))
+    FROM ev_raw WHERE platform != 'TIMESPAN_PROBE' FORMAT TSVRaw")"
   if [ "$D" -ge 60 ]; then
     say "$(qd "$DBN" "
       WITH f AS (SELECT groupArray(content_id) AS a FROM (
@@ -442,8 +499,8 @@ SQL
       tname="${tier%%:*}"; targs="${tier#*:}"
       qd "$DBN" "TRUNCATE TABLE IF EXISTS $tiername" >/dev/null 2>&1
       # shellcheck disable=SC2086
-      if run_stage "$DBN" "tspan_${LBL}_${lbl}_${tname}" "$f" --max_partitions_per_insert_block=400 $targs; then
-        st=$(stage_stats "tspan_${LBL}_${lbl}_${tname}")
+      if run_stage "$DBN" "tspan_${RUNID}_${LBL}_${lbl}_${tname}" "$f" --max_partitions_per_insert_block=400 $targs; then
+        st=$(stage_stats "tspan_${RUNID}_${LBL}_${lbl}_${tname}")
         say "  [$lbl$([ "$tname" != default ] && echo "+$tname")]  $(printf '%s' "$st" | cut -f1) ms  ·  peak mem $(fmt "$(printf '%s' "$st" | cut -f2)")  ·  read $(comma "$(printf '%s' "$st" | cut -f3)") rows  ·  wrote $(comma "$(printf '%s' "$st" | cut -f4)") rows$(spill_note "$st")"
         BUILDROWS+=("${LBL}|$lbl$([ "$tname" != default ] && echo "+$tname")|$(printf '%s' "$st" | cut -f1)|$(printf '%s' "$st" | cut -f2)")
         ok=1; break
@@ -509,7 +566,7 @@ SQL
   MSTART=$((MIDD - 15)); [ $MSTART -lt 0 ] && MSTART=0
   WMS=$((T0 + MSTART * 86400));      WME=$((WMS + 86400 * (D < 30 ? D : 30)))
   W3S=$T0;                           W3E=$((T0 + D * 86400))
-  enc() { python3 -c "import sys,datetime;print(datetime.datetime.utcfromtimestamp(int(sys.argv[1])).strftime('%Y-%m-%d%%20%H:%M:%S'))" "$1"; }
+  enc() { python3 -c "import sys,datetime;print(datetime.datetime.fromtimestamp(int(sys.argv[1]),datetime.timezone.utc).strftime('%Y-%m-%d%%20%H:%M:%S'))" "$1"; }
   wrange_sql() { echo "SELECT peak, integral, round(avg_concurrent,2), hours_from_hour_tier, change_points_from_minute_tier FROM v_cc_window_range(p_start={p_start:DateTime}, p_end={p_end:DateTime}, p_platform={p_platform:String}, p_country={p_country:String}, p_content_id={p_content_id:Int64}) FORMAT TSV"; }
   local -a BN=() BQ=() BX=()
   BN+=("W1 window-range, ONE day (hour tier)");    BQ+=("$(wrange_sql)"); BX+=("&param_p_start=$(enc $W1S)&param_p_end=$(enc $W1E)&param_p_platform=*&param_p_country=*&param_p_content_id=-1")
@@ -523,7 +580,7 @@ SQL
   local i j r rr rb res lblq
   for i in "${!BN[@]}"; do
     local tms=()
-    lblq="tspan_${LBL}_q${i}"
+    lblq="tspan_${RUNID}_${LBL}_q${i}"
     for j in 1 2 3; do
       r=$(summary "$DBN" "${BQ[$i]}" "${BX[$i]}&log_comment=$lblq")
       tms+=("$(printf '%s' "$r" | cut -f3)")
@@ -618,7 +675,9 @@ PY
   # carry 7-DAY TTLs. Those TTLs are on marked_at — PROCESSING time — so a
   # straggler whose EVENT time is months old must still publish cleanly. Proved
   # here by bridging a gap in a session from the FIRST WEEK of a 180-day span.
-  if [ "$D" -ge 100 ] && [ "$NEV" -gt 20000000 ]; then
+  # STRAGGLER_MIN_EV exists so this branch is reachable in a cheap smoke run;
+  # the default keeps it at the one point the brief asks for (180 d / 50M).
+  if [ "$D" -ge 100 ] && [ "$NEV" -gt "${STRAGGLER_MIN_EV:-20000000}" ]; then
     say ""
     say "  OLD-STRAGGLER PUBLISH — event-time ~$((D - 7)) days before span end:"
     if docker exec -i ch clickhouse-client --database "$DBN" --multiquery < sql/12_publish.sql >/dev/null 2>&1; then
@@ -632,12 +691,19 @@ PY
                                                             ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)) AS gap_s
           FROM session_intervals FINAL
           WHERE interval_start < toDateTime($((T0 + 7 * 86400))))
-        WHERE gap_s BETWEEN 180 AND 400
+        WHERE gap_s BETWEEN 180 AND 300
         ORDER BY video_session_id, interval_end LIMIT 1" | head -1)
       sess=$(printf '%s' "$pick" | cut -f1); ts=$(printf '%s' "$pick" | cut -f2)
       if [ -n "$sess" ] && [ -n "$ts" ]; then
         say "    straggler: ${sess:0:20}…  heartbeat at $ts (bridges a gap in week 1)"
+        # gap_s is capped at 300 so the midpoint beat sits <= 150 s from BOTH
+        # sides and the two intervals actually merge — a wider gap would insert
+        # a beat that changes nothing and prove nothing. Columns are named for
+        # the ADR 0024 reason documented in PHASE 0.
         qd "$DBN" "INSERT INTO ev_raw
+             (content_id, video_session_id, user_id, event_type, event, event_timestamp,
+              platform, app_version, country, audio_language, subtitle_language,
+              player_version, session_start_epoch)
            SELECT content_id, video_session_id, user_id, 'VideoHeartbeat', 'network-activity',
                   toDateTime64('$ts', 3), platform, app_version, country, audio_language,
                   subtitle_language, player_version, session_start_epoch
