@@ -7,7 +7,11 @@
 # > the stream — all server-side SQL), runs the REAL model files over it, and
 # > captures per-stage time/memory, row counts against the ADR 0008 ceiling,
 # > on-disk size and compression, part counts, and serving-query latency AND
-# > BYTES READ. Writes evidence/scale.txt. Nothing here touches `sonyliv`.
+# > BYTES READ. Since ADR 0016 the model has FOUR tiers: the user tier
+# > (sql/45_user_concurrency.sql, ReplacingMergeTree of uniqExact states) is
+# > built and reconciled here too, and a one-straggler publish run (all six
+# > finalizer phases, incl. hours+users) is timed at every scale. Writes
+# > evidence/scale.txt. Nothing here touches `sonyliv`.
 #
 # USAGE
 #   tools/scale-test.sh                 # 1 10 100  (the full matrix)
@@ -86,6 +90,28 @@ run_stage() {  # run_stage <db> <label> <file> [extra-setting ...]
 # only evidence if the failure is quoted rather than paraphrased.
 err_line()  { printf '%s' "$LAST_ERR" | tr '\n' ' ' | cut -c1-300; }
 err_short() { printf '%s' "$LAST_ERR" | tr '\n' ' ' | sed 's/.*DB::Exception: //' | cut -c1-96; }
+
+# The build stages, in tools/build-model.sh order (1/6..4/6). The users stage
+# is ADR 0016's explicit backfill — the MV that used to populate the tier as a
+# side effect of the intervals insert is retired, so it is a REAL stage now,
+# with a cost of its own, and it belongs in this ladder.
+BUILD_STAGES=("30_build_intervals:intervals" "45_user_concurrency:users" "40_deltas:deltas" "50_hour_agg:houragg")
+
+# Which table a stage owns, so a truncate-before-run (and a rescue retry) can
+# clear the right one. The old version of this script always truncated
+# session_intervals in the rescue loop — harmless when intervals was the only
+# stage that could fail, wrong now that users can.
+stage_table() {  # stage_table <label>
+  case "$1" in
+    intervals) echo session_intervals ;;
+    users)     echo cc_user_minute ;;
+    deltas)    echo cc_minute_delta ;;
+    houragg)   echo cc_hour_agg ;;
+  esac
+}
+truncate_stage() {  # truncate_stage <db> <label>
+  qd "$1" "TRUNCATE TABLE IF EXISTS $(stage_table "$2")" >/dev/null 2>&1
+}
 
 # ms | peak bytes | read rows | written rows | external-aggregation bytes | OS read bytes
 #
@@ -171,6 +197,23 @@ say "  Generated server-side by tools/scale-load.sql (INSERT ... SELECT FROM"
 say "  numbers_mt). Every draw is cityHash64(session, salt), so a scale is"
 say "  reproducible byte-for-byte from (S, SEED)."
 hr
+say "WHY THIS RUN EXISTS — re-measured after ADR 0016 (2026-08-01)"
+say "  The previous run (2026-08-01T15:18Z, commit 8af15cb) measured the"
+say "  pre-ADR-0016 model: three build stages, and NO user tier at all — its"
+say "  scratch databases never instantiated cc_user_minute. ADR 0016 changed"
+say "  real things underneath those numbers:"
+say "    * cc_user_minute: AggregatingMergeTree + mv_user_minute (set union)"
+say "      -> ReplacingMergeTree(computed_at) + explicit backfill INSERT."
+say "      Different engine, different merge behaviour, different read cost."
+say "    * retraction is an explicit empty-state row at a newer version, so"
+say "      corrected buckets become ROWS, not absences — row counts only grow."
+say "    * the publisher gained 'hours' and 'users' phases: a publish run does"
+say "      strictly more work than the run whose timings were published."
+say "  So this run builds all four tiers, reconciles the user tier against the"
+say "  interval expansion at every scale, and times a one-straggler publish"
+say "  (all six phases) at every scale. A frozen copy of the pre-ADR-0016"
+say "  headline figures is printed at the end for the diff."
+hr
 
 # ============================================================================
 # 1 — the 1x REAL baseline, from the provided CSV, in its own database
@@ -202,16 +245,21 @@ docker exec -i ch clickhouse-client --database "$REAL_DB" --multiquery < tools/s
 declare -a ROWS=()
 declare -a STAGES=()
 declare -a CAND=()
+declare -a PUB=()
 
 measure_db() {  # measure_db <db> <tag> <sessions> ; appends one row to ROWS
   local db="$1" tag="$2" sess="$3"
-  local ev iv dl ha ceil
+  local ev iv dl ha ceil um
   ev=$(qd "$db"  "SELECT count() FROM ev_raw")
   iv=$(qd "$db"  "SELECT count() FROM session_intervals FINAL")
   dl=$(qd "$db"  "SELECT count() FROM cc_minute_delta")
   ceil=$(qd "$db" "SELECT toInt64(sum(starts)+sum(ends)) FROM cc_minute_delta")
   ha=$(qd "$db"  "SELECT count() FROM cc_hour_agg FINAL")
-  ROWS+=("$tag|$sess|$ev|$iv|$dl|$ceil|$ha")
+  # FINAL: one row per (dims, minute) bucket — the tier's logical size. The
+  # physical row count (superseded versions + retraction tombstones, ADR 0016)
+  # is a publish-time property and is measured in the publish probe instead.
+  um=$(qd "$db"  "SELECT count() FROM cc_user_minute FINAL")
+  ROWS+=("$tag|$sess|$ev|$iv|$dl|$ceil|$ha|$um")
 }
 
 # ---- the serving query set. Reconstructed from the statement's grains, as
@@ -231,6 +279,13 @@ QN+=("Q6 peak filtered on a TAIL dimension (audio_language)")
 QS+=("SELECT max(concurrent) FROM (SELECT minute, toInt64(sum(sum(delta)) OVER (PARTITION BY toStartOfHour(minute) ORDER BY minute)) AS concurrent FROM cc_minute_delta WHERE audio_language='hin' GROUP BY minute)")
 QN+=("Q7 dashboard: minute curve for the peak hour")
 QS+=("SELECT count() FROM (SELECT minute, toInt64(sum(sum(delta)) OVER (PARTITION BY toStartOfHour(minute) ORDER BY minute)) AS concurrent FROM cc_minute_delta WHERE minute >= (SELECT argMax(hour, peak) FROM v_concurrency_hour_total) AND minute < (SELECT argMax(hour, peak) FROM v_concurrency_hour_total) + INTERVAL 1 HOUR GROUP BY minute)")
+# NEW since ADR 0016: the user tier is ReplacingMergeTree and its views read
+# FINAL — that is a different read path than the AggregatingMergeTree the old
+# numbers were (never) measured on, so it gets its own serving query. This is
+# the read cost of 'replacement is the representation in which retraction
+# exists': merging every bucket's uniqExact state under FINAL.
+QN+=("Q8 peak concurrent USERS, whole feed (FINAL merge)")
+QS+=("SELECT max(concurrent_users) FROM v_user_concurrency_minute_total")
 
 bench_db() {  # bench_db <db>
   local db="$1" i j r
@@ -267,6 +322,149 @@ fidelity_block() {  # fidelity_block <real_db> <synth_db>
   say "  this is the check that the fit survived contact with the generator."
   say "  $(printf '%-40s %22s %22s' 'metric' 'PROVIDED FILE' 'SYNTHETIC 1x')"
   say "$(qd default "$(sed -e "s/__R__/$R/g" -e "s/__S__/$S/g" tools/scale-fidelity.sql)")"
+}
+
+# ---------------------------------------------------------------------------
+# USER TIER GATE at scale — the same check tools/build-model.sh runs, because
+# a distinct count that is wrong at 100x is not a serving tier, it is a chart
+# of a bug. Runs with spill enabled and capped threads: at 100x the truth side
+# holds a uniqExact(user_id) state per minute and the served side merges ~10M
+# bucket states, so this query is itself a scale measurement — if it cannot
+# complete on this box, that is reported as its own finding, not hidden.
+# ---------------------------------------------------------------------------
+user_gate() {  # user_gate <db>
+  local out
+  out=$(qd "$1" "
+    WITH truth AS (
+      SELECT toDateTime(m) AS minute, uniqExact(user_id) AS u
+      FROM (
+        SELECT user_id, arrayJoin(range(toUInt32(toStartOfMinute(interval_start)),
+                                        toUInt32(toStartOfMinute(interval_end)) + 1, 60)) AS m
+        FROM session_intervals FINAL
+      ) GROUP BY minute
+    ),
+    served AS (SELECT minute, concurrent_users AS u FROM v_user_concurrency_minute_total)
+    SELECT if(countIf(served.u != truth.u) = 0,
+              concat('PASS  ', toString(count()), ' minutes compared, user peak ', toString(max(truth.u))),
+              concat('FAIL  ', toString(countIf(served.u != truth.u)), ' of ', toString(count()),
+                     ' minutes disagree, served peak ', toString(max(served.u)),
+                     ' vs true ', toString(max(truth.u))))
+    FROM served FULL OUTER JOIN truth USING (minute)
+    SETTINGS max_bytes_before_external_group_by = 1073741824, max_threads = 4 FORMAT TSVRaw" | head -1)
+  case "$out" in
+    PASS*|FAIL*) say "  reconcile (user tier vs interval expansion, every minute): $out" ;;
+    *) say "  reconcile (user tier): DID NOT COMPLETE on this box — $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-200)" ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# PUBLISH PROBE — one straggler, all six finalizer phases, at this scale.
+#
+# ADR 0016 gave the publisher 'hours' and 'users' phases, so a publish run now
+# does strictly more work than the four-phase run whose timings the repo
+# quotes ("1 session in 3.4 s", docs/ARCHITECTURE.md — measured on Cloud at 1x
+# BEFORE the extra phases existed). This probe reproduces that exact shape —
+# a heartbeat landing inside a gap of an already-published session, bridging
+# two intervals — and prices it per phase at each scale.
+#
+# The users phase is the one to watch: it recomputes every touched
+# (minute, dims) bucket IN FULL — all sessions covering it, not just the
+# straggler's — because full-bucket recompute is what makes replacement (and
+# therefore retraction) correct. Its floor grows with audience x window, not
+# with history; this measures that floor.
+#
+# sql/12_publish.sql is applied AFTER the bulk load, so mv_session_dirty has
+# seen nothing and the straggler's marking is the only work in the queue —
+# a clean one-session batch, same as the quoted claim.
+# ---------------------------------------------------------------------------
+publish_probe() {  # publish_probe <db> <tag>
+  local db="$1" tag="$2"
+  say ""
+  say "  PUBLISH RUN AT ${tag} — one straggler through all SIX phases (ADR 0016)."
+  if ! docker exec -i ch clickhouse-client --database "$db" --multiquery < sql/12_publish.sql >/dev/null 2>&1; then
+    say "  sql/12_publish.sql failed to apply — probe skipped"
+    return 0
+  fi
+  local pick sess ts
+  pick=$(qd "$db" "
+    SELECT video_session_id, toString(interval_end + toIntervalSecond(intDiv(gap_s, 2))) AS ts
+    FROM (
+      SELECT video_session_id, interval_end,
+             dateDiff('second', interval_end,
+                      leadInFrame(interval_start) OVER (PARTITION BY video_session_id ORDER BY interval_start
+                                                        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)) AS gap_s
+      FROM session_intervals FINAL)
+    WHERE gap_s BETWEEN 180 AND 400
+    ORDER BY video_session_id, interval_end LIMIT 1" | head -1)
+  sess=$(printf '%s' "$pick" | cut -f1); ts=$(printf '%s' "$pick" | cut -f2)
+  if [ -z "$sess" ] || [ -z "$ts" ]; then
+    say "  no session with a 180-400 s gap found — probe skipped"
+    return 0
+  fi
+  local rows_before keys_before
+  rows_before=$(qd "$db" "SELECT count() FROM cc_user_minute")
+  keys_before=$(qd "$db" "SELECT count() FROM cc_user_minute FINAL")
+  say "  straggler: session ${sess:0:16}…  heartbeat at $ts (bridges a published gap)"
+  qd "$db" "INSERT INTO ev_raw
+     SELECT content_id, video_session_id, user_id, 'VideoHeartbeat', 'network-activity',
+            toDateTime64('$ts', 3), platform, app_version, country, audio_language,
+            subtitle_language, player_version, session_start_epoch
+     FROM ev_raw WHERE video_session_id = '$sess'
+     ORDER BY event_timestamp LIMIT 1" >/dev/null
+  sleep 4   # marking must SETTLE (PUBLISH_SETTLE_S=2 below) before it is eligible
+  local pout prc=0
+  pout=$(PUBLISH_SETTLE_S=2 TARGET=local tools/publish.sh --database "$db" 2>&1) || prc=$?
+  printf '%s\n' "$pout" | sed 's/^/    /' | tee -a "$OUT" >/dev/null
+  if [ "$prc" != 0 ]; then
+    say "  *** publish FAILED at ${tag} (exit $prc) — the error above is the measurement ***"
+    PUB+=("${tag}|FAILED|-|-|-|-")
+    return 0
+  fi
+  local run total hours_ms users_ms
+  run=$(qd "$db" "SELECT max(run_id) FROM cc_publish_runs WHERE phase = 'committed'")
+  say ""
+  say "  per-phase cost of the one-session correction (cc_publish_runs):"
+  say "$(qd "$db" "
+    SELECT concat('    ', rpad(phase, 10, ' '), lpad(toString(elapsed_ms), 8, ' '), ' ms  ',
+                  lpad(toString(rows_written), 14, ' '), ' rows')
+    FROM cc_publish_runs WHERE run_id = $run AND phase NOT IN ('claimed','committed')
+    ORDER BY at FORMAT TSVRaw")"
+  total=$(qd "$db" "SELECT sum(elapsed_ms) FROM cc_publish_runs WHERE run_id = $run")
+  hours_ms=$(qd "$db" "SELECT sum(elapsed_ms) FROM cc_publish_runs WHERE run_id = $run AND phase = 'hours'")
+  users_ms=$(qd "$db" "SELECT sum(elapsed_ms) FROM cc_publish_runs WHERE run_id = $run AND phase = 'users'")
+  say "    TOTAL     $(printf '%8s' "$total") ms   (hours+users: $((hours_ms + users_ms)) ms — the phases the 3.4 s claim never contained)"
+  qd default "SYSTEM FLUSH LOGS" >/dev/null
+  say ""
+  say "  what the two NEW phases read (system.query_log):"
+  say "$(qd default "
+    SELECT concat('    ', rpad(splitByChar('-', query_id)[3], 10, ' '),
+                  lpad(toString(read_rows), 14, ' '), ' rows  ',
+                  lpad(formatReadableSize(read_bytes), 12, ' '), '  ',
+                  lpad(formatReadableSize(memory_usage), 12, ' '), ' peak mem')
+    FROM system.query_log
+    WHERE type = 'QueryFinish' AND query_id IN ('publish-$run-hours', 'publish-$run-users')
+    ORDER BY query_id FORMAT TSVRaw")"
+  local rows_after keys_after
+  rows_after=$(qd "$db" "SELECT count() FROM cc_user_minute")
+  keys_after=$(qd "$db" "SELECT count() FROM cc_user_minute FINAL")
+  say ""
+  say "  user-tier geometry (ADR 0016: corrections are ROWS, so counts only grow):"
+  say "    physical rows $(comma "$rows_before") -> $(comma "$rows_after")  (+$(comma $((rows_after - rows_before))) superseding versions from ONE publish)"
+  say "    logical keys  $(comma "$keys_before") -> $(comma "$keys_after")  (FINAL collapses the versions; a rebuild's TRUNCATE clears them)"
+  # Correctness after the publish, or the timings above mean nothing: the
+  # minute tier must still reconcile against the interval expansion.
+  local recon2
+  recon2=$(qd "$db" "
+    WITH dense AS (
+      SELECT minute, concurrent FROM v_concurrency_minute_delta_total
+      ORDER BY minute WITH FILL STEP toIntervalSecond(60) INTERPOLATE (concurrent AS concurrent)
+    )
+    SELECT if(countIf(dense.concurrent != i.concurrent) = 0,
+              concat('PASS  ', toString(count()), ' minutes'),
+              concat('FAIL  ', toString(countIf(dense.concurrent != i.concurrent)), ' of ', toString(count()), ' minutes disagree'))
+    FROM dense INNER JOIN v_concurrency_minute_intervals i USING (minute) FORMAT TSVRaw" | head -1)
+  say "  reconcile after the publish (minute tier vs intervals): $recon2"
+  PUB+=("${tag}|$total|$hours_ms|$users_ms|$(qd default "SELECT read_rows FROM system.query_log WHERE type='QueryFinish' AND query_id='publish-$run-users'" | head -1)|$(qd default "SELECT read_rows FROM system.query_log WHERE type='QueryFinish' AND query_id='publish-$run-derive'" | head -1)")
 }
 
 # The single most important number in this file, so it is measured directly
@@ -403,13 +601,9 @@ storage_db() {  # storage_db <db> <tag>
 hr
 say "PHASE 0b — build the model on the REAL file (the anchor for everything below)"
 hr
-for stage in "30_build_intervals:intervals" "40_deltas:deltas" "50_hour_agg:houragg"; do
+for stage in "${BUILD_STAGES[@]}"; do
   f="sql/${stage%%:*}.sql"; lbl="${stage##*:}"
-  case "$lbl" in
-    intervals) qd "$REAL_DB" "TRUNCATE TABLE session_intervals" >/dev/null ;;
-    deltas)    qd "$REAL_DB" "TRUNCATE TABLE cc_minute_delta"   >/dev/null ;;
-    houragg)   qd "$REAL_DB" "TRUNCATE TABLE cc_hour_agg"       >/dev/null 2>&1 ;;
-  esac
+  truncate_stage "$REAL_DB" "$lbl"
   run_stage "$REAL_DB" "scale_real_${lbl}" "$f"
   st=$(stage_stats "scale_real_${lbl}")
   say "  [$lbl]  $(printf '%s' "$st" | cut -f1) ms  ·  peak mem $(fmt "$(printf '%s' "$st" | cut -f2)")  ·  read $(comma "$(printf '%s' "$st" | cut -f3)") rows  ·  wrote $(comma "$(printf '%s' "$st" | cut -f4)") rows$(spill_note "$st")"
@@ -418,7 +612,7 @@ measure_db "$REAL_DB" "1x-real" "$BASE_SESSIONS"
 storage_db "$REAL_DB"
 bench_db "$REAL_DB"
 say ""
-say "  headline: peak $(qd "$REAL_DB" 'SELECT max(concurrent) FROM v_concurrency_minute_delta_total' | head -1) at $(qd "$REAL_DB" 'SELECT argMax(minute,concurrent) FROM v_concurrency_minute_delta_total' | head -1)  (the repo number is 2887 @ 2026-07-26 10:56 — this run reproduces it or it is not the same model)"
+say "  headline: peak $(qd "$REAL_DB" 'SELECT max(concurrent) FROM v_concurrency_minute_delta_total' | head -1) at $(qd "$REAL_DB" 'SELECT argMax(minute,concurrent) FROM v_concurrency_minute_delta_total' | head -1)  (the repo number is 2917 @ 2026-07-26 10:56, evidence/reconcile.txt — this run reproduces it or it is not the same model)"
 
 for N in "${SCALES[@]}"; do
   DBN="scale_x${N}"
@@ -455,7 +649,7 @@ for N in "${SCALES[@]}"; do
     say "  NOTE: read the error before reading it as a limit. A ClickHouse"
     say "  exception is a finding; a docker/connection error is the machine this"
     say "  ran on, and the scale should be re-run rather than reported."
-    ROWS+=("${N}x|$S|FAILED:gen|-|-|-|-")
+    ROWS+=("${N}x|$S|FAILED:gen|-|-|-|-|-")
     [ "$KEEP" = 1 ] || qd default "DROP DATABASE $DBN" >/dev/null
     continue
   fi
@@ -464,13 +658,9 @@ for N in "${SCALES[@]}"; do
 
   # ---- build the model, one real file per stage ---------------------------
   BUILD_FAILED=""
-  for stage in "30_build_intervals:intervals" "40_deltas:deltas" "50_hour_agg:houragg"; do
+  for stage in "${BUILD_STAGES[@]}"; do
     f="sql/${stage%%:*}.sql"; lbl="${stage##*:}"
-    case "$lbl" in
-      intervals) qd "$DBN" "TRUNCATE TABLE session_intervals" >/dev/null ;;
-      deltas)    qd "$DBN" "TRUNCATE TABLE cc_minute_delta"   >/dev/null ;;
-      houragg)   qd "$DBN" "TRUNCATE TABLE cc_hour_agg"       >/dev/null 2>&1 ;;
-    esac
+    truncate_stage "$DBN" "$lbl"
     if run_stage "$DBN" "scale_${N}x_${lbl}" "$f"; then
       st=$(stage_stats "scale_${N}x_${lbl}")
       say "  [$lbl]  $(printf '%s' "$st" | cut -f1) ms  ·  peak mem $(fmt "$(printf '%s' "$st" | cut -f2)")  ·  read $(comma "$(printf '%s' "$st" | cut -f3)") rows  ·  wrote $(comma "$(printf '%s' "$st" | cut -f4)") rows$(spill_note "$st")"
@@ -493,7 +683,7 @@ for N in "${SCALES[@]}"; do
                   "spill+2threads:--max_bytes_before_external_group_by=1073741824 --max_threads=2"; do
         tname="${tier%%:*}"; targs="${tier#*:}"
         say "  [$lbl]  retrying with $tname"
-        qd "$DBN" "TRUNCATE TABLE session_intervals" >/dev/null 2>&1
+        truncate_stage "$DBN" "$lbl"
         # shellcheck disable=SC2086
         if run_stage "$DBN" "scale_${N}x_${lbl}_${tname}" "$f" $targs; then
           st=$(stage_stats "scale_${N}x_${lbl}_${tname}")
@@ -513,7 +703,7 @@ for N in "${SCALES[@]}"; do
     say ""
     say "  scale ${N}x did not complete: stage '$BUILD_FAILED' failed."
     say "  A measured limit beats an untested claim — the error text above is the evidence."
-    ROWS+=("${N}x|$S|$(qd "$DBN" 'SELECT count() FROM ev_raw')|FAILED:$BUILD_FAILED|-|-|-")
+    ROWS+=("${N}x|$S|$(qd "$DBN" 'SELECT count() FROM ev_raw')|FAILED:$BUILD_FAILED|-|-|-|-")
     [ "$KEEP" = 1 ] || qd default "DROP DATABASE $DBN" >/dev/null
     continue
   fi
@@ -525,7 +715,7 @@ for N in "${SCALES[@]}"; do
 
   # The four candidates the brief names, each reduced to one number so they can
   # be put side by side at the end.
-  CAND+=("${N}x|$(qd "$DBN" "SELECT max(p) FROM (SELECT table, count() p FROM system.parts WHERE database='$DBN' AND active GROUP BY table)" | head -1)|$(qd default "SELECT countIf(event_type='MergeParts') FROM system.part_log WHERE database='$DBN' AND event_date >= today()-1" | head -1)|$(qd default "SELECT max(duration_ms) FROM system.part_log WHERE database='$DBN' AND event_type='MergeParts' AND event_date >= today()-1" | head -1)|$(qd default "SELECT any(bytes_allocated) FROM system.dictionaries WHERE database='$DBN' AND name='dict_content_scale'" | head -1)|$(qd "$DBN" "SELECT toInt64(sum(active_state_bytes)) FROM (SELECT sum(data_compressed_bytes) AS active_state_bytes FROM system.parts WHERE database='$DBN' AND active AND table='cc_minute_stateless')" | head -1)")
+  CAND+=("${N}x|$(qd "$DBN" "SELECT max(p) FROM (SELECT table, count() p FROM system.parts WHERE database='$DBN' AND active GROUP BY table)" | head -1)|$(qd default "SELECT countIf(event_type='MergeParts') FROM system.part_log WHERE database='$DBN' AND event_date >= today()-1" | head -1)|$(qd default "SELECT max(duration_ms) FROM system.part_log WHERE database='$DBN' AND event_type='MergeParts' AND event_date >= today()-1" | head -1)|$(qd default "SELECT any(bytes_allocated) FROM system.dictionaries WHERE database='$DBN' AND name='dict_content_scale'" | head -1)|$(qd "$DBN" "SELECT toInt64(sum(active_state_bytes)) FROM (SELECT sum(data_compressed_bytes) AS active_state_bytes FROM system.parts WHERE database='$DBN' AND active AND table='cc_minute_stateless')" | head -1)|$(qd "$DBN" "SELECT toInt64(ifNull(sum(data_compressed_bytes), 0)) FROM system.parts WHERE database='$DBN' AND active AND table='cc_user_minute'" | head -1)")
 
   # ---- correctness has to survive the scale, or the timings mean nothing ---
   say ""
@@ -539,6 +729,13 @@ for N in "${SCALES[@]}"; do
               concat('FAIL  ', toString(countIf(dense.concurrent != i.concurrent)), ' of ', toString(count()), ' minutes disagree'))
     FROM dense INNER JOIN v_concurrency_minute_intervals i USING (minute) FORMAT TSVRaw" | head -1)
   say "  reconcile (delta serving layer vs interval expansion, every minute): $RECON"
+  user_gate "$DBN"
+
+  # The publish probe mutates ev_raw (one injected heartbeat), so it runs
+  # AFTER every build/storage/bench number above is captured, and before the
+  # memory sweep (which rebuilds session_intervals from ev_raw and will absorb
+  # the straggler — a one-interval difference in 'rows out', not a defect).
+  publish_probe "$DBN" "${N}x"
 
   # Only at the biggest scale asked for: below the memory wall the sweep is
   # three identical fast numbers and says nothing.
@@ -553,10 +750,10 @@ done
 hr
 say "SUMMARY — row counts against the ADR 0008 ceiling"
 hr
-say "$(printf '%-6s %12s %14s %14s %14s %12s %12s' scale sessions events intervals cc_minute_delta ceiling hour_agg)"
+say "$(printf '%-6s %12s %14s %12s %14s %12s %10s %12s' scale sessions events intervals cc_minute_delta ceiling hour_agg user_bkts)"
 for r in "${ROWS[@]}"; do
-  IFS='|' read -r a b c d e f g <<< "$r"
-  say "$(printf '%-6s %12s %14s %14s %14s %12s %12s' "$a" "$(comma "$b")" "$(comma "$c")" "$(comma "$d" 2>/dev/null || echo "$d")" "$(comma "$e" 2>/dev/null || echo "$e")" "$(comma "$f" 2>/dev/null || echo "$f")" "$(comma "$g" 2>/dev/null || echo "$g")")"
+  IFS='|' read -r a b c d e f g h <<< "$r"
+  say "$(printf '%-6s %12s %14s %12s %14s %12s %10s %12s' "$a" "$(comma "$b")" "$(comma "$c")" "$(comma "$d" 2>/dev/null || echo "$d")" "$(comma "$e" 2>/dev/null || echo "$e")" "$(comma "$f" 2>/dev/null || echo "$f")" "$(comma "$g" 2>/dev/null || echo "$g")" "$(comma "$h" 2>/dev/null || echo "$h")")"
 done
 hr
 say "BUILD COST — per stage, straight out of system.query_log"
@@ -616,10 +813,10 @@ say "gap between the two columns is what a new dimension could still cost."
 hr
 say "WHAT BREAKS FIRST — the four candidates, each as the number that shows it"
 hr
-say "$(printf '%-8s %14s %10s %14s %14s %16s' scale 'max parts' 'merges' 'slowest merge' 'dict bytes' 'stateless tier')"
+say "$(printf '%-8s %14s %10s %14s %14s %16s %14s' scale 'max parts' 'merges' 'slowest merge' 'dict bytes' 'stateless tier' 'user tier')"
 for r in "${CAND[@]}"; do
-  IFS='|' read -r a b c d e f <<< "$r"
-  say "$(printf '%-8s %14s %10s %14s %14s %16s' "$a" "$(comma "$b")" "$(comma "$c")" "$d ms" "$(fmt "$e")" "$(fmt "$f")")"
+  IFS='|' read -r a b c d e f g <<< "$r"
+  say "$(printf '%-8s %14s %10s %14s %14s %16s %14s' "$a" "$(comma "$b")" "$(comma "$c")" "$d ms" "$(fmt "$e")" "$(fmt "$f")" "$(fmt "$g")")"
 done
 say ""
 say "  max parts       — the classic 'too many parts' failure; the limit is"
@@ -630,6 +827,116 @@ say "  dict bytes      — dict_content is keyed on the CATALOG, not the audienc
 say "  stateless tier  — cc_minute_stateless, the uniqExact(video_session_id)"
 say "                    states; the one structure whose size is set by DISTINCT"
 say "                    SESSIONS rather than by intervals"
+say "  user tier       — cc_user_minute (ADR 0016), uniqExact(user_id) states"
+say "                    under ReplacingMergeTree: set by DISTINCT USERS x the"
+say "                    dims fan-out, and every read of it pays FINAL"
+hr
+say "PUBLISH COST vs SCALE — one straggler, six phases (ADR 0016)"
+hr
+say "  The public claim this table interrogates: 'straggler correction = one"
+say "  session in 3.4 s' (docs/ARCHITECTURE.md), measured on CLOUD at 1x when"
+say "  the publisher had FOUR phases. These runs are on the local docker box,"
+say "  so compare shapes across scales, not absolute ms against Cloud."
+say "  $(printf '%-8s %10s %10s %10s %16s %16s' scale 'total ms' 'hours ms' 'users ms' 'users read rows' 'derive read rows')"
+for r in "${PUB[@]}"; do
+  IFS='|' read -r a b c d e f <<< "$r"
+  say "  $(printf '%-8s %10s %10s %10s %16s %16s' "$a" "$b" "$c" "$d" "$(comma "$e")" "$(comma "$f")")"
+done
+hr
+say "VERDICT vs THE PRE-ADR-0016 RUN — every figure, moved or not"
+hr
+say "  Written against the 2026-08-01T17:27Z run of this script. If you"
+say "  regenerate at a later commit, re-read these callouts against your"
+say "  fresh numbers before quoting them."
+say ""
+say "  UNCHANGED — the ADR 0016 engine change was FREE here, which is itself"
+say "  a design claim:"
+say "    deltas build      1058 ms / 262 MiB at 10x, 9875 ms / 2.08 GiB at 100x — identical"
+say "    houragg build     789 ms at 10x, 11876 ms / 2.06 GiB at 100x — identical"
+say "    growth exponents  deltas k=0.84, houragg k=0.89 — identical"
+say "    serving Q1-Q7     within noise at every scale; bytes read at 100x"
+say "                      actually FELL ~3 pct (fewer delta rows after ADR 0009"
+say "                      same-second-resume merging: 3.98M vs 4.09M)"
+say "    breaks-first set  max parts 28, dict 17.00 MiB, stateless 42.54 MiB —"
+say "                      all where they were"
+say "    ADR 0008 ceiling  deltas at 88.8 pct of ceiling at 100x (was 88.7) — holds"
+say ""
+say "  MOVED — none of it caused by ADR 0016; the re-measure caught ADR 0009:"
+say "    intervals 10x     peak mem 1.47 -> 3.79 GiB (+158 pct); ms 6092 -> 6324 (noise)"
+say "    intervals 100x    'spill' alone NO LONGER rescues it (before: 53.9 s /"
+say "                      4.23 GiB); now needs spill+2threads: 122.1 s / 3.57 GiB"
+say "    sweep 100x        t=4 now FAILS (was 75.5 s / 4.43 GiB); t=2 completes"
+say "                      215.6 s / 3.52 GiB (was 55.1 s / 2.67 GiB) — 3.9x slower"
+say "    growth exponent   intervals k(time) 0.98 -> 1.16, LINEAR -> SUPER-LINEAR"
+say "    cause             sql/30_build_intervals.sql now groupArrays a TUPLE per"
+say "                      event (ADR 0009 deterministic attribution) where it held"
+say "                      bare timestamps. EXPLAINER.md's sweep quote (t=2 at"
+say "                      2.59 GiB / 50.5 s) is stale."
+say "    model row counts  1x-real intervals 30,769 -> 30,323; real-file peak"
+say "                      2,887 -> 2,917 — matches evidence/reconcile.txt; the"
+say "                      old scale run was measuring the pre-fix model"
+say ""
+say "  NEW — measured for the first time (the old run never built the tier):"
+say "    users build       139 ms/113 MiB -> 883 ms/922 MiB -> 10.5 s/2.39 GiB"
+say "                      (361 MiB spilled); k=0.94 LINEAR — second-heaviest stage"
+say "    user tier disk    66.42 MiB at 100x — now the LARGEST derived aggregate"
+say "                      on disk (stateless is 42.54 MiB)"
+say "    Q8 user peak      8.5 ms/17.8 MiB -> 79.7 ms/194 MiB -> 884 ms/1.50 GiB —"
+say "                      the ONLY serving query that grows with the tier; every"
+say "                      other query stays under 15 ms at 100x"
+say "    publish, 6 phases 584 -> 1,248 -> 7,497 ms; hours+users are 43 -> 81 ->"
+say "                      97 pct of the run; the four delta phases stay flat"
+say "                      (~230-330 ms at every scale — window-bound, as designed)"
+say "    hours phase mem   2.45 GiB peak at 100x for ONE session's correction —"
+say "                      45 pct of this box's budget; linear from 267 MiB at 10x,"
+say "                      so it meets the ceiling between 100x and 200x HERE"
+say "    tier churn        one publish appends +1.14M physical rows to"
+say "                      cc_user_minute at 100x (16 pct of the tier) as"
+say "                      superseding versions, until merges collapse them"
+say ""
+say "  WHAT BREAKS FIRST — the answer moved in TWO ways:"
+say "    1. Batch path: still the interval derivation's memory, but WORSE than"
+say "       published (ADR 0009's wider per-event tuple, super-linear time fit)."
+say "    2. Incremental path, NEW: the publisher's hours+users phases. Their"
+say "       cost is audience x window — NOT straggler count. At 100x, one"
+say "       session's correction re-derives 748,506 hour-cube rows (71 pct of"
+say "       the whole cube) and 1.14M user buckets in 7.5 s at 2.45 GiB peak."
+say "       The publisher, not the rebuild, is the first thing to break at"
+say "       scale beyond 100x on a box this size."
+say ""
+say "  THE QUOTED CLAIM. 'Straggler correction: 1 session in 3.4 s'"
+say "  (docs/ARCHITECTURE.md) does NOT survive ADR 0016. On Cloud at 1x the"
+say "  same correction through six phases is already 5,215 ms"
+say "  (evidence/publish.txt PHASE 5: 681+566+1424+1284 legacy + 599 hours +"
+say "  661 users), and this table shows the cost is audience-proportional."
+say "  The claim that DOES survive: the four delta phases scale with"
+say "  stragglers, not history — they are flat at every scale above. The"
+say "  honest public sentence is: 'delta correction is window-bounded and"
+say "  flat; tier maintenance rides along and scales with the audience.'"
+hr
+say "FROZEN BEFORE — the pre-ADR-0016 run these numbers are diffed against"
+hr
+say "  generated 2026-08-01T15:18Z, commit 8af15cb, same box (docker CH, 10"
+say "  cores, ~5.6 GiB budget), same seed 20260801. Copied verbatim so a"
+say "  regeneration of this file keeps the comparison. That run had NO user"
+say "  tier (cc_user_minute was never instantiated) and NO publish probe."
+say ""
+say "  BUILD COST then:"
+say "    1x    intervals   585 ms  251.14 MiB   |  10x  intervals   6092 ms  1.47 GiB"
+say "    1x    deltas      208 ms   83.44 MiB   |  10x  deltas      1058 ms  261.96 MiB"
+say "    1x    houragg     196 ms   51.30 MiB   |  10x  houragg      789 ms  381.45 MiB"
+say "    100x  intervals   FAILED (memory limit: would use 2.80 GiB, RSS 5.18/5.51 GiB)"
+say "    100x  intervals+spill  53890 ms  4.23 GiB  (574.85 MiB spilled)"
+say "    100x  deltas            9875 ms  2.08 GiB"
+say "    100x  houragg          11876 ms  2.06 GiB"
+say "  MEMORY SWEEP at 100x then: t=10 FAILED · t=4 75487 ms / 4.43 GiB · t=2 55094 ms / 2.67 GiB"
+say "  ROW COUNTS then: 1x-real 30,769 iv / 28,149 dl / 26,166 ha · 10x 294,468 / 428,190 / 177,982"
+say "                   100x 2,947,649 iv / 4,086,387 dl / 1,054,762 ha"
+say "  SERVING at 100x then: Q1 11.2ms/46.76MiB · Q2 12.9ms/33.28MiB · Q3 2.1ms/176KiB"
+say "                        Q4 2.3ms/176KiB · Q5 9.5ms/6.10MiB · Q6 17.2ms/50.66MiB · Q7 10.1ms/15.19MiB"
+say "  WHAT BREAKS FIRST then: parts 28 · merges 930 · slowest merge 35722 ms ·"
+say "                          dict 17.00 MiB · stateless tier 42.70 MiB — and the"
+say "                          binding stage was the INTERVAL DERIVATION's memory."
 hr
 [ "$KEEP" = 1 ] || qd default "DROP DATABASE IF EXISTS $REAL_DB" >/dev/null
 say "scratch databases $( [ "$KEEP" = 1 ] && echo 'KEPT (KEEP=1)' || echo 'dropped' ) · sonyliv never written"
