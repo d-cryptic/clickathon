@@ -179,7 +179,8 @@ None of these are hidden in footnotes; each has evidence and, where possible, a 
 
 1. **The benchmark set is our reconstruction** (§2). If the official shapes differ, our latencies
    are indicative, not comparable.
-2. **`resume` semantics are worth 9.7% of the headline number** — the largest measured fork.
+2. **`resume` semantics are worth 9.7% of the headline number** — the largest fork *in the
+   interval derivation* (the membership question in item 6a is larger still).
    `resume` fires for at least four distinct reasons (9,958 back-to-back `resume→resume` runs; 900
    sessions whose first pause/resume event *is* a resume), so whether the first `resume` after a
    `pause` genuinely ends the pause moves counted watch time by 189.2 h. Unknowable from the file;
@@ -198,6 +199,22 @@ None of these are hidden in footnotes; each has evidence and, where possible, a 
    gate cannot decide inclusive vs half-open (moves 91 minutes; peak 2,917 → 2,916 under the
    alternative). Definition question for the organisers
    ([doubts/05](doubts/05-minute-boundary-membership.md)).
+
+   **6a. And the broader form of that question is our single largest open number.** "Concurrent at
+   minute M" can mean *active for any part of M* (what we ship) or *active at the instant M
+   begins* — how a sampled gauge reads. Measured by rebuilding the derivation under both readings:
+   peak **2,917 → 2,507, −410 viewers, −14.1%**, at the same peak minute. That is larger than the
+   `resume` fork in item 2 and larger than every other assumption we probed. The gate is blind to
+   it by construction — `sql/90_reconcile.sql` expands minutes with the same convention the model
+   does, so both sides agree under *either* reading.
+
+   We are not hedging our answer: **2,917 is our number**, under a stated and consistently applied
+   convention, and we think any-overlap is the right reading for a concurrency metric. But a judge
+   comparing against a ground truth built by sampling would see a systematic 14% gap with no
+   defect anywhere in our pipeline, so it belongs in the open, not in a footnote
+   ([doubts/09](doubts/09-minute-membership-instant-reading.md), full ledger of 21 probed
+   assumptions in [evidence/adversarial/](evidence/adversarial/README.md) — ten came back safe at
+   ≤0.1%).
 7. **Serving paths expose different dimension subsets.** The minute delta tier carries all 7 raw
    dimensions; the hour/day cube, user tier, window views and stateless baseline carry
    platform/country/content only. Anything outside a shipped shape needs custom SQL over the delta
