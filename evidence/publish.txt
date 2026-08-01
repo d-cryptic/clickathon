@@ -1,0 +1,295 @@
+CONTINUOUS PUBLICATION — incremental update proof   (ADR 0013)
+generated 2026-08-01T14:34:38Z  ·  commit 1fb6351
+live: sonyliv_pub   control: sonyliv_pub_ctl   sonyliv read-only   cut 2026-07-26 10:56:00
+--------------------------------------------------------------------------
+
+PHASE 0 — reset both scratch databases and apply the schema
+  sonyliv_pub has the publication layer (sql/12_publish.sql); sonyliv_pub_ctl does not — it is rebuilt.
+
+PHASE 1 — load the truncated slice into both:  event_timestamp < 2026-07-26 10:56:00
+  458477 events · 6659 sessions · newest 2026-07-26 10:55:59.999
+  change log: 6659 rows · 6659 sessions · 1 insert block(s)
+
+  The MV collapsed the load to one row per session per block. No session list
+  was computed by scanning history — this is what the finalizer consumes.
+
+PHASE 2 — build BOTH: control by rebuild, live by the incremental finalizer
+
+  control — tools/build-model.sh's path (TRUNCATE + re-derive all of ev_raw):
+    intervals  read_rows=458.48 thousand  read_bytes=69.08 MiB  parts=7  marks=61/61  583 ms
+    deltas     read_rows=30.45 thousand  read_bytes=2.82 MiB  parts=2  marks=4/4  786 ms
+
+  live — tools/publish.sh, no special bootstrap path:
+    == run 1785594928549  ·  6659 session(s) claimed  ·  cursor 1970-01-01 00:00:00.000 -> 2026-08-01 14:35:03.185
+       negated   0 corrective delta rows   1148 ms
+       derived   15224 intervals   1159 ms   (window 2026-07-14 15:43:58.144 .. 2026-07-26 10:55:59.999)
+       pruned    superseded intervals   1470 ms
+       emitted   14879 delta rows   1166 ms
+       committed cursor now 2026-08-01 14:35:03.185
+
+  There is no separate initial-build code. The first run sees every session
+  marked dirty by the load and derives them; every later run sees only what
+  arrived. One path, so the bootstrap cannot drift from the steady state.
+
+  CONVERGENCE — incremental (sonyliv_pub) vs from-scratch rebuild (sonyliv_pub_ctl)
+   ┌─ord─┬─check─────────────────────────────────────────────────────────────┬─value─┐
+1. │   1 │ delta cells differing                                             │ 0     │
+2. │   2 │ interval rows differing                                           │ 0     │
+3. │   3 │ served minutes differing                                          │ 0     │
+4. │   4 │ served minutes compared                                           │ 1544  │
+5. │   5 │ peak — incremental                                                │ 2825  │
+6. │   6 │ peak — rebuild                                                    │ 2825  │
+7. │   7 │ cc_minute_delta rows — incremental (incl. cancelling corrections) │ 14879 │
+8. │   8 │ cc_minute_delta rows — rebuild                                    │ 14879 │
+   └─────┴───────────────────────────────────────────────────────────────────┴───────┘
+
+--------------------------------------------------------------------------
+PHASE 3 — LATE ARRIVAL (a): the five busiest sessions catch up
+  inserted 4072 events for 5 sessions
+  pending: 5 session(s), lag 47s
+
+    == run 1785594961296  ·  5 session(s) claimed  ·  cursor 2026-08-01 14:35:03.185 -> 2026-08-01 14:35:50.323
+       negated   17 corrective delta rows   576 ms
+       derived   31 intervals   589 ms   (window 2026-07-26 10:36:10.000 .. 2026-07-26 11:29:27.262)
+       pruned    superseded intervals   1446 ms
+       emitted   30 delta rows   505 ms
+       committed cursor now 2026-08-01 14:35:50.323
+
+  WHAT THE INCREMENTAL RUN TOUCHED, from system.query_log:
+    negate   read_rows=30.46 thousand  read_bytes=2.82 MiB  parts=4  marks=6/6  116 ms
+    derive   read_rows=128.36 thousand  read_bytes=11.42 MiB  parts=3  marks=24/52  151 ms
+    emit     read_rows=30.52 thousand  read_bytes=3.08 MiB  parts=6  marks=8/8  115 ms
+
+  the same update, done by RECOMPUTING (the control):
+    intervals  read_rows=462.55 thousand  read_bytes=69.70 MiB  parts=8  marks=62/62  439 ms
+    deltas     read_rows=30.48 thousand  read_bytes=2.82 MiB  parts=2  marks=4/4  563 ms
+
+  CONVERGENCE — incremental (sonyliv_pub) vs from-scratch rebuild (sonyliv_pub_ctl)
+   ┌─ord─┬─check─────────────────────────────────────────────────────────────┬─value─┐
+1. │   1 │ delta cells differing                                             │ 0     │
+2. │   2 │ interval rows differing                                           │ 0     │
+3. │   3 │ served minutes differing                                          │ 0     │
+4. │   4 │ served minutes compared                                           │ 1554  │
+5. │   5 │ peak — incremental                                                │ 2825  │
+6. │   6 │ peak — rebuild                                                    │ 2825  │
+7. │   7 │ cc_minute_delta rows — incremental (incl. cancelling corrections) │ 14926 │
+8. │   8 │ cc_minute_delta rows — rebuild                                    │ 14894 │
+   └─────┴───────────────────────────────────────────────────────────────────┴───────┘
+
+--------------------------------------------------------------------------
+PHASE 4 — LATE ARRIVAL (b): the entire remaining stream
+  905558 events now loaded · newest 2026-07-26 11:30:04.847
+  pending: 7718 session(s)
+
+    == run 1785595012471  ·  7718 session(s) claimed  ·  cursor 2026-08-01 14:35:50.323 -> 2026-08-01 14:36:41.142
+       negated   7184 corrective delta rows   1248 ms
+       derived   21915 intervals   1146 ms   (window 2026-07-26 03:54:23.000 .. 2026-07-26 11:30:04.847)
+       pruned    superseded intervals   1448 ms
+       emitted   20366 delta rows   580 ms
+       committed cursor now 2026-08-01 14:36:41.142
+
+    derive   read_rows=857.61 thousand  read_bytes=127.85 MiB  parts=4  marks=107/107  683 ms
+    rebuild  read_rows=905.56 thousand  read_bytes=136.45 MiB  parts=9  marks=117/117  708 ms
+
+  CONVERGENCE — incremental (sonyliv_pub) vs from-scratch rebuild (sonyliv_pub_ctl)
+   ┌─ord─┬─check─────────────────────────────────────────────────────────────┬─value─┐
+1. │   1 │ delta cells differing                                             │ 0     │
+2. │   2 │ interval rows differing                                           │ 0     │
+3. │   3 │ served minutes differing                                          │ 0     │
+4. │   4 │ served minutes compared                                           │ 1579  │
+5. │   5 │ peak — incremental                                                │ 2917  │
+6. │   6 │ peak — rebuild                                                    │ 2917  │
+7. │   7 │ cc_minute_delta rows — incremental (incl. cancelling corrections) │ 42476 │
+8. │   8 │ cc_minute_delta rows — rebuild                                    │ 28074 │
+   └─────┴───────────────────────────────────────────────────────────────────┴───────┘
+
+--------------------------------------------------------------------------
+PHASE 5 — THE STRAGGLER. One heartbeat, event-dated 46 minutes behind the
+          watermark, landing inside a 290 s gap of an already-published session.
+
+  session B52EB43D855A723E1755B97C75CEAC5D05B60BCCEDC5902DECF4610114D89E6B
+  event   2026-07-26 10:45:10.000   (newest event in ev_raw: 2026-07-26 11:30:04.847)
+  ADR 0004 set W = 2400 s. This event is older than W, so the two-tier design
+  has no path for it and ADR 0006's correction-by-diff is the only answer.
+
+  intervals BEFORE — note the second one starts at 10:47:33:
+   ┌─interval_start──────────┬─interval_end────────────┬─is_open─┐
+1. │ 2026-07-26 10:30:43.000 │ 2026-07-26 10:43:43.000 │       0 │
+2. │ 2026-07-26 10:47:33.000 │ 2026-07-26 10:50:36.000 │       0 │
+3. │ 2026-07-26 10:57:03.000 │ 2026-07-26 10:58:06.000 │       0 │
+   └─────────────────────────┴─────────────────────────┴─────────┘
+
+  served concurrency BEFORE:
+   ┌─at─────┬─at_minute───────────┬─concurrent─┐
+1. │ before │ 2026-07-26 10:42:00 │        128 │
+2. │ before │ 2026-07-26 10:43:00 │        273 │
+3. │ before │ 2026-07-26 10:44:00 │        283 │
+4. │ before │ 2026-07-26 10:45:00 │        356 │
+5. │ before │ 2026-07-26 10:46:00 │        452 │
+6. │ before │ 2026-07-26 10:47:00 │        512 │
+7. │ before │ 2026-07-26 10:48:00 │        592 │
+   └────────┴─────────────────────┴────────────┘
+
+  pending: 1 session(s)
+
+    == run 1785595054371  ·  1 session(s) claimed  ·  cursor 2026-08-01 14:36:41.142 -> 2026-08-01 14:37:25.306
+       negated   6 corrective delta rows   554 ms
+       derived   2 intervals   1255 ms   (window 2026-07-26 10:30:43.000 .. 2026-07-26 10:58:06.000)
+       pruned    superseded intervals   1430 ms
+       emitted   4 delta rows   511 ms
+       committed cursor now 2026-08-01 14:37:25.306
+
+  WHAT ONE-SESSION CORRECTION COSTS, from system.query_log:
+    negate   read_rows=30.51 thousand  read_bytes=3.07 MiB  parts=8  marks=8/14  143 ms
+    derive   read_rows=136.54 thousand  read_bytes=9.51 MiB  parts=5  marks=38/108  137 ms
+    prune    read_rows=0.00  read_bytes=0.00 B  parts=0  marks=0/0  1019 ms
+    emit     read_rows=30.52 thousand  read_bytes=3.08 MiB  parts=10  marks=10/16  116 ms
+  ev_raw holds 905.56 thousand events over 10866 sessions.
+
+  HOW MUCH OF ev_raw DOES A ONE-SESSION CORRECTION HAVE TO READ?
+
+  Not 78 rows, and it is worth being blunt about why. ADR 0002 puts
+  toStartOfHour(event_timestamp) FIRST in ev_raw's sort key and video_session_id
+  third, so a session lookup prunes only by generic exclusion search. The
+  finalizer therefore ALSO bounds the read by the batch's event-time window
+  (the completeness argument is in tools/publish.sh). A/B below on the real
+  query shape — IN (subquery over cc_publish_batch), not an inlined literal,
+  because that is what publish.sh issues and the two do not prune alike.
+
+   ┌─variant────┬─read_rows─┬─pct_of_ev_raw─┬─read_bytes─┬─ms─┐
+1. │ a.unscoped │    905559 │ 100%          │ 64.77 MiB  │ 59 │
+2. │ b.session  │    307766 │ 34%           │ 19.72 MiB  │ 15 │
+3. │ c.windowed │    104640 │ 11.6%         │ 6.75 MiB   │ 11 │
+   └────────────┴───────────┴───────────────┴────────────┴────┘
+    a.unscoped = what a rebuild reads    c.windowed = what publish.sh scopes to
+    mean of 3 runs each, on a settled part set (905559 rows in ev_raw)
+
+  intervals AFTER — the two runs merged, so interval_start 10:47:33 no longer
+  exists. A ReplacingMergeTree cannot delete a key; the prune phase does:
+   ┌─interval_start──────────┬─interval_end────────────┬─is_open─┐
+1. │ 2026-07-26 10:30:43.000 │ 2026-07-26 10:50:36.000 │       0 │
+2. │ 2026-07-26 10:57:03.000 │ 2026-07-26 10:58:06.000 │       0 │
+   └─────────────────────────┴─────────────────────────┴─────────┘
+
+  orphan rows left behind by the vanished key: 0
+
+  served concurrency AFTER — every minute the straggler bridges gains one viewer:
+   ┌─at────┬─at_minute───────────┬─concurrent─┐
+1. │ after │ 2026-07-26 10:42:00 │        128 │
+2. │ after │ 2026-07-26 10:43:00 │        273 │
+3. │ after │ 2026-07-26 10:44:00 │        284 │
+4. │ after │ 2026-07-26 10:45:00 │        357 │
+5. │ after │ 2026-07-26 10:46:00 │        453 │
+6. │ after │ 2026-07-26 10:47:00 │        512 │
+7. │ after │ 2026-07-26 10:48:00 │        592 │
+   └───────┴─────────────────────┴────────────┘
+
+  and the same rebuilt from scratch, for comparison:
+
+  CONVERGENCE — incremental (sonyliv_pub) vs from-scratch rebuild (sonyliv_pub_ctl)
+   ┌─ord─┬─check─────────────────────────────────────────────────────────────┬─value─┐
+1. │   1 │ delta cells differing                                             │ 0     │
+2. │   2 │ interval rows differing                                           │ 0     │
+3. │   3 │ served minutes differing                                          │ 0     │
+4. │   4 │ served minutes compared                                           │ 1579  │
+5. │   5 │ peak — incremental                                                │ 2917  │
+6. │   6 │ peak — rebuild                                                    │ 2917  │
+7. │   7 │ cc_minute_delta rows — incremental (incl. cancelling corrections) │ 29740 │
+8. │   8 │ cc_minute_delta rows — rebuild                                    │ 28074 │
+   └─────┴───────────────────────────────────────────────────────────────────┴───────┘
+
+--------------------------------------------------------------------------
+PHASE 6 — IDEMPOTENCE. Republish sessions whose events did NOT change.
+
+  A resumed run, a replayed batch or an operator correction can all re-publish
+  a session whose events did not change. That is only safe if -deltas(X) +
+  deltas(X) = 0. Forcing a republication of 200 unchanged sessions tests it.
+    == run 1785595101472  ·  200 session(s) claimed  ·  cursor 2026-08-01 14:37:25.306 -> 2026-08-01 14:37:25.306
+       negated   677 corrective delta rows   746 ms
+       derived   532 intervals   741 ms   (window 2026-07-23 16:19:00.000 .. 2026-07-26 11:30:45.000)
+       pruned    superseded intervals   1404 ms
+       emitted   677 delta rows   583 ms
+       committed cursor now 2026-08-01 14:37:25.306
+
+  cc_minute_delta rows: 29740 -> 31094 (corrective rows are APPENDED, never updated)
+  cursor: UNCHANGED at 2026-08-01 14:37:25.306 — a forced run corrects, it does not consume the queue
+
+  CONVERGENCE — incremental (sonyliv_pub) vs from-scratch rebuild (sonyliv_pub_ctl)
+   ┌─ord─┬─check─────────────────────────────────────────────────────────────┬─value─┐
+1. │   1 │ delta cells differing                                             │ 0     │
+2. │   2 │ interval rows differing                                           │ 0     │
+3. │   3 │ served minutes differing                                          │ 0     │
+4. │   4 │ served minutes compared                                           │ 1579  │
+5. │   5 │ peak — incremental                                                │ 2917  │
+6. │   6 │ peak — rebuild                                                    │ 2917  │
+7. │   7 │ cc_minute_delta rows — incremental (incl. cancelling corrections) │ 31094 │
+8. │   8 │ cc_minute_delta rows — rebuild                                    │ 28074 │
+   └─────┴───────────────────────────────────────────────────────────────────┴───────┘
+
+--------------------------------------------------------------------------
+PHASE 7 — THE COST LEDGER, per run, from cc_publish_runs
+   ┌────────run_id─┬─cursor_to───────────────┬─sessions─┬─total_ms─┬─intervals_written─┬─delta_rows_written─┐
+1. │ 1785594928549 │ 2026-08-01 14:35:03.185 │     6659 │     4943 │             15224 │              14879 │
+2. │ 1785594961296 │ 2026-08-01 14:35:50.323 │        5 │     3116 │                31 │                 47 │
+3. │ 1785595012471 │ 2026-08-01 14:36:41.142 │     7718 │     4422 │             21915 │              27550 │
+4. │ 1785595054371 │ 2026-08-01 14:37:25.306 │        1 │     3750 │                 2 │                 10 │
+5. │ 1785595101472 │ 2026-08-01 14:37:25.306 │      200 │     3474 │               532 │               1354 │
+   └───────────────┴─────────────────────────┴──────────┴──────────┴───────────────────┴────────────────────┘
+
+  freshness, as a downstream consumer would read it:
+Row 1:
+──────
+publish_cursor:     2026-08-01 14:37:25.306
+ingest_watermark:   2026-08-01 14:37:25.306
+publish_lag_s:      0
+pending_sessions:   0
+last_committed_run: 1785595101472 -- 1.79 trillion
+last_run_ms:        3474
+last_run_sessions:  200
+runs_in_flight:     0
+
+--------------------------------------------------------------------------
+PHASE 8 — RE-MEASURING THE SHELVED PROJECTION on the finalizer's query shape.
+
+  WALKTHROUGH §5 records proj_by_session as measured and NOT shipped: 27.7x on
+  a single-session lookup, but "the actual straggler path uses IN (subquery),
+  which full-scans anyway, so the real gain is 1.00x for +94% storage".
+  The finalizer's derive is exactly that IN (subquery) — plus an event-time
+  window — so the shape is worth re-measuring rather than inheriting.
+
+   ┌─variant────┬─read_rows─┬─pct_of_ev_raw─┬─read_bytes─┬─ms─┬─used_projection─┐
+1. │ b.session  │     38946 │ 4.3%          │ 2.49 MiB   │ 12 │ YES             │
+2. │ c.windowed │      8193 │ 0.9%          │ 600.07 KiB │  7 │ YES             │
+   └────────────┴───────────┴───────────────┴────────────┴────┴─────────────────┘
+
+  storage: ev_raw 3.73 MiB -> 7.16 MiB (projection itself 3.42 MiB)
+
+  Compare against the PHASE 5 table above: the projection IS chosen for the
+  IN (subquery) shape on 26.2. This does not overturn the storage trade — that
+  is still the operator's call — but the '1.00x' half of it does not hold for
+  the finalizer's query. ADR 0013 records both numbers and ships neither.
+  NOTE: sql/60_projection.sql hard-codes 'sonyliv.', so it cannot be applied to
+  any other database; this phase had to issue the ALTER itself. Same class of
+  defect ADR 0010 fixed in sql/80_content.sql.
+
+--------------------------------------------------------------------------
+PHASE 9 — ADOPTION COSTS NOTHING. Turn the publication layer on over a database
+          that was built the old way, and prove it does not re-derive history.
+
+  sonyliv_pub_ctl has been rebuilt from scratch and has never had sql/12_publish.sql.
+  This is the shape of the graded service today.
+
+  before: 30322 intervals · 28074 delta rows · peak 2917
+  applied sql/12_publish.sql
+    == nothing to publish (0 sessions claimed)
+  after:  30322 intervals · 28074 delta rows · peak 2917
+
+  Nothing moved, because nothing has arrived since the layer went on. The change
+  log is empty on a table that was already loaded, so the cursor starts at the
+  current ingest position rather than at the beginning of history. Adoption is
+  one DDL round trip — it does NOT trigger a rebuild to catch up.
+
+--------------------------------------------------------------------------
+Every 'differing' row above is 0 or this run failed. cc_minute_delta was never
+truncated after PHASE 2 and session_intervals was never rebuilt: every number
+moved by appending a correction and re-deriving the sessions that changed.

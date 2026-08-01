@@ -119,6 +119,17 @@ model:
 reconcile:
 	tools/reconcile.sh
 
+## publish: ONE incremental publication batch — DB=name (ADR 0013). LOOP=60 to run continuously
+.PHONY: publish
+publish:
+	@test -n "$(DB)" || { echo "usage: make publish DB=<database> [LOOP=60]"; exit 2; }
+	tools/publish.sh --database $(DB) $(if $(LOOP),--loop $(LOOP),)
+
+## publish-test: prove the aggregates move without a rebuild; writes evidence/publish.txt
+.PHONY: publish-test
+publish-test:
+	tools/publish-test.sh
+
 ## sql-local: apply sql/*.sql to the local container
 .PHONY: sql-local
 sql-local:
