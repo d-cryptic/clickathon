@@ -14,6 +14,28 @@ Owned by `tools/clickstack-alerts.sh`. Evidence: [`evidence/alerting/`](../evide
 
 ---
 
+## ⚠ CORRECTION 2026-08-02 — the `hb_per_session` anchor is inverted
+
+This document claimed the classifier's thresholds are anchored to semantics rather than fitted,
+specifically that **`hb_per_session < 1.0` sits below the fully-paused heartbeat rate ADR 0007
+measured (0.756/min), so tripping it cannot be viewer behaviour.**
+
+**That is backwards, and it is arithmetic, not opinion: 1.0 > 0.756.**
+
+The threshold sits **above** the paused rate. A fully-paused session heartbeats at 0.756/min, which
+is below 1.0, so it **does** trip the alert — meaning tripping it is *exactly* viewer behaviour, the
+opposite of what was claimed. Measured alongside: **94,472 of 843,600 heartbeats (11.2%) occur while
+a session is paused**, so this is not a rare corner.
+
+Found by Codex audit 005. **The orchestrator then repeated the claim in a merge commit without
+checking it** — an unverified claim inherited and amplified, which is the failure this repo keeps
+re-learning.
+
+**Status of the threshold itself: unresolved.** It may still be a *useful* discriminator — a genuine
+outage drives heartbeats far below 0.756 — but the value is **fitted, not anchored**, and this
+document must not claim otherwise until someone derives one that is. A fitted threshold openly
+labelled is defensible; a fitted one described as principled is not.
+
 ## 1. Why this is not a threshold problem
 
 The naive reading of "alert on concurrency decline" is a threshold on rate of change. It does not
