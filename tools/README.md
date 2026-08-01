@@ -21,7 +21,8 @@
 state-machine, correction, and tail SQL. Change the label only with a historical rebuild followed by
 `bootstrap-finalizer.sh --replace`; `finalize.sh` rejects a correction against a differently-versioned baseline.
 
-The core loading, model, finalizer, tail, query, status, and raw-to-serving reconciliation commands honor `TARGET=local|cloud`
+The core loading, model, finalizer, tail, query, status, raw-to-serving reconciliation, model-invariant,
+and truncation commands honor `TARGET=local|cloud`
 (default `local`). For a newly provisioned Cloud service: deploy the schema, then load, build, bootstrap,
 finalize, and publish the tail. Run correctness probes against the same target only after the organiser
 data and a real endpoint are available.

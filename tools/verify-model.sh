@@ -6,14 +6,15 @@ set -euo pipefail
 
 root_dir=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root_dir"
-set -a
-. ./.env
-set +a
+if [ -f .env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . ./.env
+  set +a
+fi
 
-container_name=${CH_CONTAINER:-ch}
-password=${CH_PASSWORD_LOCAL:?CH_PASSWORD_LOCAL must be set in .env}
-
-result=$(docker exec -i "$container_name" clickhouse-client --user app --password "$password" -n <<'SQL'
+target=${TARGET:-local}
+result=$(TARGET="$target" "$root_dir/tools/ch-run.sh" --multiquery --stdin <<'SQL'
 WITH targets AS
 (
     SELECT platform, toStartOfMinute(interval_start) AS minute, count() AS starts

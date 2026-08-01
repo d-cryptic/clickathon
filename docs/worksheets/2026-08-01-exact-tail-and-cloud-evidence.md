@@ -40,8 +40,8 @@ with a defensible evidence path for the unseen day.
 
 1. Provision/fill the real Cloud endpoint, then run `TARGET=cloud tools/deploy-schema.sh`,
    `load.sh`, `materialize.sh --replace`, `bootstrap-finalizer.sh --replace`, `finalize.sh`, and
-   `refresh-tail.sh`, and `reconcile.sh`. Each of those commands is target-aware; record the status and
-   correctness evidence only from that same Cloud target.
+   `refresh-tail.sh`, `reconcile.sh`, `verify-model.sh`, and `truncation-test.sh`. Each of those commands
+   is target-aware; record the status and correctness evidence only from that same Cloud target.
 2. Add the organisers’ official benchmark queries under `evidence/benchmark/` and run each three times
    with bytes-read and granule evidence. If those queries are unavailable, label any reconstructed shapes
    as non-official.

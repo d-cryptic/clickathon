@@ -15,13 +15,14 @@ if [ -f .env ]; then
 fi
 
 usage() {
-  echo "usage: TARGET=local|cloud tools/ch-run.sh [--multiquery] [--param NAME=VALUE] [--setting NAME=VALUE] (--query SQL | --file PATH)" >&2
+  echo "usage: TARGET=local|cloud tools/ch-run.sh [--multiquery] [--param NAME=VALUE] [--setting NAME=VALUE] (--query SQL | --file PATH | --stdin)" >&2
 }
 
 target=${TARGET:-local}
 multiquery=0
 query=''
 query_file=''
+query_stdin=0
 params=()
 settings=()
 
@@ -32,11 +33,16 @@ while [ "$#" -gt 0 ]; do
     --setting) settings+=("${2:?missing NAME=VALUE}"); shift 2 ;;
     --query) query=${2:?missing SQL}; shift 2 ;;
     --file) query_file=${2:?missing path}; shift 2 ;;
+    --stdin) query_stdin=1; shift ;;
     *) usage; exit 2 ;;
   esac
 done
 
-if { [ -n "$query" ] && [ -n "$query_file" ]; } || { [ -z "$query" ] && [ -z "$query_file" ]; }; then
+query_sources=0
+[ -n "$query" ] && query_sources=$((query_sources + 1))
+[ -n "$query_file" ] && query_sources=$((query_sources + 1))
+[ "$query_stdin" = 1 ] && query_sources=$((query_sources + 1))
+if [ "$query_sources" != 1 ]; then
   usage
   exit 2
 fi
@@ -68,6 +74,8 @@ if [ "$target" = local ]; then
   done
   if [ -n "$query_file" ]; then
     "${client_args[@]}" < "$query_file"
+  elif [ "$query_stdin" = 1 ]; then
+    "${client_args[@]}"
   else
     "${client_args[@]}" --query "$query"
   fi
@@ -109,6 +117,8 @@ done
 
 if [ -n "$query_file" ]; then
   curl -sS --fail-with-body "$endpoint" --user "${user}:${password}" --data-binary "@$query_file"
+elif [ "$query_stdin" = 1 ]; then
+  curl -sS --fail-with-body "$endpoint" --user "${user}:${password}" --data-binary @-
 else
   curl -sS --fail-with-body "$endpoint" --user "${user}:${password}" --data-binary "$query"
 fi
