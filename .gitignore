@@ -1,0 +1,23 @@
+# --- secrets: never commit a filled-in env file ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+credentials.json
+
+# --- data: large inputs stay out of git ---
+data/*.csv
+data/*.parquet
+data/*.native
+!data/.gitkeep
+
+# --- local noise ---
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+evidence/*.png
+!evidence/.gitkeep

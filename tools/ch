@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# tools/ch — run a query against local or cloud. `ch "SELECT 1"` or `ch -c "SELECT 1"` for cloud.
+set -euo pipefail
+[ -f .env ] && set -a && . ./.env && set +a
+TARGET=local
+if [ "${1:-}" = "-c" ]; then TARGET=cloud; shift; fi
+Q="${1:?usage: tools/ch [-c] \"SQL\"}"
+if [ "$TARGET" = cloud ]; then
+  curl -sS --fail-with-body "https://${CH_HOST}:${CH_PORT}/?database=${CH_DATABASE}" \
+    --user "${CH_USER}:${CH_PASSWORD}" --data-binary "$Q"
+else
+  curl -sS --fail-with-body "${CH_LOCAL_URL}/?user=app&password=${CH_PASSWORD_LOCAL}" --data-binary "$Q"
+fi

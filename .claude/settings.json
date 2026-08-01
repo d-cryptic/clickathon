@@ -1,0 +1,15 @@
+{
+  "$comment": "Project settings. enableAllProjectMcpServers so the ClickHouse MCP is live without a prompt.",
+  "enableAllProjectMcpServers": true,
+  "permissions": {
+    "allow": [
+      "Bash(tools/ch:*)",
+      "Bash(tools/stats:*)",
+      "Bash(docker compose:*)",
+      "Bash(docker exec ch clickhouse-client:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)"
+    ]
+  }
+}

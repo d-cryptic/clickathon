@@ -1,0 +1,38 @@
+# CONVENTIONS — how we write SQL here
+
+> **Summary:** Judgment calls a linter cannot enforce. Sort keys are dimension-first then time;
+> aggregates are always state combinators, never raw distinct counts in a rollup; every table declares
+> why its ordering key is what it is; tunables live in one place. Anything mechanically checkable
+> belongs in a script, not here.
+
+## Naming
+- Tables: `snake_case`, singular subject + grain — `cc_minute_delta`, `session_intervals`.
+- Views: `v_` prefix. Materialized views: `mv_` prefix, named after what they FILL.
+- Columns: `snake_case`. State columns end `_state` (`active_state`).
+
+## Table design
+- **Every `CREATE TABLE` carries a comment saying why the ORDER BY is what it is.** If you cannot
+  write that sentence, you have not chosen a key — you have guessed one.
+- Sort key order: **filter dimensions first, time last**. Dashboards filter then scan a range.
+- Truncated time in the key (`toStartOfMinute`), raw timestamp only at the tail. A coarse bucket
+  prunes well because it repeats; a raw `DateTime64(3)` does not.
+- `PRIMARY KEY` may be **shorter** than `ORDER BY` — keep the unique id in the sort order for dedup,
+  out of the sparse index to keep it small.
+- `LowCardinality(String)` for every dimension. `Decimal`, never `Float`, for anything money-like.
+- Set `min_bytes_for_wide_part = 0` on tables we report compression for (Compact parts report 0).
+
+## Aggregation
+- **Never sum a distinct count across buckets.** `AggregatingMergeTree` + `uniqState`/`uniqMerge`, and
+  `-MergeState` for a second hop. A `SummingMergeTree` over `uniqExact` over-counted **9×** in testing.
+- A plain column in an `AggregatingMergeTree` that is neither in the sort key nor an aggregate is
+  rejected on 26.7 — use `SimpleAggregateFunction(sum, …)`.
+- Cascading MVs land in `AggregatingMergeTree`, never in a `SummingMergeTree`.
+
+## Tunables
+All model thresholds (`HEARTBEAT_GAP_S`, `TAIL_GRACE_S`, watermark) live at the top of
+`sql/10_intervals.sql` and nowhere else. Changing one must not require a grep.
+
+## Queries
+- Select columns, never `SELECT *`, in anything that ships.
+- Label benchmark runs with `SETTINGS log_comment='...'` so evidence is findable.
+- Prefer `dictGet` over joining a small dimension.
