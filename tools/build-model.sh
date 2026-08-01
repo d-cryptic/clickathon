@@ -36,7 +36,20 @@
 #   TARGET=cloud tools/build-model.sh # the graded service
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Bug 11 (queue Q33): `set -a && . ./.env` OVERWRITES variables already exported
+# by the caller. Two agents hit this within an hour on 2026-08-02 — one could not
+# build a scratch model at all, the other asked for a scratch database and had
+# this script TRUNCATE `default.session_intervals` before dying on a schema
+# mismatch. `CH_DATABASE=scratch TARGET=cloud tools/build-model.sh` resolved to
+# `sonyliv`, and only the REBUILD_GRADED guard below stood between that and the
+# graded database. The guard was never meant to be the only line of defence.
+# Capture the caller's view FIRST, then let it win — same pattern as tools/ch,
+# tools/load.sh and tools/apply-sql.sh.
+ENV_DB="${CH_DATABASE-}"
+ENV_DB_LOCAL="${CH_DATABASE_LOCAL-}"
 [ -f .env ] && set -a && . ./.env && set +a
+[ -n "$ENV_DB" ]       && export CH_DATABASE="$ENV_DB"
+[ -n "$ENV_DB_LOCAL" ] && export CH_DATABASE_LOCAL="$ENV_DB_LOCAL"
 TARGET="${TARGET:-local}"
 
 q() {  # q <sql>
