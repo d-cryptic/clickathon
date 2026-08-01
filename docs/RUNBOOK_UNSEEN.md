@@ -81,6 +81,8 @@ three questions in [`evidence/source-contract/README.md`](../evidence/source-con
 This doubles as a dress rehearsal of the loader's positional header check (§2's first failure row)
 on a database whose loss costs nothing.
 
+`tools/contract-runner-agreement.sh` asserts that this step-zero gate and `tools/unseen-run.sh` agree about which files are loadable — **they did not, until Q37** (`evidence/q37/`). Its verdict table includes negative controls: a missing column and a duplicated one are still REFUSED by both, so the two were made to agree without loosening either.
+
 ---
 
 ## 1. The run

@@ -140,12 +140,13 @@ gate_verdict() {
     "$csv" "$CONTENT" >>"$log" 2>&1
   rc=$?
   set -e
-  [ "$rc" -eq 0 ] || { echo REFUSE; return; }
+  if [ "$rc" -ne 0 ]; then echo REFUSE; return 0; fi
   set +e
   tools/validate-source-contract.sh -c --database "$GATE_DB" >>"$log" 2>&1
   rc=$?
   set -e
-  [ "$rc" -eq 0 ] && echo ACCEPT || echo REFUSE
+  if [ "$rc" -eq 0 ]; then echo ACCEPT; else echo REFUSE; fi
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -160,16 +161,44 @@ runner_verdict() {
   local csv="$1" log="$2" rc=0
   sysq "DROP DATABASE IF EXISTS ${RUN_DB}" >/dev/null
   set +e
-  UNSEEN_DB="$RUN_DB" UNSEEN_OUT="$log" tools/unseen-run.sh "$csv" "$CONTENT" >/dev/null 2>&1
+  UNSEEN_DB="$RUN_DB" UNSEEN_OUT="$log" tools/unseen-run.sh "$csv" "$CONTENT" >/dev/null 2>"$log.err"
   rc=$?
   set -e
-  [ "$rc" -eq 0 ] && { echo ACCEPT; return; }
+  # if/fi, NOT `[ ... ] && { ... }`. These functions run inside `$( )`, and a
+  # trailing `&&` list that evaluates false returns 1 for the whole statement —
+  # `set -e` then kills the SUBSHELL, the assignment inherits status 1, and the
+  # script dies silently mid-loop with no verdict printed. That is the same trap
+  # that stopped phase 2b of tools/unseen-run.sh from ever running its contract
+  # gate (evidence/q37/README.md, case 3); it bit this script too, on its first
+  # both-refuse fixture. Worth the four extra characters.
+  if [ "$rc" -eq 0 ]; then echo ACCEPT; return 0; fi
+
+  # A refusal by tools/load.sh does NOT reach the runner's die() banner: phase 2
+  # pipes the loader through `tee`, and with `set -o pipefail` the failing
+  # pipeline trips `set -e` and kills the script before die() ever runs. So the
+  # banner is only one of the two signatures worth reading, and a classifier
+  # that trusts it alone calls a plain file refusal "RAN-BUT-FAILED".
+  #
+  # That direction is the safe one — it can only UNDER-report violations, never
+  # invent them — but under-reporting is exactly how this regression would go
+  # quiet on the defect it exists to catch. So the loader's own refusal markers
+  # count too.
+  # The loader writes its refusal to STDERR, which never reaches UNSEEN_OUT
+  # (phase 2 tees stdout only), so runner_verdict captures stderr separately.
+  if grep -q 'REFUSING:\|=== load.sh FAILED ===' "$log" "$log.err" 2>/dev/null; then
+    echo "REFUSE-FILE"; return 0
+  fi
   local phase
-  phase="$(grep -m1 '=== FAILED:' "$log" | sed 's/.*=== FAILED: //; s/ ===.*//')"
+  phase="$(grep -m1 '=== FAILED:' "$log" 2>/dev/null | sed 's/.*=== FAILED: //; s/ ===.*//' || true)"
+  # Default RAN-BUT-FAILED on anything unrecognised, INCLUDING an absent banner.
+  # The reconcile gate fails with "VERDICT — GATE FAILED" and no banner at all;
+  # calling that a file refusal would manufacture a violation out of a model bug,
+  # which is the one error this script must never make.
   case "$phase" in
     preflight|*load*) echo "REFUSE-FILE" ;;
     *)                echo "RAN-BUT-FAILED" ;;
   esac
+  return 0
 }
 
 # ---------------------------------------------------------------------------
