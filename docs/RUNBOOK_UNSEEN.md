@@ -152,11 +152,16 @@ Full transcript with the failure and both re-runs: [`evidence/unseen/rehearsal.t
 - **R8 · FLAGGED — the default scratch DB may be someone else's live state.** Preflight found
   `sonyliv_unseen` still populated from the earlier rehearsal; a literal run would have dropped it.
   §0 now says: pick a fresh name.
-- **R9 · MEASURED, OPEN — the A10 sentinel collision is real.** A genuine `content_id = -1` session
-  (true hour peak 1) is served as **peak 2** from `cc_hour_agg` — indistinguishably merged with the
-  all-content sentinel rows. Total-tier numbers are unaffected; any *per-content* query for id −1 is
-  wrong. If the unseen day contains `-1` in the event stream, say so and exclude it from cube claims.
-  The fix (a dedicated `is_total` flag or a different sentinel) is a schema change owned elsewhere.
+- **R9 · FIXED by ADR 0022 — the A10 sentinel collision.** A genuine `content_id = -1` session
+  (true hour peak 1) was served as **peak 2** from `cc_hour_agg` — indistinguishably merged with the
+  all-content sentinel rows (merged integral 4080 = 3060 rollup + 1020 content: the curves added).
+  `cc_hour_agg` now carries `cube_level` in its key — the rollup marker is structural, not a value —
+  and the rehearsal re-runs clean: rollup 2/3060 and content −1 1/1020 as separate rows, gate
+  1,080/0. `tools/unseen-run.sh` additionally **asserts at load** that no value collides with a
+  sentinel and stops (override: `UNSEEN_ACK_SENTINEL=1`), because the `-1`/`'*'`-means-all
+  convention is still the query API in `sql/85_windows.sql`, `tools/clickstack-cloud.sh` and the
+  benchmark pins — for a colliding id, route per-content answers through `cc_hour_agg` with
+  `cube_level` pinned, or `cc_minute_delta`. Evidence: `evidence/unseen/adr-0022-*.txt`.
 - **R10 · CORRECTED (docs) — missing content ids serve `(unknown)`, not `''`.** The dictionary
   carries a default, so blank-content behaviour is visible in output rather than silent (updates A9's
   wording). `-987654399`, `-1` and `21000099` all returned `(unknown)` titles; joins did not error.
@@ -214,8 +219,9 @@ past-midnight tail minute**.
 - **A9 · UPDATED by R10** — content metadata must be re-delivered (fetch script is sha-pinned to July
   files); missing ids serve `(unknown)` titles rather than erroring. Pass `none` only knowingly.
 - **A10 · smaller things, still real** — timestamp units (loader divides by 1000 unconditionally;
-  check `min/max(event_timestamp)` after load); `content_id = -1` collides with the cube sentinel
-  (**now measured — see R9**); AggregatingMergeTree `count()` is not a build identity (compare
+  check `min/max(event_timestamp)` after load); `content_id = -1` no longer collides with the cube
+  sentinel (**fixed — see R9 / ADR 0022**, and the run now asserts it at load) but remains ambiguous
+  in the `p_* = sentinel` query API; AggregatingMergeTree `count()` is not a build identity (compare
   `sum(delta)/sum(starts)/sum(ends)`); `50_hour_agg` re-runs supersede only under `FINAL`; the
   HyperDX chart range is a human step and defaults to the July window in the docs.
 

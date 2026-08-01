@@ -73,10 +73,27 @@ say "2 · open sessions (trap 3): $(q "SELECT countIf(is_open=1) FROM session_in
 say "3 · never-seen dims (trap 4) reached the serving tier:"
 say "     $(q "SELECT concat('platform VISION_PRO intervals=', toString(countIf(platform='VISION_PRO')), ' · country nepal=', toString(countIf(country='nepal')), ' · audio mai=', toString(countIf(audio_language='mai'))) FROM session_intervals FINAL FORMAT TSVRaw" | tr -d '\n')  (designed: 10 each)"
 say "4 · negative content_id (trap 5): $(q "SELECT concat(toString(countIf(content_id=-987654399)), ' intervals at -987654399, ', toString(countIf(content_id=-1)), ' at -1') FROM session_intervals FINAL FORMAT TSVRaw" | tr -d '\n')  (designed: 2 and 1)"
-say "5 · A10 sentinel collision — cc_hour_agg rows with content_id=-1 in hour 17:"
-q "SELECT platform, country, content_id, peak FROM cc_hour_agg FINAL
-   WHERE content_id = -1 AND toHour(hour) = 17 ORDER BY platform, country FORMAT PrettyCompactNoEscapes" | tee -a "$OUT"
-say "     (the REAL -1 session and the 'all content' sentinel are indistinguishable above)"
+say "5 · A10 sentinel collision (ADR 0022) — the REAL content_id=-1 session and the all-content"
+say "    rollup must be SEPARATE rows in cc_hour_agg, distinguished by cube_level:"
+q "SELECT cube_level, platform, country, content_id, peak, integral FROM cc_hour_agg FINAL
+   WHERE content_id = -1 AND toHour(hour) = 17 ORDER BY cube_level, platform, country FORMAT PrettyCompactNoEscapes" | tee -a "$OUT"
+# Designed truth for hour 17 (from the generator + session_intervals): the -1
+# session vs_q18_i2 runs 17:30-17:46 alone at its grain -> peak 1, 17 min =
+# 1020 concurrency-seconds; the whole service peaks at 2 with 3060 s. Pre-fix
+# the cube served ONE merged ('*','*',-1) row: 2 / 4080 — the curves added.
+R9_ROLLUP="$(q "SELECT concat(toString(peak),'/',toString(integral)) FROM cc_hour_agg FINAL
+   WHERE cube_level=0 AND platform='*' AND country='*' AND content_id=-1 AND toHour(hour)=17 FORMAT TSVRaw" | tr -d '\n')"
+R9_REAL="$(q "SELECT concat(toString(peak),'/',toString(integral)) FROM cc_hour_agg FINAL
+   WHERE cube_level=4 AND platform='*' AND country='*' AND content_id=-1 AND toHour(hour)=17 FORMAT TSVRaw" | tr -d '\n')"
+if [ "$R9_ROLLUP" = "2/3060" ] && [ "$R9_REAL" = "1/1020" ]; then
+  RC5=0
+  say "     rollup (cube_level 0): ${R9_ROLLUP} · real content -1 (cube_level 4): ${R9_REAL} -> PASS"
+  say "     (designed: 2/3060 and 1/1020 · the pre-ADR-0022 cube served one merged row 2/4080)"
+else
+  RC5=1
+  say "     rollup (cube_level 0): '${R9_ROLLUP}' · real content -1 (cube_level 4): '${R9_REAL}' -> FAIL"
+  say "     (designed: 2/3060 and 1/1020 — the R9 collision is BACK, or the cube did not build)"
+fi
 say "6 · dictGet on ids absent from content_dim (A9) serves blanks, not errors:"
 q "SELECT content_id, concat('[', dictGet('dict_content','title',tuple(content_id)), ']') AS title
    FROM (SELECT DISTINCT content_id FROM ev_raw WHERE content_id IN (-987654399,-1,21000099,21000016))
@@ -90,6 +107,12 @@ say "     block J active hours: $(q "SELECT toString(round(sum(dateDiff('second'
 say "9 · ADR 0009 same-second pause/resume — block C must have lost NO time:"
 say "     block C active hours: $(q "SELECT toString(round(sum(dateDiff('second',interval_start,interval_end))/3600, 2)) FROM session_intervals FINAL WHERE video_session_id LIKE 'vs_q18_c%' FORMAT TSVRaw" | tr -d '\n') h · intervals: $(q "SELECT toString(count()) FROM session_intervals FINAL WHERE video_session_id LIKE 'vs_q18_c%' FORMAT TSVRaw" | tr -d '\n')  (designed: 8 x 11 min = 1.47 h, 8 intervals — one each, NOT split at the tie)"
 say ""
-if [ "$RC1" -eq 0 ]; then say "VERIFY VERDICT — designed truth and serving layer AGREE on every minute."
-else say "VERIFY VERDICT — DESIGNED-TRUTH MISMATCH. The gate may share a blind spot with the model (A3)."; fi
-exit "$RC1"
+if [ "$RC1" -ne 0 ]; then
+  say "VERIFY VERDICT — DESIGNED-TRUTH MISMATCH. The gate may share a blind spot with the model (A3)."
+elif [ "$RC5" -ne 0 ]; then
+  say "VERIFY VERDICT — MINUTES AGREE but the hour cube fails the sentinel-separation assertion (probe 5, ADR 0022)."
+else
+  say "VERIFY VERDICT — designed truth and serving layer AGREE on every minute, and the hour cube keeps the real content -1 separate from the rollup."
+fi
+[ "$RC1" -ne 0 ] && exit "$RC1"
+exit "$RC5"

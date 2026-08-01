@@ -42,6 +42,10 @@
 #   UNSEEN_ALLOW_PROD=1        permit UNSEEN_DB=sonyliv
 #   UNSEEN_KEEP=1              keep the rendered SQL in the temp dir
 #   UNSEEN_OUT=path            evidence file (default evidence/unseen-rehearsal.txt)
+#   UNSEEN_ACK_SENTINEL=1      proceed although the data carries values that
+#                              collide with the repo's rollup sentinels
+#                              (content_id -1, platform/country '*') — see the
+#                              SENTINEL AUDIT below and ADR 0022 before using
 # ============================================================================
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -292,6 +296,40 @@ DAY_MAX=$(q1 "SELECT toString(toStartOfMinute(max(event_timestamp))) FROM ev_raw
 NDAYS=$(q1  "SELECT uniqExact(toDate(event_timestamp)) FROM ev_raw")
 say "  data spans ${DAY_MIN} .. ${DAY_MAX}  (${NDAYS} calendar day(s))"
 
+# SENTINEL AUDIT (ADR 0022) — assert, at load, that no VALUE in the data
+# collides with a rollup MARKER, instead of trusting that it never will. The
+# rehearsal (R9) planted a session whose real content_id is -1 and the hour
+# cube silently merged it into the all-content rollup; the cube is structurally
+# safe since ADR 0022 (cube_level is the marker, not the value), but the
+# "-1 / '*' means ALL" convention is still the query API elsewhere:
+#   - sql/85_windows.sql parametrised views: p_content_id = -1 (and
+#     p_platform / p_country = '*') mean "no filter" there
+#   - tools/clickstack-cloud.sh CUBE_TOTAL, tools/build-model.sh's status
+#     line, and the evidence/benchmark sentinel pins
+# For a colliding id those paths serve the ROLLUP where the caller asked for
+# the content. That must never pass silently — hence fail here, loudly, with
+# an explicit acknowledgement to proceed.
+S_CID=$(q1 "SELECT toString(countIf(content_id = -1)) FROM ev_raw")
+S_PLT=$(q1 "SELECT toString(countIf(platform = '*')) FROM ev_raw")
+S_CTY=$(q1 "SELECT toString(countIf(country = '*')) FROM ev_raw")
+if [ "$S_CID" != "0" ] || [ "$S_PLT" != "0" ] || [ "$S_CTY" != "0" ]; then
+  say ""
+  say "  SENTINEL COLLISION IN THE DATA (ADR 0022):"
+  say "    ev_raw rows with content_id = -1: ${S_CID} · platform = '*': ${S_PLT} · country = '*': ${S_CTY}"
+  say "    cc_hour_agg and its views stay CORRECT (cube_level separates rollup from value)."
+  say "    NOT safe for the colliding value: sql/85_windows.sql's p_* = sentinel"
+  say "    convention, tools/clickstack-cloud.sh CUBE_TOTAL, tools/build-model.sh's"
+  say "    status line, evidence/benchmark sentinel pins. Route per-content answers"
+  say "    for that id through cc_hour_agg WITH cube_level pinned, or cc_minute_delta."
+  if [ -z "${UNSEEN_ACK_SENTINEL:-}" ]; then
+    die "sentinel-colliding values in ev_raw — the R9 trap. The pipeline's own answer
+and gate stay correct, but the sentinel-convention query paths listed above are
+ambiguous for the colliding value. Read the list, then re-run with
+UNSEEN_ACK_SENTINEL=1."
+  fi
+  say "  UNSEEN_ACK_SENTINEL=1 — acknowledged, continuing."
+fi
+
 # ---------------------------------------------------------------------------
 phase "3 intervals (30_build_intervals.sql)"
 q "TRUNCATE TABLE session_intervals" >/dev/null
@@ -331,11 +369,13 @@ say "  cc_hour_agg $(q1 "SELECT count() FROM cc_hour_agg FINAL") rows"
 # level, at every tier. The old bare argMax(peak_minute, peak) here picked an
 # arbitrary tied hour — on the synthetic rehearsal it answered 21:10 where the
 # designed earliest was 20:00.
+# cube_level=0 pins the grand total STRUCTURALLY (ADR 0022) — the sentinel
+# tuple alone also matches a real content_id=-1 row when the day carries one.
 say "  $(q1 "SELECT concat('hour tier says peak ',toString(max(peak)),' @ ',toString(min(peak_minute)))
         FROM cc_hour_agg FINAL
-        WHERE platform='*' AND country='*' AND content_id=-1
+        WHERE platform='*' AND country='*' AND content_id=-1 AND cube_level=0
           AND peak = (SELECT max(peak) FROM cc_hour_agg FINAL
-                      WHERE platform='*' AND country='*' AND content_id=-1)")"
+                      WHERE platform='*' AND country='*' AND content_id=-1 AND cube_level=0)")"
 
 # ---------------------------------------------------------------------------
 phase "7 the answer (this is what we would submit)"
