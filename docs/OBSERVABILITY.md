@@ -8,6 +8,14 @@
 > the OTLP/HTTP JSON mapping is small and stable and the SDK's log bridge is still experimental. Every
 > claim below was executed, not reasoned about — see "Verified end to end".
 
+**The hosted twin.** The ClickHouse Cloud service has **no OTLP path** (no `otel_*` tables), so the
+metrics below cannot land there. `tools/clickstack-cloud.sh` therefore builds **"SonyLIV pipeline
+health (cloud)"** on the hosted HyperDX from the same three signals cloud-natively: `v_cc_watermark`
+directly, build stages from `system.query_log` with the exact filters `internal/pipelinehealth`
+uses, and reconcile-gate *runs* by their read set (`ev_raw` AND `cc_minute_delta`). What the hosted
+twin cannot show is the gate's PASS/FAIL **verdict** — that lives in `evidence/reconcile.txt` and in
+`sonyliv.reconcile.gate_pass` here, which is precisely why this OTLP emitter still earns its keep.
+
 ## Why this file exists
 
 The rubric test is: *if I delete ClickStack, does the demo stop doing something a judge saw?* Before
@@ -115,6 +123,13 @@ info   build stage session_intervals: 1525ms, 121492 rows written, last ran 2m7s
 info   build stage cc_minute_delta: 1020ms, 28139 rows written, last ran 2m5s ago
 info   reconcile gate: PASS (5/5 minutes agree, evidence commit 3c081ff, 1m54s old)
 ```
+
+(That log line predates the hardened gate. Since 2026-08-01 the parser reads the gate's SUMMARY row
+rather than counting sample rows, and the line reads
+`reconcile gate: PASS (17028 minutes compared, 0 mismatched, peak 2887, evidence commit d6c85e2, …)`.
+A file with no parseable SUMMARY — empty, malformed, or pre-81c0161 — logs
+`FAIL — no SUMMARY row parsed` and `gate_pass=0`: unreadable evidence fails loudly instead of
+passing silently.)
 
 `SeverityText` came back **lower-case** exactly as written — confirms VERIFIED.md's `severity:error`
 filtering fact against this emitter specifically, not just the general claim.

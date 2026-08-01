@@ -164,12 +164,34 @@ The cost of asking is low and the cost of guessing is a whole category of benchm
 | **negative ids may appear in events** | already covered — `Int64` end to end. Add one assertion at load that `min(content_id)` is Int64-parseable | ~2 lines in `tools/load.sh` |
 | *no answer received* | ship both grains (`content_id` and `title`), label the blank explicitly as `unknown`, and say in the deck which one we treat as canonical and why | small; converts ambiguity into a stated choice |
 
-## Our current assumption
+## Our current assumption — now SHIPPED as a stated default (ADR 0010, 2026-08-01)
 
-Group by `content_id` is canonical; `title` / `category` / `video_type` are rollups on top. Empty
-`video_type` is left as `''` (real source data, not a join failure). `content_id` is `Int64`
-everywhere. The join stays `LEFT` with a `'(unknown)'` dictionary default so an orphan is visible
-rather than dropped.
+Group by `content_id` is canonical; `title` / `category` / `video_type` are rollups on top.
+`content_id` is `Int64` everywhere. The join stays `LEFT` with a `'(unknown)'` dictionary default so an
+orphan is visible rather than dropped.
+
+This is the *"no answer received"* row of the table above, implemented rather than left implicit —
+both grains shipped, the blank labelled, and which one is canonical said out loud:
+
+- **Both grains ship.** `v_concurrency_minute_title` is **kept**, because *"demand by title **or**
+  content identifier"* is the deliverable's own wording, and because
+  `v_concurrency_minute_content` is not a drop-in replacement — its grain is
+  `(minute, platform, country, content_id)`, so a per-asset answer still needs a roll-up.
+- **The ambiguity rides in the data, not in a comment.** `v_concurrency_minute_title` gained
+  `catalog_content_ids` — how many `content_id`s carry this title. Measured against the serving layer:
+  **568 of 3,325** served titles (17.1%) name more than one asset, 32 actually add two live assets
+  together, and **7 of the top 50 by peak** are ambiguous — including the **#1 title, `wekek ked`
+  (peak 433)**, whose name is shared by a `live`/`cdbgg` asset and a dormant `vod`/`cddgn` one.
+  `v_content_title_collisions` lists every collision so a flagged title can be split.
+- **The blank `video_type` is labelled `'(blank)'`** — not `''` (invisible), not `'(unknown)'` (that
+  string is reserved *exclusively* for a dictionary key miss, and merging them would let a real orphan
+  hide inside a bucket worth 2.85% of events), and not filtered. Applied to `title` and `category` too;
+  measured 0 blanks there today, so it is insurance for the unseen day.
+
+**All three questions below are still open**, and the shipped choices are one-liners to reverse
+precisely because the blank is *labelled* rather than filtered and both grains exist. If the answer is
+"call it unknown", change one string in four views; "exclude them", add
+`WHERE video_type != '(blank)'` to the video-type view only, never to the totals.
 
 ## Answer
 

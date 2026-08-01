@@ -8,7 +8,7 @@
 --
 -- Per (dimension combination, hour) we store:
 --   peak        the hour's max of the intra-hour running sum
---   peak_minute the minute that max first occurred (ties -> earliest)
+--   peak_minute the minute that max first occurred (ties -> earliest, ADR 0014)
 --   integral    concurrency-SECONDS over the hour
 --
 -- Peak over an hour-aligned range is `max(peak)`. Time-weighted average over an
@@ -16,7 +16,7 @@
 -- 24 rows per combination instead of 1,440 minutes.
 --
 -- ---------------------------------------------------------------------------
--- THE TWO THINGS THAT ARE EASY TO GET WRONG HERE
+-- THE THREE THINGS THAT ARE EASY TO GET WRONG HERE
 -- ---------------------------------------------------------------------------
 --
 -- 1. THE INTEGRAL MUST CARRY CONCURRENCY FORWARD.
@@ -47,6 +47,26 @@
 --    or one content_id genre bucket — is NOT a cube level and its peak must be
 --    recomputed from cc_minute_delta at minute grain. The hour tier is an
 --    accelerator for the common dashboard shapes, never the only path.
+--
+-- 3. "THE PEAK MINUTE" IS AMBIGUOUS, AND THE AMBIGUITY IS THE COMMON CASE.
+--    MEASURED on the provided file, 2026-08-01: of the 98 hour rows stored at
+--    the all-dimensions cube level, 48 (49.0%) have TWO OR MORE change points
+--    sitting at that hour's max, and 81 (82.7%) hold the max level for two or
+--    more minutes. At content grain it is 36.9% / 92.2% of 5,734 rows. So
+--    roughly half of every peak_minute this table stores is the output of a
+--    tie-break, not of a unique argmax.
+--
+--    ADR 0014 fixes the rule for the whole repo: THE PEAK MINUTE IS THE
+--    EARLIEST MINUTE AT WHICH THE PEAK LEVEL IS REACHED, at every tier and
+--    every grain. Encoded everywhere as the same tuple:
+--
+--        argMax(<minute-ish>, (<peak-ish>, -toInt64(toUInt32(<minute-ish>))))
+--
+--    argMax over a bare `concurrent` returns an ARBITRARY row among ties, which
+--    makes the stored answer depend on merge order and thread count. The tuple
+--    orders by concurrency first and by negated epoch second, so the maximal
+--    tuple is the highest concurrency at the smallest timestamp — a total order
+--    with no ties left, hence identical output at any max_threads.
 --
 -- ---------------------------------------------------------------------------
 -- Re-runnable, unlike cc_minute_delta. That table is a SummingMergeTree of
@@ -180,11 +200,14 @@ SELECT
     lv_content_id,
     hour,
     max(concurrent) AS peak,
-    -- Tie-break the peak minute to the EARLIEST occurrence. argMax over a bare
-    -- `concurrent` returns an arbitrary row among ties, which makes the answer
-    -- non-deterministic across merges; the tuple orders by concurrency then by
-    -- negated epoch, so the highest tuple is the highest concurrency at the
-    -- earliest minute. "First reached" is also what a dashboard means by it.
+    -- THE TIE-BREAK, note 3 above / ADR 0014: earliest minute wins. This is the
+    -- ROOT site — every other peak_minute in the repo either uses this same
+    -- tuple or rolls this column up, so the rule is defined once here.
+    --
+    -- Note the curve only carries CHANGE POINTS, and that costs nothing: a level
+    -- can only first be reached at a change point, so the earliest change point
+    -- at the max IS the earliest minute at the max. Expanding the held minutes
+    -- first would return the identical answer for more work.
     argMax(minute, (concurrent, -toInt64(toUInt32(minute)))) AS peak_minute,
     sum(concurrent * hold_s) AS integral
 FROM curve
@@ -271,8 +294,19 @@ SELECT
     -- another — Code: 184, ILLEGAL_AGGREGATION. Qualifying is the fix that
     -- keeps the output column names the callers expect.
     max(cc_hour_agg.peak) AS peak,
-    -- same earliest-wins tie-break as the hour tier, one grain up
-    argMax(peak_minute, (cc_hour_agg.peak, -toInt64(toUInt32(hour)))) AS peak_minute,
+    -- Same earliest-wins tie-break as the hour tier, one grain up (ADR 0014) —
+    -- and tie-broken on the PEAK MINUTE itself, not on `hour`.
+    --
+    -- An earlier draft tie-broke on `-toUInt32(hour)`. On today's data that is
+    -- the same answer, because a stored peak_minute always lies inside its own
+    -- hour, so the earlier hour necessarily carries the earlier minute. It is
+    -- the same answer only for that reason, though, and ADR 0006's
+    -- correction-by-diff path re-derives an hour's row after a late arrival —
+    -- the day of an off-by-one there is the day the indirect form starts
+    -- disagreeing with the direct one. Tie-break on the column you are actually
+    -- returning.
+    argMax(cc_hour_agg.peak_minute,
+           (cc_hour_agg.peak, -toInt64(toUInt32(cc_hour_agg.peak_minute)))) AS peak_minute,
     sum(cc_hour_agg.integral) AS integral,
     sum(cc_hour_agg.integral) / 86400 AS avg_concurrent,
     count() AS active_hours
@@ -284,7 +318,9 @@ CREATE OR REPLACE VIEW v_concurrency_day_total AS
 SELECT
     toDate(hour) AS day,
     max(cc_hour_agg.peak) AS peak,
-    argMax(peak_minute, (cc_hour_agg.peak, -toInt64(toUInt32(hour)))) AS peak_minute,
+    -- ADR 0014, same tuple as v_concurrency_day above.
+    argMax(cc_hour_agg.peak_minute,
+           (cc_hour_agg.peak, -toInt64(toUInt32(cc_hour_agg.peak_minute)))) AS peak_minute,
     sum(cc_hour_agg.integral) AS integral,
     sum(cc_hour_agg.integral) / 86400 AS avg_concurrent,
     count() AS active_hours
