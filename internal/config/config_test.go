@@ -76,6 +76,52 @@ func TestLoadCloudNormalizesHost(t *testing.T) {
 	}
 }
 
+// The bug ADR 0018 removes, pinned: local used to fall back to CH_DATABASE —
+// the graded Cloud database — so `sonyliv verify -target local` looked for
+// `sonyliv` on localhost and 404ed. A set CH_DATABASE must be invisible to the
+// local target: with CH_DATABASE_LOCAL unset, Load(local) fails loudly instead
+// of borrowing the other target's database.
+func TestLoadLocalNeverReadsCloudDatabase(t *testing.T) {
+	t.Setenv("CH_DATABASE", "sonyliv")
+	t.Setenv("CH_DATABASE_LOCAL", "")
+	t.Setenv("CH_PASSWORD_LOCAL", "secret")
+
+	if _, err := config.Load(config.TargetLocal); err == nil {
+		t.Fatal("Load(local) with only CH_DATABASE set returned nil error; want a loud CH_DATABASE_LOCAL error, never a fallback to the Cloud database")
+	}
+}
+
+func TestLoadLocalResolvesItsOwnDatabase(t *testing.T) {
+	t.Setenv("CH_DATABASE", "sonyliv") // must be ignored
+	t.Setenv("CH_DATABASE_LOCAL", "default")
+	t.Setenv("CH_PASSWORD_LOCAL", "secret")
+	t.Setenv("CH_LOCAL_URL", "http://localhost:8123")
+
+	got, err := config.Load(config.TargetLocal)
+	if err != nil {
+		t.Fatalf("Load(local) = %v, want nil", err)
+	}
+	if got.Database != "default" {
+		t.Errorf("Database = %q, want %q (CH_DATABASE_LOCAL, not CH_DATABASE)", got.Database, "default")
+	}
+	if want := "localhost:8123"; got.Addr() != want {
+		t.Errorf("Addr() = %q, want %q", got.Addr(), want)
+	}
+}
+
+// Cloud symmetrically requires its own database variable: an unset CH_DATABASE
+// must fail at Load time, not produce a confident query against the server
+// default database.
+func TestLoadCloudRequiresDatabase(t *testing.T) {
+	t.Setenv("CH_HOST", "abc.gcp.clickhouse.cloud")
+	t.Setenv("CH_PASSWORD", "secret")
+	t.Setenv("CH_DATABASE", "")
+
+	if _, err := config.Load(config.TargetCloud); err == nil {
+		t.Fatal("Load(cloud) with no CH_DATABASE returned nil error; want a named-variable error")
+	}
+}
+
 func TestLoadRejectsUnknownTarget(t *testing.T) {
 	t.Parallel()
 	if _, err := config.Load(config.Target("staging")); err == nil {
