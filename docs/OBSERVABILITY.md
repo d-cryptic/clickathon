@@ -197,6 +197,36 @@ deleted afterward (`ALTER TABLE ... DELETE`); they are not part of the numbers a
   *late* even after — poll, don't sleep a fixed amount; no `authorization` header is a 401; registration
   is at the root (`/register/password`), not under `/api`.
 
+## Alerting — what we page on, and what we deliberately do not
+
+Everything above observes the *pipeline*. The one thing we alert on is a **business** signal:
+concurrency declining. It has its own document, [DECLINE_ALERTING.md](DECLINE_ALERTING.md), because
+the hard part is not the detection — it is telling apart the three causes the problem statement names
+(the asset ended · a system issue · the content is not engaging), which have completely different
+responses. Summary of what is live in hosted HyperDX:
+
+| Alert | Fires when | Response |
+|---|---|---|
+| **Concurrency decline — SYSTEM ISSUE** | concurrency below 80% of its 15-min trailing median, departures *not* explained by session closes, heartbeat rate below the fully-paused rate. 5 min, 2 consecutive windows | **page** |
+| **Concurrency decline — CONTENT NOT ENGAGING** | same decline, viewers still connected and emitting, but pausing/backgrounding above their own recent rate. 15 min | content call, no page |
+| **Concurrency decline — UNCLASSIFIED** | a decline that matches none of the three cleanly. 15 min | look at it |
+
+There is **no alert on an asset ending**, which is the entire point: concurrency falls legitimately
+all evening, and a detector that fires on that is one people learn to ignore.
+
+Two things from that work belong here rather than only there:
+
+- **Alert windows anchor to `v_cc_watermark.sealed_watermark`, never `now()`.** Same watermark this
+  emitter reports as `sonyliv.watermark.sealed_lag_seconds`. It is what makes an alert meaningful on
+  a frozen dataset, and it degrades usefully on a live one — if ingestion stalls the window stops
+  advancing instead of sliding onto empty minutes and reporting all-clear.
+- **A 200 from the alerts API does not mean the alert works.** Two alerts sat in `state=ALERT` while
+  their tiles read `0` — either because `above` is inclusive or because the engine fires on a row
+  existing; we closed both doors rather than guess. Only reading state back and comparing it against
+  the tile's own value caught it, and `tools/clickstack-alerts.sh --verify` exists to make that check
+  routine. Same lesson as the OTLP work above: verify by reading the data back out, not by trusting
+  the write.
+
 ## Files
 
 | File | Role |
@@ -206,3 +236,4 @@ deleted afterward (`ALTER TABLE ... DELETE`); they are not part of the numbers a
 | `cmd/sonyliv/observe.go`, `observe_helpers.go` | wiring: gather signals inside a trace, build the OTLP payloads, print a summary, POST |
 | `internal/config/clickstack.go` | `CLICKSTACK_OTLP`/`CLICKSTACK_INGESTION_KEY`/`CLICKSTACK_SERVICE_NAME` — additive, does not touch `config.go`'s Cloud/local ClickHouse loading |
 | `tools/clickstack-observability.sh` | idempotent dashboard over the emitted metrics, local self-hosted stack |
+| `tools/clickstack-alerts.sh` | idempotent decline dashboard + 3 alerts on hosted HyperDX; `--validate` regenerates the thresholds' evidence, `--verify` reads the alerts back signed-in ([DECLINE_ALERTING.md](DECLINE_ALERTING.md)) |

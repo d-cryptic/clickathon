@@ -1,0 +1,52 @@
+ClickStack decline alerting — read back from the control plane, authenticated
+org d4ab47e3-cdd8-46f9-a7ba-515ebcd6d51b · service c483b8ed-1c82-4b6a-af31-08a0725362ad · 2026-08-01T21:45:32Z
+
+== GET https://api.clickhouse.cloud/v1/organizations/d4ab47e3-cdd8-46f9-a7ba-515ebcd6d51b/services/c483b8ed-1c82-4b6a-af31-08a0725362ad/clickstack/alerts
+  Concurrency decline — SYSTEM ISSUE (page)
+    id=6a6e65c1a561469a8f4eeacc state=ALERT source=tile
+    threshold above_exclusive 0 · interval 5m · consecutive 2 · channel webhook
+    executionError: WEBHOOK_ERROR: Failed to send webhook notification. Check the webhook configuration and destination.
+  Concurrency decline — CONTENT NOT ENGAGING
+    id=6a6e65c208fc5020ea613d71 state=OK source=tile
+    threshold above_exclusive 0 · interval 15m · consecutive 1 · channel webhook
+    executionError: WEBHOOK_ERROR: Failed to send webhook notification. Check the webhook configuration and destination.
+  Concurrency decline — UNCLASSIFIED
+    id=6a6e65c439f3a5088c90ac47 state=OK source=tile
+    threshold above_exclusive 0 · interval 15m · consecutive 1 · channel webhook
+    executionError: WEBHOOK_ERROR: Failed to send webhook notification. Check the webhook configuration and destination.
+
+== GET https://api.clickhouse.cloud/v1/organizations/d4ab47e3-cdd8-46f9-a7ba-515ebcd6d51b/services/c483b8ed-1c82-4b6a-af31-08a0725362ad/clickstack/dashboards  (tiles the alerts are attached to)
+  dashboard SonyLIV concurrency decline id=6a6e654ca561469a8f4eeab9 tiles=7
+    tile 6a6e657d39f3a5088c90ac2emarkdown  What this dashboard alerts on
+    tile 6a6e657d39f3a5088c90ac2fline      Concurrency vs its 15-min trailing median — declining minutes broken out
+    tile 6a6e657d39f3a5088c90ac30number    SYSTEM ISSUE — minutes (page someone)
+    tile 6a6e657d39f3a5088c90ac31number    ASSET ENDED — minutes (expected, no action)
+    tile 6a6e657d39f3a5088c90ac32number    NOT ENGAGING — minutes (a content call)
+    tile 6a6e657d39f3a5088c90ac33number    UNCLASSIFIED decline — minutes (look at it)
+    tile 6a6e657d39f3a5088c90ac34table     Classified decline minutes — the evidence behind each verdict
+
+== GET https://api.clickhouse.cloud/v1/organizations/d4ab47e3-cdd8-46f9-a7ba-515ebcd6d51b/services/c483b8ed-1c82-4b6a-af31-08a0725362ad/clickstack/webhooks
+  SonyLIV decline sink id=6a6e6549a561469a8f4eeaa7 service=generic url=https://example.com/sonyliv-decline-alert
+
+-----------------------------------------------------------------------------
+READ THIS ALONGSIDE clickstack-alerts-BEFORE-having-fix.txt
+
+BEFORE (21:34, thresholdType "above", no HAVING):
+  SYSTEM ISSUE        PENDING   tile = 3   <- correct
+  CONTENT NOT ENGAGING  ALERT   tile = 0   <- FALSE FIRE
+  UNCLASSIFIED          ALERT   tile = 0   <- FALSE FIRE
+
+AFTER (21:45, thresholdType "above_exclusive", HAVING <count> > 0):
+  SYSTEM ISSUE          ALERT   tile = 3   <- correct, still paging
+  CONTENT NOT ENGAGING     OK   tile = <no rows>
+  UNCLASSIFIED             OK   tile = <no rows>
+
+Both 15m alerts re-evaluated at 2026-08-01T21:45:03Z and cleared to OK; the 5m
+page re-evaluated and stayed ALERT because its tile genuinely reads 3 outage
+minutes. The state change was observed live, not inferred from the config.
+
+The WEBHOOK_ERROR on every line is EXPECTED and is not a fault: the default sink
+(https://example.com/...) discards the payload by design, so delivery fails by
+design. Set DECLINE_WEBHOOK_URL to a real destination and it clears. Alert
+evaluation and state transitions are unaffected — which is the whole point of
+verifying state rather than trusting the write.

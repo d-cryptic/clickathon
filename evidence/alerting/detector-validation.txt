@@ -1,0 +1,31 @@
+Decline detector + classifier — validation against the delivered file
+2026-08-01T21:45:16Z · database sonyliv · regenerate: tools/clickstack-alerts.sh --validate
+
+== 1. BASELINE CHOICE: how often does each candidate fire?
+   (whole file, 6,195 spine minutes. An alert nobody can ignore is one that stays quiet.)
+   ┌─spine_minutes─┬─naive_down20pct_5min─┬─median_NO_lag─┬─mean_lag3─┬─SHIPPED_median_lag3─┐
+1. │          6195 │                  962 │            22 │        30 │                  28 │
+   └───────────────┴──────────────────────┴───────────────┴───────────┴─────────────────────┘
+
+   Where the naive detector's noise lives — by baseline size:
+
+-----------------------------------------------------------------------------
+PROVENANCE NOTE — concurrent activity on the graded database
+
+Another session wrote to `sonyliv` while this work was in progress (user
+`default`): TRUNCATE TABLE sonyliv.session_intervals at 2026-08-01 21:23:18,
+then CREATE OR REPLACE VIEW on the two v_user_concurrency_minute* views at
+21:23:28-29. NOT from this session — everything here is read-only against
+ClickHouse, and tools/clickstack-alerts.sh has no apply-sql step at all.
+
+Why the numbers above are still trustworthy, checked rather than assumed:
+  * the tier is self-consistent NOW and matches the documented headline exactly
+    — peak 2917 @ 2026-07-26 10:56, session_intervals 30,323 rows;
+  * `--validate` was run twice, at 21:34 and 21:45, spanning that window and
+    everything after it, and returned IDENTICAL figures both times
+    (962 / 22 / 30 / 28 firing minutes; same 28 classified minutes).
+
+Flagged rather than buried because an unguarded TRUNCATE of session_intervals
+is the exact pattern that left the graded database serving two model
+generations on 2026-08-01. If a reconcile run disagrees with these numbers,
+reconcile is right and this file is stale.
