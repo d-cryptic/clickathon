@@ -27,15 +27,14 @@
 #   stops. There is no "half-worked".
 #
 # THE GATE, on a day whose dates nobody knew in advance
-#   sql/90_reconcile.sql hard-codes five minutes from 2026-07-26. Run unmodified
-#   on any other day it returns ZERO ROWS — and tools/reconcile.sh greps for the
-#   string MISMATCH, finds none, and reports PASS having compared nothing. So the
-#   gate runs THREE ways here:
-#     G0  the committed file, verbatim   -> exposes the vacuous pass
-#     G1  five minutes DERIVED from the loaded day (peak, first, last, q25, q75)
-#     G2  EVERY minute of the day, driven off the minute spine
-#   G1 and G2 reuse the file's own truth derivation; only `targets` (and, for G2,
-#   which side drives the final join) is templated.
+#   Since 81c0161, sql/90_reconcile.sql derives its targets from ev_raw: a dense
+#   minute spine between the first and last event, idle minutes compared as 0=0,
+#   and a SUMMARY row carrying minutes_compared. So the gate runs ONCE, verbatim,
+#   and this script ASSERTS the summary: verdict PASS and minutes_compared equal
+#   to the spine this day implies. (The old G0/G1/G2 triple-run predated that fix
+#   — G1 only swapped the cosmetic sample minutes and G2's rewrite silently
+#   no-opped against the rewritten file; removed after the 2026-08-15-synthetic
+#   rehearsal caught both.)
 #
 # ENV
 #   UNSEEN_DB=sonyliv_unseen   target database
@@ -43,6 +42,10 @@
 #   UNSEEN_ALLOW_PROD=1        permit UNSEEN_DB=sonyliv
 #   UNSEEN_KEEP=1              keep the rendered SQL in the temp dir
 #   UNSEEN_OUT=path            evidence file (default evidence/unseen-rehearsal.txt)
+#   UNSEEN_ACK_SENTINEL=1      proceed although the data carries values that
+#                              collide with the repo's rollup sentinels
+#                              (content_id -1, platform/country '*') — see the
+#                              SENTINEL AUDIT below and ADR 0022 before using
 # ============================================================================
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -79,6 +82,10 @@ qsys() { curl -sS --fail-with-body "https://${HOSTNAME_}:${CH_PORT}/?database=de
 
 # run_file <file> — multi-statement, native protocol via the `ch` container.
 run_file() {
+  # A die() inside $(render …) exits only the SUBSHELL: the parent still calls
+  # run_file with an empty argument and the real error drowns in grep noise.
+  # Measured in the 2026-08-01 synthetic rehearsal. Validate the argument.
+  [ -n "${1:-}" ] && [ -f "$1" ] || die "run_file got no file — render() failed; its message is above"
   assert_isolated "$1"
   docker exec -i -e CLICKHOUSE_PASSWORD="$CH_PASSWORD" ch clickhouse-client \
     --host "$HOSTNAME_" --port 9440 --secure --user "$CH_USER" \
@@ -86,20 +93,34 @@ run_file() {
 }
 
 # A rendered file that still names another database would be silent and
-# catastrophic. sql/80_content.sql hard-codes `sonyliv` in six dictGet calls and
-# in the dictionary SOURCE, so this is not hypothetical.
+# catastrophic. This is not hypothetical: sql/80_content.sql used to hard-code
+# `sonyliv` in six dictGet calls and in the dictionary SOURCE. ADR 0009 removed
+# them, so today this guard finds nothing to rewrite there — which is exactly
+# why it stays. It is the standing check that the defect does not come back, in
+# that file or any other.
+# The guard inspects CODE ONLY: `--` comments are stripped before the grep.
+# Found in the 2026-08-01 synthetic rehearsal: ADR 0010 removed the real
+# `sonyliv.` references from sql/80_content.sql but its explanatory comments
+# still QUOTE the old defect ("dictGet('sonyliv.dict_content'…", a
+# `sonyliv_trunc` mention), and the whole-file grep killed phase 6 on a day
+# where the code was clean. Prose must not be able to fail the run; executable
+# text still does.
 assert_isolated() {
-  if [ "$DB" != "$PROD" ] && grep -qE "(\bsonyliv\.|'sonyliv'|sonyliv_trunc)" "$1"; then
-    die "rendered file $1 still names another database:
-$(grep -nE "(\bsonyliv\.|'sonyliv'|sonyliv_trunc)" "$1")"
+  if [ "$DB" != "$PROD" ] && perl -pe 's/--.*$//' "$1" | grep -qE "(\bsonyliv\.|'sonyliv'|sonyliv_trunc)"; then
+    die "rendered file $1 still names another database (in code, comments are ignored):
+$(perl -pe 's/--.*$//' "$1" | grep -nE "(\bsonyliv\.|'sonyliv'|sonyliv_trunc)")"
   fi
 }
 
 # render <src.sql> — templates the database name out of a real sql/ file and
 # echoes the rendered path. Byte-identical to the committed file otherwise.
+# perl, NOT sed: `\b` is a GNU extension that macOS/BSD sed silently treats as
+# a literal, so the old `sed "s/\bsonyliv\./…"` never replaced anything on the
+# machine the unseen day will actually run on (found 2026-08-01 when
+# assert_isolated caught text sed claimed to have rewritten).
 render() {
   local dst="$TMP/$(basename "$1")"
-  sed -e "s/\bsonyliv\./${DB}./g" -e "s/'sonyliv'/'${DB}'/g" "$1" > "$dst"
+  perl -pe "s/\bsonyliv\./${DB}./g; s/'sonyliv'/'${DB}'/g" "$1" > "$dst"
   assert_isolated "$dst"
   printf '%s' "$dst"
 }
@@ -141,7 +162,10 @@ views silently serve blank dimensions. Pass the content CSV, or pass the literal
 string 'none' to accept blank content dimensions knowingly."
 [ "$CONTENT" = none ] || [ -f "$CONTENT" ] || usage "no such content file: $CONTENT"
 
-mkdir -p evidence
+# dirname, not a hard-coded "evidence": UNSEEN_OUT may point into a
+# subdirectory (the rehearsals write evidence/unseen/…), and truncating a path
+# whose directory does not exist kills the run before it starts.
+mkdir -p "$(dirname "$OUT")"
 : > "$OUT"
 say "UNSEEN-DAY RUN"
 say "generated $(date -u '+%Y-%m-%dT%H:%M:%SZ')   commit $(git rev-parse --short HEAD 2>/dev/null || echo n/a)"
@@ -233,11 +257,14 @@ say "  objects: $(q1 "SELECT count() FROM system.tables WHERE database='${DB}'")
 
 # ---------------------------------------------------------------------------
 phase "2 load (tools/load.sh, unmodified)"
-# tools/load.sh sources ./.env with `set -a`, which OVERWRITES a CH_DATABASE
-# passed in the environment — `CH_DATABASE=x tools/load.sh` silently loads into
-# `sonyliv`. It is also the only tool that does NOT cd to the repo root, so it
-# reads the .env of whatever directory it is invoked from. We use exactly that:
-# invoke it from a sandbox holding an overridden copy of .env.
+# tools/load.sh now takes its database from --database first, then the
+# ENVIRONMENT, then ./.env (it is still the only tool that does NOT cd to the
+# repo root, so ./.env means the sandbox's copy). All three are set to $DB here
+# and they must agree: this script exports CH_DATABASE=sonyliv by sourcing the
+# repo .env at line 50, and load.sh dies rather than resolve a --database that
+# contradicts an exported CH_DATABASE. The sandbox .env stays as the third,
+# redundant belt — if either of the first two is ever dropped, the load still
+# cannot wander into production.
 SANDBOX="$TMP/sandbox"; mkdir -p "$SANDBOX"; chmod 700 "$SANDBOX"
 sed "s|^CH_DATABASE=.*|CH_DATABASE=${DB}|" "$REPO/.env" > "$SANDBOX/.env"
 chmod 600 "$SANDBOX/.env"
@@ -246,7 +273,8 @@ Without that override tools/load.sh would load into ${PROD}. Refusing to run."
 RAW_ABS="$(cd "$(dirname "$RAW")" && pwd)/$(basename "$RAW")"
 CONTENT_ABS="/dev/null"
 [ -n "$CONTENT" ] && CONTENT_ABS="$(cd "$(dirname "$CONTENT")" && pwd)/$(basename "$CONTENT")"
-( cd "$SANDBOX" && TARGET=cloud "$REPO/tools/load.sh" "$RAW_ABS" "$CONTENT_ABS" ) | tee -a "$OUT"
+( cd "$SANDBOX" && CH_DATABASE="$DB" TARGET=cloud \
+    "$REPO/tools/load.sh" --database "$DB" "$RAW_ABS" "$CONTENT_ABS" ) | tee -a "$OUT"
 
 EV=$(q1 "SELECT count() FROM ev_raw")
 [ "$EV" = "$CSV_ROWS" ] || die "ev_raw holds $EV rows, the CSV has $CSV_ROWS data rows.
@@ -267,6 +295,82 @@ DAY_MIN=$(q1 "SELECT toString(toStartOfMinute(min(event_timestamp))) FROM ev_raw
 DAY_MAX=$(q1 "SELECT toString(toStartOfMinute(max(event_timestamp))) FROM ev_raw")
 NDAYS=$(q1  "SELECT uniqExact(toDate(event_timestamp)) FROM ev_raw")
 say "  data spans ${DAY_MIN} .. ${DAY_MAX}  (${NDAYS} calendar day(s))"
+
+# SENTINEL AUDIT (ADR 0022) — assert, at load, that no VALUE in the data
+# collides with a rollup MARKER, instead of trusting that it never will. The
+# rehearsal (R9) planted a session whose real content_id is -1 and the hour
+# cube silently merged it into the all-content rollup; the cube is structurally
+# safe since ADR 0022 (cube_level is the marker, not the value), but the
+# "-1 / '*' means ALL" convention is still the query API elsewhere:
+#   - sql/85_windows.sql parametrised views: p_content_id = -1 (and
+#     p_platform / p_country = '*') mean "no filter" there
+#   - tools/clickstack-cloud.sh CUBE_TOTAL, tools/build-model.sh's status
+#     line, and the evidence/benchmark sentinel pins
+# For a colliding id those paths serve the ROLLUP where the caller asked for
+# the content. That must never pass silently — hence fail here, loudly, with
+# an explicit acknowledgement to proceed.
+S_CID=$(q1 "SELECT toString(countIf(content_id = -1)) FROM ev_raw")
+S_PLT=$(q1 "SELECT toString(countIf(platform = '*')) FROM ev_raw")
+S_CTY=$(q1 "SELECT toString(countIf(country = '*')) FROM ev_raw")
+if [ "$S_CID" != "0" ] || [ "$S_PLT" != "0" ] || [ "$S_CTY" != "0" ]; then
+  say ""
+  say "  SENTINEL COLLISION IN THE DATA (ADR 0022):"
+  say "    ev_raw rows with content_id = -1: ${S_CID} · platform = '*': ${S_PLT} · country = '*': ${S_CTY}"
+  say "    cc_hour_agg and its views stay CORRECT (cube_level separates rollup from value)."
+  say "    NOT safe for the colliding value: sql/85_windows.sql's p_* = sentinel"
+  say "    convention, tools/clickstack-cloud.sh CUBE_TOTAL, tools/build-model.sh's"
+  say "    status line, evidence/benchmark sentinel pins. Route per-content answers"
+  say "    for that id through cc_hour_agg WITH cube_level pinned, or cc_minute_delta."
+  if [ -z "${UNSEEN_ACK_SENTINEL:-}" ]; then
+    die "sentinel-colliding values in ev_raw — the R9 trap. The pipeline's own answer
+and gate stay correct, but the sentinel-convention query paths listed above are
+ambiguous for the colliding value. Read the list, then re-run with
+UNSEEN_ACK_SENTINEL=1."
+  fi
+  say "  UNSEEN_ACK_SENTINEL=1 — acknowledged, continuing."
+fi
+
+# ---------------------------------------------------------------------------
+phase "2b SOURCE CONTRACT — is this file what we think it is?"
+# Wired in 2026-08-02 after Codex audit 005 found the gap: ADR 0026's gate
+# existed and docs/RUNBOOK_UNSEEN.md invoked it as a MANUAL step, but this
+# script — the advertised one-command path, and the one anybody actually runs
+# under time pressure — never called it. So the protection existed on paper and
+# not on the path.
+#
+# It must sit HERE: after the load (the probes query ev_raw) and BEFORE the
+# model is derived. Running it later would mean discovering the file was wrong
+# after building an answer on it.
+#
+# The hazard this exists for: a seconds-valued event_timestamp is divided by
+# 1000 at load, lands in 1970, the model derives intervals there quite happily,
+# and THE GATE STAYS GREEN — truth and serving agree, both in the wrong year.
+# Probe 3 (toYear NOT BETWEEN 2020 AND 2035) is what catches it.
+if [ -x tools/validate-source-contract.sh ]; then
+  CONTRACT_ARGS=""
+  [ "$TARGET" = cloud ] && CONTRACT_ARGS="-c"
+  if tools/validate-source-contract.sh $CONTRACT_ARGS --database "$DB" 2>&1 | tee -a "$OUT"; then
+    say "  source contract: no FAIL — proceeding to derive the model."
+  else
+    if [ "${UNSEEN_ACK_CONTRACT:-}" != 1 ]; then
+      die "the source-contract gate reported a FAIL on '$DB'.
+
+Read the verdict above against the committed baseline
+(evidence/source-contract/baseline-sonyliv-2026-08-02.txt). A FAIL means the
+file is not the shape we believe it is, and every number derived from it
+inherits that. The reconcile gate CANNOT catch this class — it compares our
+model against our own re-derivation, so a file-level fault makes both wrong
+together and both agree.
+
+If you have read the verdict and decided to proceed anyway:
+  UNSEEN_ACK_CONTRACT=1 $0 $*"
+    fi
+    say "  UNSEEN_ACK_CONTRACT=1 — FAIL acknowledged, continuing deliberately."
+  fi
+else
+  say "  ⚠ tools/validate-source-contract.sh not present or not executable — SKIPPED."
+  say "    The unseen file is being trusted unchecked. This is a gap, not a pass."
+fi
 
 # ---------------------------------------------------------------------------
 phase "3 intervals (30_build_intervals.sql)"
@@ -303,83 +407,67 @@ run_file "$(render sql/50_hour_agg.sql)"
 [ -n "$CONTENT" ] && run_file "$(render sql/80_content.sql)"
 run_file "$(render sql/85_windows.sql)"
 say "  cc_hour_agg $(q1 "SELECT count() FROM cc_hour_agg FINAL") rows"
-say "  $(q1 "SELECT concat('hour tier says peak ',toString(max(peak)),' @ ',
-        toString(argMax(peak_minute,peak))) FROM cc_hour_agg FINAL
-        WHERE platform='*' AND country='*' AND content_id=-1")"
+# ADR 0014: under a tie the peak minute is the EARLIEST minute at the peak
+# level, at every tier. The old bare argMax(peak_minute, peak) here picked an
+# arbitrary tied hour — on the synthetic rehearsal it answered 21:10 where the
+# designed earliest was 20:00.
+# cube_level=0 pins the grand total STRUCTURALLY (ADR 0022) — the sentinel
+# tuple alone also matches a real content_id=-1 row when the day carries one.
+say "  $(q1 "SELECT concat('hour tier says peak ',toString(max(peak)),' @ ',toString(min(peak_minute)))
+        FROM cc_hour_agg FINAL
+        WHERE platform='*' AND country='*' AND content_id=-1 AND cube_level=0
+          AND peak = (SELECT max(peak) FROM cc_hour_agg FINAL
+                      WHERE platform='*' AND country='*' AND content_id=-1 AND cube_level=0)")"
 
 # ---------------------------------------------------------------------------
 phase "7 the answer (this is what we would submit)"
-PEAK_MIN=$(q1 "SELECT toString(argMax(minute, concurrent)) FROM v_concurrency_minute_delta_total")
+# ADR 0014: the peak minute is the EARLIEST minute at which the peak level is
+# reached. The peak level always begins at a change point, so min(minute) over
+# the change-point view at the max IS the earliest minute — no spine needed for
+# the answer itself. (The old argMax(minute, concurrent) picked an arbitrary
+# tied change point: 21:10 on the synthetic rehearsal, designed earliest 20:00.)
 PEAK_VAL=$(q1 "SELECT toString(max(concurrent)) FROM v_concurrency_minute_delta_total")
-say "  session concurrency  peak ${PEAK_VAL} @ ${PEAK_MIN}"
+PEAK_MIN=$(q1 "SELECT toString(min(minute)) FROM v_concurrency_minute_delta_total
+        WHERE concurrent = (SELECT max(concurrent) FROM v_concurrency_minute_delta_total)")
+say "  session concurrency  peak ${PEAK_VAL} @ ${PEAK_MIN}  (earliest tied minute — ADR 0014)"
 say "  user concurrency     peak $(q1 "SELECT toString(max(concurrent_users)) FROM v_user_concurrency_minute_total")"
 say "  stateless baseline   peak $(q1 "SELECT toString(max(concurrent)) FROM v_concurrency_minute_total")"
-# Ties are not academic: on 2026-07-25 four minutes share the peak and the
-# minute tier and the hour tier name DIFFERENT ones. If the ground truth asks
-# "which minute", say which rule you used.
-say "  minutes tied at the peak: $(q1 "SELECT toString(count()) FROM v_concurrency_minute_delta_total
-        WHERE concurrent = (SELECT max(concurrent) FROM v_concurrency_minute_delta_total)")"
+# Ties are not academic: 5 of 7 delivered days tie at the day peak, and the
+# synthetic day ties across 64 minutes. Count them on the DENSE spine — the
+# change-point view under-counts (it said 2 where 64 minutes were tied, because
+# a level that HOLDS across minutes only appears at the minute it changes).
+say "  minutes tied at the peak: $(q1 "
+    WITH b AS (SELECT toStartOfMinute(min(event_timestamp)) lo, toStartOfMinute(max(event_timestamp)) hi FROM ev_raw),
+    spine AS (SELECT toDateTime(arrayJoin(range(toUInt32((SELECT lo FROM b)), toUInt32((SELECT hi FROM b)) + 60, 60))) AS minute),
+    dm AS (SELECT minute, sum(delta) d FROM cc_minute_delta GROUP BY minute),
+    lv AS (SELECT s.minute AS minute, toInt64(sum(ifNull(dm.d,0)) OVER (PARTITION BY toStartOfHour(s.minute)
+              ORDER BY s.minute ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)) c
+           FROM spine s LEFT JOIN dm ON dm.minute = s.minute)
+    SELECT toString(countIf(c = (SELECT max(c) FROM lv))) FROM lv")  (dense spine; the change-point count under-reports)"
 
 # ---------------------------------------------------------------------------
 phase "8 THE GATE — truth recomputed from ev_raw"
-G0="$(render sql/90_reconcile.sql)"
-
-# G0 — the committed gate, verbatim.
-G0_OUT="$(run_file "$G0" || true)"
-G0_ROWS=$(printf '%s' "$G0_OUT" | grep -c . || true)
+# The gate is SELF-TARGETING since 81c0161: dense spine derived from ev_raw,
+# idle minutes compared as 0=0, SUMMARY row first. Run it once, verbatim, then
+# assert the summary — a gate that silently compared less than the day implies
+# is the failure mode that made the old G0 pass vacuously.
+G0_OUT="$(run_file "$(render sql/90_reconcile.sql)")"
 say ""
-say "G0 — sql/90_reconcile.sql VERBATIM (its five target minutes are 2026-07-26 literals):"
-if [ "$G0_ROWS" -eq 0 ]; then
-  say "     ZERO ROWS. It compared nothing. tools/reconcile.sh greps the output for"
-  say "     the string MISMATCH, finds none, and reports PASS — a VACUOUS PASS."
-  VACUOUS=yes
-else
-  say "$(printf '%s' "$G0_OUT" | sed 's/^/     /')"
-  VACUOUS=no
+say "sql/90_reconcile.sql, verbatim (SUMMARY + up to 20 mismatches + 5 samples):"
+say "$(printf '%s' "$G0_OUT" | head -30 | sed 's/^/     /')"
+
+SUMMARY_LINE="$(printf '%s' "$G0_OUT" | grep -m1 'SUMMARY' || true)"
+[ -n "$SUMMARY_LINE" ] || die "the gate printed no SUMMARY row — it has regressed to a form
+whose silence is unreadable. Check sql/90_reconcile.sql."
+MIN_COMPARED="$(printf '%s' "$SUMMARY_LINE" | grep -oE 'minutes_compared=[0-9]+' | cut -d= -f2)"
+# The spine the day implies: every minute from DAY_MIN to DAY_MAX inclusive.
+EXPECTED_MIN=$(( ( $(q1 "SELECT toUInt32(toDateTime('${DAY_MAX}'))") - $(q1 "SELECT toUInt32(toDateTime('${DAY_MIN}'))") ) / 60 + 1 ))
+if [ "$MIN_COMPARED" != "$EXPECTED_MIN" ]; then
+  die "the gate compared ${MIN_COMPARED} minutes but the day spans ${EXPECTED_MIN}
+(${DAY_MIN} .. ${DAY_MAX}). It is testing less than it claims."
 fi
-
-# G1 — the same file, `targets` swapped for five minutes DERIVED from this day.
-Q25=$(q1 "SELECT toString(quantileExact(0.25)(minute)) FROM (SELECT DISTINCT toStartOfMinute(event_timestamp) AS minute FROM ev_raw)")
-Q75=$(q1 "SELECT toString(quantileExact(0.75)(minute)) FROM (SELECT DISTINCT toStartOfMinute(event_timestamp) AS minute FROM ev_raw)")
 say ""
-say "G1 — same gate, five minutes DERIVED from the loaded day:"
-say "     peak ${PEAK_MIN} · first ${DAY_MIN} · last ${DAY_MAX} · q25 ${Q25} · q75 ${Q75}"
-TARGETS="toDateTime('${PEAK_MIN}'),toDateTime('${DAY_MIN}'),toDateTime('${DAY_MAX}'),toDateTime('${Q25}'),toDateTime('${Q75}')"
-perl -0pe "s/SELECT arrayJoin\(\[.*?\]\) AS m/SELECT arrayJoin([${TARGETS}]) AS m/s" "$G0" > "$TMP/g1.sql"
-grep -q "$PEAK_MIN" "$TMP/g1.sql" || die "could not template the target minutes into the gate"
-G1_OUT="$(run_file "$TMP/g1.sql")"
-say "$(printf '%s' "$G1_OUT" | sed 's/^/     /')"
-
-# G2 — EVERY minute, and driven off `targets` rather than off `truth`.
-#
-# That second change is not cosmetic. sql/90_reconcile.sql ends with
-#     FROM truth AS t LEFT JOIN served AS s
-# and `truth` is a GROUP BY over a CROSS JOIN, so a minute in which NOBODY was
-# watching produces no row at all — it is never compared, whatever the serving
-# layer claims about it. MEASURED on this database, 2026-08-01: injecting
-#     INSERT INTO cc_minute_delta (minute,platform,country,content_id,delta,starts,ends)
-#     SELECT toDateTime('2026-07-25 00:44:00'),'ANDROID_PHONE','india',12345,500,500,0
-# made v_concurrency_minute_delta_total report 500 concurrent viewers at an idle
-# minute, and BOTH the five-minute gate and a truth-driven all-minutes gate still
-# said PASS. Driving off the minute spine closes it.
-say ""
-say "G2 — same gate over EVERY minute ${DAY_MIN} .. ${DAY_MAX}, driven off the minute"
-say "     spine so IDLE minutes are compared too (the truth-driven form skips them):"
-ALLMIN="SELECT toDateTime(arrayJoin(range(toUInt32(toDateTime('${DAY_MIN}')), toUInt32(toDateTime('${DAY_MAX}'))+60, 60))) AS m"
-perl -0pe "s/SELECT arrayJoin\(\[.*?\]\) AS m/${ALLMIN}/s" "$G0" > "$TMP/g2_body.sql"
-perl -0pe "s/SELECT\s*\n\s*t\.minute\s+AS minute,.*\z/SELECT
-    count()                                          AS minutes_compared,
-    countIf(ifNull(t.truth,0) = 0)                   AS of_which_idle,
-    countIf(ifNull(s.served,0) != ifNull(t.truth,0)) AS mismatches,
-    max(abs(ifNull(s.served,0) - ifNull(t.truth,0))) AS max_abs_diff,
-    max(ifNull(t.truth,0))                           AS peak_truth,
-    if(countIf(ifNull(s.served,0) != ifNull(t.truth,0)) = 0, 'PASS', 'MISMATCH') AS verdict
-FROM targets AS tg
-LEFT JOIN truth  AS t ON t.minute = tg.m
-LEFT JOIN served AS s ON s.minute = tg.m;
-/s" "$TMP/g2_body.sql" > "$TMP/g2.sql"
-G2_OUT="$(run_file "$TMP/g2.sql")"
-say "$(printf '%s' "$G2_OUT" | sed 's/^/     /')"
+say "     asserted: minutes_compared=${MIN_COMPARED} equals the day's spine (${DAY_MIN} .. ${DAY_MAX})"
 
 phase_end
 
@@ -392,8 +480,7 @@ printf '%s' "$TIMINGS" | tee -a "$OUT"
 say "$(printf '  %-58s %5ss' 'TOTAL' "$(( $(date +%s) - T_TOTAL_START ))")"
 
 FAILED=no
-printf '%s' "$G1_OUT" | grep -q MISMATCH && FAILED=yes
-printf '%s' "$G2_OUT" | grep -q MISMATCH && FAILED=yes
+printf '%s' "$G0_OUT" | grep -q MISMATCH && FAILED=yes
 say ""
 rule
 if [ "$FAILED" = yes ]; then
@@ -402,12 +489,7 @@ if [ "$FAILED" = yes ]; then
   echo "unseen run FAILED · $OUT" >&2
   exit 1
 fi
-say "VERDICT — GATE PASSED on ${DB}. peak ${PEAK_VAL} @ ${PEAK_MIN}."
-if [ "$VACUOUS" = yes ]; then
-  say "         WARNING: the committed gate (G0) passed VACUOUSLY — it compared zero"
-  say "         minutes. Only G1 and G2 tested anything. sql/90_reconcile.sql must be"
-  say "         re-targeted before tools/reconcile.sh means anything on this day."
-fi
+say "VERDICT — GATE PASSED on ${DB}. peak ${PEAK_VAL} @ ${PEAK_MIN} (earliest tied minute)."
 rule
 echo
 echo "unseen run PASSED · evidence written to $OUT"

@@ -159,14 +159,25 @@ idempotent — the unseen day may be re-loaded". Measured on Cloud 26.2.1.525: l
 non-replicated MergeTree; the Cloud engine is **SharedMergeTree**. `tools/unseen-run.sh` drops the
 database first. If you ever re-load by hand, `TRUNCATE TABLE ev_raw` first.
 
-### A5 — `CH_DATABASE` in the environment is silently ignored
+### A5 — ~~`CH_DATABASE` in the environment is silently ignored~~ · **FIXED, and inverted**
 
-Every tool does `[ -f .env ] && set -a && . ./.env && set +a`, so `.env` **overwrites** anything
-passed in the environment. `CH_DATABASE=sonyliv_unseen tools/build-model.sh` writes to **`sonyliv`**.
-All of `build-model.sh`, `reconcile.sh`, `apply-sql.sh` and `truncation-test.sh` also `cd` to the repo
-root first, so they always read the repo's `.env`. **The only way to point them at another database is
-to edit `.env`.** `tools/load.sh` is the one exception (it does not `cd`), which is why
-`tools/unseen-run.sh` runs it from a sandbox directory holding an overridden `.env`.
+**The environment now WINS.** Kept as a record because the old behaviour was dangerous and the
+correction is worth being able to point at.
+
+**What was wrong.** Every tool did `[ -f .env ] && set -a && . ./.env && set +a`, and `set -a` makes
+the file **overwrite** anything passed in the environment. So
+`CH_DATABASE=sonyliv_unseen tools/build-model.sh` wrote to **`sonyliv`** — the graded database — while
+the operator believed they were targeting a scratch one. Two agents hit this within an hour on
+2026-08-02; one had `default.session_intervals` truncated by it (queue **Q33**).
+
+**What it does now.** `tools/ch`, `tools/load.sh`, `tools/apply-sql.sh`, `tools/build-model.sh` and
+`tools/reconcile.sh` capture the caller's view **before** sourcing `.env` and re-export it after, so
+precedence is: **`--database` > environment > `.env` > die**. `CH_DATABASE=scratch` now means
+scratch. ADR 0018 states the rule and, since its own "every layer" claim was found to overstate, now
+carries a measured per-layer table rather than a blanket assertion.
+
+**What to check on the day:** print the resolved database before trusting any run. Every tool above
+announces it. If a tool you are using is not on that list, assume the old behaviour and verify.
 
 ### A6 — `sql/80_content.sql` hard-codes the `sonyliv` database
 
