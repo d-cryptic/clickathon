@@ -45,6 +45,17 @@ TARGET=local   host CH_LOCAL_URL       database  $CH_DATABASE_LOCAL  > .env CH_D
    invisible to the local target — pinned by `TestLoadLocalNeverReadsCloudDatabase`.
 2. **The database is always sent explicitly.** No query rides the server's default database.
 3. **The environment beats `.env`** (capture before `set -a && . .env`, which otherwise overwrites).
+4. **`TARGET` is read from the environment on every layer, and an unrecognised value dies.**
+   Added 2026-08-01 after the first cut of this ADR shipped: `tools/ch` assigned `TARGET=local`
+   unconditionally and switched to Cloud only on a positional `-c` flag, so
+   `TARGET=cloud tools/ch "…"` silently queried **local** while the file's own header documented
+   `TARGET=cloud (-c)` as equivalent spellings. Every other tool here (`build-model.sh`,
+   `apply-sql.sh`, `reconcile.sh`) takes `TARGET=`, so `tools/ch` was the odd one out and the
+   divergence was invisible at the call site. The reproduction returned
+   `Database sonyliv does not exist`, which reads as the graded database having been dropped —
+   it had not been; the query was simply on the wrong server. A typo like `TARGET=Cloud` now
+   dies rather than falling through to local, because silently defaulting is the whole failure
+   class this ADR exists to remove.
 4. **Missing config dies at startup, naming the variable** — in `tools/ch` before any request; in Go
    at `config.Load`. Never a confident query against the wrong database.
 5. **`.env` resolves relative to the repo root**, not the CWD (`tools/ch` used to silently lose all

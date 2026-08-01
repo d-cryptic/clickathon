@@ -31,9 +31,19 @@ die() { printf 'tools/ch: %s\n' "$*" >&2; exit 1; }
 # https://https://... and dies with "Could not resolve host: https".
 ch_host() { local h="${CH_HOST:?CH_HOST unset — fill in .env}"; h="${h#https://}"; h="${h#http://}"; echo "${h%/}"; }
 
-TARGET=local
+# TARGET comes from the environment, because that is the convention every other
+# tool here uses (build-model.sh, apply-sql.sh, reconcile.sh all take TARGET=).
+# This script used to assign TARGET=local unconditionally, so `TARGET=cloud
+# tools/ch "..."` silently ran against LOCAL — a reproduction on 2026-08-01
+# returned "Database sonyliv does not exist", which reads as the graded database
+# having been dropped. It had not been; the query was on the wrong server.
+TARGET="${TARGET:-local}"
 if [ "${1:-}" = "-c" ]; then TARGET=cloud; shift; fi
-Q="${1:?usage: tools/ch [-c] \"SQL\"}"
+case "$TARGET" in
+  local|cloud) ;;
+  *) die "TARGET='$TARGET' is not a target. Use 'local' or 'cloud' (or the -c flag). Refusing to guess — see ADR 0018." ;;
+esac
+Q="${1:?usage: tools/ch [-c] \"SQL\"   (or TARGET=cloud tools/ch \"SQL\")}"
 
 if [ "$TARGET" = cloud ]; then
   DB="${ENV_DB:-${CH_DATABASE-}}"
