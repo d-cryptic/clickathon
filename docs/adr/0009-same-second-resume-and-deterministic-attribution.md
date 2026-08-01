@@ -221,11 +221,20 @@ count (+11), which is dimension tuples redistributing inside the 36,930-row ceil
   from the derivation, and it *collapses* the new per-interval attribution back to one value per
   session. That file was out of scope for this change and its own comment records the choice
   ("moving those to a different rule would move numbers this task is not allowed to move"). It is now
-  the last `any()` in the pipeline and should be closed the same way. **Filed, not fixed.**
+  the last `any()` in the pipeline and should be closed the same way. **Filed, not fixed** — closed
+  by [ADR 0012](0012-rebuild-owns-every-tier-and-the-last-any-leaves.md), which also corrects this
+  paragraph's premise: over `session_intervals` (not `ev_raw`) those three `any()` measured
+  *deterministic* at `max_threads` 1/8/32, because only 25 of 10,866 sessions carry two platforms
+  and none carries two countries or content_ids. The defect was latent, not live.
 - **`tools/build-model.sh` does not truncate `cc_user_minute`.** `mv_user_minute` is a `TO` view on
   `session_intervals`, so every rebuild appends another build's rows and stale intervals never leave.
   `uniqExactMerge` hides it by deduplicating user ids, so the number stays plausible while drifting
   up: after five rebuilds the user peak read **2,953** against a true **2,844** computed directly from
   `session_intervals`. The table was truncated and replayed to get the figures in this ADR. Same class
   of defect as the `cc_minute_delta` double-insert that script already guards against — it just
-  missed one table. **Filed, not fixed** (out of scope, and the file has another owner).
+  missed one table. **Filed, not fixed** (out of scope, and the file has another owner) — closed by
+  [ADR 0012](0012-rebuild-owns-every-tier-and-the-last-any-leaves.md), which reproduced the 2,953 /
+  2,844 figure exactly and found it is *not* the same class as the double-insert: a `uniqExact`
+  union is idempotent, so identical rebuilds tripled the storage without moving the number at all.
+  It breaks only when a rebuild changes an interval. That ADR also found `cc_hour_agg` was not
+  rebuilt by the script at all, and was serving 2,887 against a 2,917 minute tier.
