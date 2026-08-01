@@ -275,6 +275,14 @@ sufficient, or do you want it user-facing?
 "100×" is mentioned in the statement — **100× of what**: sessions, events, or peak concurrency?
 **Why it matters:** the three imply different bottlenecks and we would defend different trade-offs.
 **Answer:** _unrecorded_
+**Assumed meanwhile:** 100× the **audience** inside the same window — 100× the sessions, drawn from the
+same session-start-minute histogram, so events and peak concurrency scale with it (89.85M events, peak
+251,668). That is the reading that stresses the most, because the one structure whose size is set by
+*distinct sessions* rather than by rows is the interval derivation, and that is exactly what runs out
+of memory first. Scaling the calendar instead would be the easy answer: every extra day is another
+partition and prunes away. Measured both framings' consequences in `evidence/scale.txt`; if the mentor
+says "100× the events over 100× the days", the binding constraint moves and our answer gets *easier*,
+not harder.
 
 ---
 

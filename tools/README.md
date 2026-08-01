@@ -22,6 +22,10 @@
 | `clickstack-cloud.sh` | provision the HyperDX built into ClickHouse Cloud — 24 sources, SIX dashboards, saved searches — via the Cloud API. Idempotent (dashboards converge by PUT) |
 | `clickstack-artifact.sh` | regenerate the offline demo fallback `docs/artifacts/2026-08-01-clickstack-dashboards.html` from live serving-view data |
 | `../evidence/capture.sh` | the evidence harness — parts, compression, pruning, latency, MV cost |
+| `scale-test.sh [N...]` | **THE SCALE EVIDENCE** — run the model at 1x/10x/100x the provided file and write `evidence/scale.txt`. Local only, own scratch databases, drops them after. `KEEP=1` to inspect |
+| `scale-gen.sql` | fits the generator's vocabularies (`gen_lut`, `gen_content`, `gen_ev`, `gen_start`) off the **real** file. Driven by `scale-test.sh`, not run by hand |
+| `scale-load.sql` | the generator itself — `INSERT ... SELECT FROM numbers_mt`, all server-side. Deterministic: every draw is `cityHash64(session, salt)`, so `(S, SEED)` regenerates the same stream |
+| `scale-fidelity.sql` | real vs synthetic on the shape metrics the model reads. This is what makes the scale timings falsifiable |
 | `../demo/chaos.sh <beat>` | demo fault injection (`stall_mv`, `stall_ingest`, …) |
 
 ## Loading twice
