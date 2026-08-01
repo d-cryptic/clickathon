@@ -25,7 +25,19 @@
 # PUBLISH_ALLOW_PROD=1 is set explicitly. Nothing here is qualified with a
 # database name, so the target is whatever --database says and nothing else.
 #
-# PREREQ: sql/12_publish.sql applied to that database.
+# SAFETY MODEL (ADR 0019). One live publisher per database, enforced by a
+# lease (cc_publish_lease): a second invocation DECLINES with exit 0 and a
+# message — that is normal operation, not an error. Every write phase renews
+# and re-checks the lease first; losing it aborts the run, which the next
+# holder rolls forward from the phase markers. The claim writes its intent row
+# (phase 'claiming') before any side effect, so a crash anywhere inside the
+# claim is rolled back, never orphaned. Resume reuses the crashed run's
+# build_version (recorded in the claimed mark) — recomputing it is how a
+# resume once deleted its own derivation.
+#
+# PREREQ: sql/12_publish.sql applied to that database. A pre-ADR-0019 schema
+# (no insert_id on session_dirty / cc_publish_consumed, no lease table) is
+# refused with migration instructions rather than run wrongly.
 # ============================================================================
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -46,16 +58,35 @@ QUIET=0
 # losing the rest for ever. So a marking is eligible only once it is this many
 # seconds old — the standard "leave the trailing window alone" rule.
 #
-# This is the ONE assumption in the design: no insert takes longer than
-# PUBLISH_SETTLE_S between now64(3) being evaluated and all of its rows being
-# visible. It is also the floor on publish lag, so it trades freshness directly.
+# This is the LOAD-BEARING assumption of the design — the lease's settle wait
+# below leans on the same bound: no insert takes longer than PUBLISH_SETTLE_S
+# between now64(3) being evaluated and all of its rows being visible. It is
+# also the floor on publish lag, so it trades freshness directly.
 #
 # It is NOT a lookback, and the difference matters. An earlier version re-read
 # the change log from `cursor - 5s` and, because the previous batch's marked_at
 # sits exactly ON the cursor, re-claimed that entire batch every run — 6,659
 # sessions re-derived to absorb 5. Exactness comes from cc_publish_consumed
 # (which INSERTs have been digested), not from a fuzzy window.
+#
+# Since ADR 0019 the claim ALSO carries a bounded LOOKBACK behind the cursor:
+# an insert that outlives the settle window surfaces a marking whose marked_at
+# is already behind the committed cursor, and without the lookback it would
+# never be scanned again. The lookback is safe precisely because exactness
+# lives in the (marked_at, insert_id) consumed set — re-scanning old markings
+# re-claims nothing that was digested, so the 6,659-session pathology cannot
+# return. An insert delayed beyond the lookback is lost; retention_alert in
+# v_cc_publish_lag is the (indirect) tell, and ADR 0019 records the bound.
 SETTLE_S="${PUBLISH_SETTLE_S:-5}"
+LOOKBACK_S="${PUBLISH_LOOKBACK_S:-900}"
+
+# THE LEASE (ADR 0019, Q9). At most one live publisher per database. TTL is
+# how long a silent holder stays authoritative — it must exceed the longest
+# single phase (measured: ≤ 2 s at this scale) with a wide margin, because a
+# holder only renews BETWEEN phases. SETTLE here plays the same role as above:
+# the acquisition lottery is decided a full visibility-window after inserting.
+LEASE_TTL_S="${PUBLISH_LEASE_TTL_S:-60}"
+LEASE_SETTLE_S="${PUBLISH_LEASE_SETTLE_S:-2}"
 
 die() { printf '\npublish.sh FAILED: %s\n' "$*" >&2; exit 1; }
 say() { [ "$QUIET" = 1 ] || printf '%s\n' "$*"; }
@@ -114,7 +145,10 @@ qf() {
 }
 qr() { q "$1 FORMAT TSVRaw"; }
 
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+# release_lease is defined further down; the guard keeps an early die (arg
+# parsing, preflight) from tripping over the not-yet-needed function.
+TMP="$(mktemp -d)"
+trap 'type release_lease >/dev/null 2>&1 && release_lease; rm -rf "$TMP"' EXIT
 
 # ---------------------------------------------------------------------------
 # template_or_die <src> <dst> <marker> <sed args...>
@@ -168,12 +202,235 @@ mark() {
 
 now_ms() { python3 -c 'import time; print(int(time.time()*1000))'; }
 
+# ---------------------------------------------------------------------------
+# FAULT INJECTION — test instrumentation only, inert unless the env is set.
+# tools/publish-test.sh drives these to prove crash recovery at every phase
+# boundary (Q8) and to widen the acquisition race for the two-publisher test
+# (Q9). PUBLISH_CRASH_AT=<point> kills the process (exit 97) when execution
+# reaches that point; PUBLISH_SLEEP_AT=<point>:<seconds> holds it there.
+# ---------------------------------------------------------------------------
+crash_if() {
+  if [ "${PUBLISH_CRASH_AT:-}" = "$1" ]; then
+    printf 'publish.sh: INJECTED CRASH at %s\n' "$1" >&2
+    # A real crash releases nothing: drop the release from the exit trap so
+    # the lease stays held and recovery has to win it the honest way (TTL).
+    trap 'rm -rf "$TMP"' EXIT
+    exit 97
+  fi
+}
+sleep_if() {
+  case "${PUBLISH_SLEEP_AT:-}" in
+    "$1:"*) sleep "${PUBLISH_SLEEP_AT#*:}" ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# PREFLIGHT — refuse a pre-ADR-0019 schema instead of running wrongly on it.
+# Five checks: insert_id on session_dirty, insert_id on cc_publish_consumed,
+# the consumed key being the PAIR, the MV capturing initialQueryID(), and the
+# lease table existing. Any miss is a hard stop with the migration commands.
+# ---------------------------------------------------------------------------
+preflight_schema() {
+  local ok
+  ok="$(qr "SELECT toString(
+      (SELECT count() FROM system.columns WHERE database = currentDatabase()
+         AND table = 'session_dirty' AND name = 'insert_id')
+    + (SELECT count() FROM system.columns WHERE database = currentDatabase()
+         AND table = 'cc_publish_consumed' AND name = 'insert_id')
+    + (SELECT countIf(sorting_key = 'marked_at, insert_id') FROM system.tables
+         WHERE database = currentDatabase() AND name = 'cc_publish_consumed')
+    + (SELECT count() FROM system.tables WHERE database = currentDatabase()
+         AND name = 'cc_publish_lease')
+    + (SELECT countSubstrings(any(create_table_query), 'initialQueryID')
+         FROM system.tables WHERE database = currentDatabase()
+         AND name = 'mv_session_dirty'))")"
+  [ "$ok" = "5" ] || die "database '$DB' has a pre-ADR-0019 publication schema ($ok/5 checks passed).
+Two identities changed (Q10): session_dirty and cc_publish_consumed now carry
+insert_id, and the consumed set keys on the (marked_at, insert_id) pair.
+With NO publisher running and no in-flight run, migrate with:
+    DROP TABLE ${DB}.mv_session_dirty; DROP TABLE ${DB}.cc_publish_consumed;
+then re-apply sql/12_publish.sql. Markings still in session_dirty are
+re-claimed once and republished — a no-op by idempotence (PHASE 8 of
+tools/publish-test.sh). See docs/adr/0019."
+}
+
+# ---------------------------------------------------------------------------
+# THE LEASE (Q9). See the comment block on cc_publish_lease in
+# sql/12_publish.sql for the protocol. All lease reads run with
+# select_sequential_consistency = 1: on Cloud's SharedMergeTree that makes the
+# read see every committed insert, which is what an exclusion protocol needs;
+# on a plain local MergeTree it is a no-op.
+# ---------------------------------------------------------------------------
+OWNER="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+HOSTN="$(hostname -s 2>/dev/null || echo unknown)"
+ACQ_AT=""
+HAVE_LEASE=0
+
+live_winner() {
+  qr "SELECT owner FROM (
+        SELECT owner, min(acquired_at) AS acq, max(renewed_at) AS ra,
+               argMax(released, renewed_at) AS rel
+        FROM cc_publish_lease GROUP BY owner)
+      WHERE rel = 0 AND ra > now64(3) - INTERVAL $LEASE_TTL_S SECOND
+      ORDER BY acq DESC, owner DESC LIMIT 1
+      SETTINGS select_sequential_consistency = 1"
+}
+
+acquire_lease() {
+  local holder
+  holder="$(live_winner)"
+  if [ -n "$holder" ]; then
+    say "== lease held by $holder — declining. (A second publisher standing down"
+    say "   is normal operation, not an error; see ADR 0019.)"
+    exit 0
+  fi
+  # acquired_at is read from the SERVER clock first so renewals can repeat it
+  # verbatim — the lottery is decided on one clock, not N publishers' clocks.
+  ACQ_AT="$(qr "SELECT toString(now64(3))")"
+  q "INSERT INTO cc_publish_lease (owner, acquired_at, renewed_at, released, host, pid)
+     VALUES ('$OWNER', toDateTime64('$ACQ_AT',3), now64(3), 0, '$HOSTN', $$)" >/dev/null
+  sleep "$LEASE_SETTLE_S"
+  local w; w="$(live_winner)"
+  if [ "$w" != "$OWNER" ]; then
+    say "== lost the acquisition lottery to ${w:-another publisher} — declining."
+    q "INSERT INTO cc_publish_lease (owner, acquired_at, renewed_at, released, host, pid)
+       VALUES ('$OWNER', toDateTime64('$ACQ_AT',3), now64(3), 1, '$HOSTN', $$)" >/dev/null 2>&1 || true
+    exit 0
+  fi
+  HAVE_LEASE=1
+}
+
+renew_lease() {
+  q "INSERT INTO cc_publish_lease (owner, acquired_at, renewed_at, released, host, pid)
+     VALUES ('$OWNER', toDateTime64('$ACQ_AT',3), now64(3), 0, '$HOSTN', $$)" >/dev/null
+}
+
+# The fencing check. Runs before EVERY write phase: a holder that expired and
+# was replaced must find out BEFORE its next statement, not after. What this
+# cannot fence — a statement already in flight server-side — is covered by the
+# run-scoped dedup tokens and the idempotent prune, and honestly bounded in
+# ADR 0019's "what is still not guaranteed".
+assert_lease() {
+  local w; w="$(live_winner)"
+  [ "$w" = "$OWNER" ] || die "lease lost to ${w:-(nobody — expired)} mid-run. Aborting before the
+next write. The run itself is safe: whoever holds the lease next resumes it
+from the phase markers with the same run_id, dedup tokens and build_version."
+}
+
+lease_beat() { renew_lease; assert_lease; }
+
+release_lease() {
+  [ "$HAVE_LEASE" = 1 ] || return 0
+  q "INSERT INTO cc_publish_lease (owner, acquired_at, renewed_at, released, host, pid)
+     VALUES ('$OWNER', toDateTime64('$ACQ_AT',3), now64(3), 1, '$HOSTN', $$)" >/dev/null 2>&1 || true
+  HAVE_LEASE=0
+}
+
+# ---------------------------------------------------------------------------
+# RECOVERY SWEEP (Q8). Runs under the lease before every batch. Three cases,
+# all cheap no-ops on a healthy database:
+#   1. runs whose latest phase is 'claiming' — died inside the claim. Rolled
+#      BACK (consumed rows deleted, batch partition dropped, marked aborted):
+#      nothing after 'claimed' can have run, so undoing the claim is exact and
+#      the markings become claimable again.
+#   2. batch partitions with no run row — pre-ADR-0019 debris (the claim used
+#      to write the batch before any run row existed). Dropped.
+#   3. consumed rows with no run row — THE Q8 ORPHAN: markings recorded as
+#      digested by a run that never registered. Deleted, which un-suppresses
+#      the markings; the next claim republishes them (idempotent if they were
+#      in fact partially published).
+# ---------------------------------------------------------------------------
+recover_claims() {
+  local stuck r cf ct
+  stuck="$(qr "SELECT arrayStringConcat(groupArray(toString(run_id)), ' ')
+               FROM (SELECT run_id FROM cc_publish_runs
+                     GROUP BY run_id
+                     HAVING countIf(phase IN ('committed','aborted')) = 0
+                        AND argMax(phase, at) = 'claiming')")"
+  for r in $stuck; do
+    say "== rolling back run $r (died mid-claim; its markings become claimable again)"
+    q "DELETE FROM cc_publish_consumed WHERE run_id = $r" >/dev/null
+    q "ALTER TABLE cc_publish_batch DROP PARTITION $r" >/dev/null 2>&1 || true
+    cf="$(qr "SELECT toString(any(cursor_from)) FROM cc_publish_runs WHERE run_id = $r")"
+    ct="$(qr "SELECT toString(any(cursor_to))   FROM cc_publish_runs WHERE run_id = $r")"
+    mark "$r" aborted "$cf" "$ct" 0 0 0 "rolled back: died mid-claim"
+  done
+  local orphans oc
+  orphans="$(qr "SELECT arrayStringConcat(groupArray(toString(run_id)), ' ') FROM (
+                   SELECT DISTINCT run_id FROM cc_publish_batch
+                   WHERE run_id NOT IN (SELECT run_id FROM cc_publish_runs))")"
+  for r in $orphans; do
+    say "== dropping orphan batch partition $r (no run row)"
+    q "ALTER TABLE cc_publish_batch DROP PARTITION $r" >/dev/null 2>&1 || true
+  done
+  oc="$(qr "SELECT toString(count()) FROM cc_publish_consumed
+            WHERE run_id NOT IN (SELECT run_id FROM cc_publish_runs)")"
+  if [ "$oc" != "0" ]; then
+    say "== deleting $oc orphan consumed row(s) with no run row — un-suppressing their markings"
+    q "DELETE FROM cc_publish_consumed
+       WHERE run_id NOT IN (SELECT run_id FROM cc_publish_runs)" >/dev/null
+  fi
+}
+
 # Rows written by a query_id, straight from the server's own log. This is the
 # evidence, not a count we did ourselves.
 written_rows() {
   q "SYSTEM FLUSH LOGS" >/dev/null 2>&1 || true
   qr "SELECT toString(ifNull(max(written_rows), 0)) FROM system.query_log
       WHERE query_id = '$1' AND type = 'QueryFinish'"
+}
+
+# ---------------------------------------------------------------------------
+# stmt_landed <query_id> — did this statement already complete server-side?
+#
+# THE DEDUP TOKEN DOES NOT PROTECT THE NEGATE AND EMIT REPLAYS. ADR 0013
+# attached insert_deduplication_token to every heavy statement as "belt and
+# braces" against a resumed run re-issuing a statement that had already landed.
+# The crash matrix (PHASE 12 of tools/publish-test.sh) measured that belt
+# broken: on Cloud 26.2.1.525, a replayed INSERT SELECT into the
+# SharedAggregatingMergeTree delta table executed BOTH times — system.query_log
+# shows two QueryFinish entries for the same query_id, each with written_rows>0
+# — and the served number double-counted the correction. (The original
+# verification evidently used a different insert shape.) Every OTHER phase is
+# replay-safe by construction: derive re-inserts the same rows at the same
+# pinned build_version (Replacing absorbs them), prune and the hours/users
+# re-derivations are idempotent. Negate and emit are APPEND-ONLY and are not.
+#
+# So a resumed run decides replays from the server's own record instead: wait
+# until the query_id is no longer executing (a crashed CLIENT does not stop a
+# statement already running server-side), flush the log, and treat a recorded
+# successful finish as "landed — do not re-issue". The token stays attached as
+# a second layer, but nothing load-bearing rests on it any more. ADR 0019.
+# ---------------------------------------------------------------------------
+# Both reads are checked for a NUMERIC answer before being believed. This
+# function is called from an `if` condition, where `set -e` is suspended: a
+# failed curl would otherwise yield "" and `[ "" != "0" ]` would read as
+# "landed", silently DROPPING a correction that never ran. An unreadable
+# answer is a hard stop, not a guess — in this one place, guessing wrong in
+# either direction corrupts the served number.
+stmt_landed() {
+  local qid="$1" tries=0 running finished
+  while :; do
+    running="$(qr "SELECT toString(count()) FROM system.processes WHERE query_id = '$qid'")"
+    case "$running" in
+      0) break ;;
+      ''|*[!0-9]*) die "cannot read system.processes for $qid (got '$running').
+Refusing to guess whether that statement is still running." ;;
+    esac
+    tries=$((tries+1))
+    [ "$tries" -le 120 ] || die "statement $qid is still executing server-side after 120 s.
+Refusing to race it: wait for it to finish (or kill it) and re-run."
+    sleep 1
+  done
+  q "SYSTEM FLUSH LOGS" >/dev/null 2>&1 || true
+  finished="$(qr "SELECT toString(countIf(type = 'QueryFinish')) FROM system.query_log
+                  WHERE query_id = '$qid'")"
+  case "$finished" in
+    ''|*[!0-9]*) die "cannot read system.query_log for $qid (got '$finished').
+Refusing to guess whether that statement landed: re-issuing a landed append
+doubles a correction, skipping an unlanded one drops it." ;;
+  esac
+  [ "$finished" != "0" ]
 }
 
 # ---------------------------------------------------------------------------
@@ -184,15 +441,34 @@ if [ "$STATUS_ONLY" = 1 ]; then
   exit 0
 fi
 
+# build_version must be monotonic AND must never collide with a build issued
+# in the same second — two runs a few hundred ms apart would otherwise stamp
+# the same value and ReplacingMergeTree(build_version) could not tell the new
+# derivation from the old. Kept in SECONDS, the same unit tools/build-model.sh
+# uses, so a later full rebuild still outranks us. Allocated ONCE per run, at
+# claim time, and recorded in the claimed mark ('bv=N'): a resumed run must
+# REUSE it, because a fresh, larger BV turns the prune into a self-delete of
+# the crashed run's own derivation (Q8b, reproduced before this was fixed).
+alloc_bv() {
+  qr "SELECT toString(greatest(toUInt64(toUnixTimestamp(now())),
+                               toUInt64(ifNull(max(build_version), 0)) + 1))
+      FROM session_intervals"
+}
+
 # ---------------------------------------------------------------------------
 # ONE BATCH
 # ---------------------------------------------------------------------------
 publish_once() {
+  lease_beat
+  recover_claims
+
   # -- resume an in-flight run, or claim a new one ---------------------------
-  local inflight run_id phase cursor_from cursor_to sessions
+  local inflight run_id phase cursor_from cursor_to sessions BV RESUMED_AT
+  RESUMED_AT=""
   inflight="$(qr "SELECT toString(ifNull(min(run_id), 0)) FROM (
                     SELECT run_id FROM cc_publish_runs
-                    GROUP BY run_id HAVING countIf(phase = 'committed') = 0)")"
+                    GROUP BY run_id
+                    HAVING countIf(phase IN ('committed','aborted')) = 0)")"
 
   if [ "$inflight" != "0" ]; then
     run_id="$inflight"
@@ -200,6 +476,11 @@ publish_once() {
     cursor_from="$(qr "SELECT toString(any(cursor_from)) FROM cc_publish_runs WHERE run_id = $run_id")"
     cursor_to="$(qr "SELECT toString(any(cursor_to))   FROM cc_publish_runs WHERE run_id = $run_id")"
     sessions="$(qr "SELECT toString(count()) FROM cc_publish_batch WHERE run_id = $run_id")"
+    RESUMED_AT="$phase"
+    # The crashed run's OWN build_version, from its claimed/derived notes.
+    # 0 only for a legacy (pre-ADR-0019) run; resolved after SCOPE is known.
+    BV="$(qr "SELECT toString(max(toUInt64OrZero(extract(note, 'bv=(\\d+)'))))
+              FROM cc_publish_runs WHERE run_id = $run_id")"
     say "== resuming run $run_id from phase '$phase' ($sessions sessions)"
   else
     phase=""
@@ -215,11 +496,63 @@ publish_once() {
       cursor_to="$(qr "SELECT toString(ifNull(max(marked_at), toDateTime64(0,3)))
                        FROM session_dirty
                        WHERE marked_at <= now64(3) - INTERVAL $SETTLE_S SECOND")"
+
+      # Anything to do at all? Checked BEFORE the intent row is written, so an
+      # idle tick (loop mode fires every minute) leaves no trace in the runs
+      # log. Same predicate as the claim below — pair identity plus lookback.
+      local pend
+      pend="$(qr "SELECT toString(count()) FROM session_dirty
+                  WHERE marked_at >= toDateTime64('$cursor_from',3) - INTERVAL $LOOKBACK_S SECOND
+                    AND marked_at <= toDateTime64('$cursor_to',3)
+                    AND (marked_at, insert_id) NOT IN
+                        (SELECT marked_at, insert_id FROM cc_publish_consumed)")"
+      if [ "$pend" = "0" ]; then
+        say "== nothing to publish (no unconsumed settled markings)"
+        return 0
+      fi
     fi
 
-    run_id="$(now_ms)"
+    # Server-allocated and strictly monotonic: epoch-ms is the base (the batch
+    # TTL depends on that scale) but a collision with ANY recorded run — e.g.
+    # two publishers whose clocks agree to the millisecond — bumps past it.
+    # Under the lease only one allocator is live, so this is unique.
+    run_id="$(qr "SELECT toString(greatest(toUInt64($(now_ms)),
+                                           toUInt64(ifNull(max(run_id), 0)) + 1))
+                  FROM cc_publish_runs")"
 
-    # --- claim -------------------------------------------------------------
+    # --- claim (ADR 0019: intent first, then consumed, then batch) ----------
+    # The INTENT ROW is written before any side effect, so no consumed row and
+    # no batch partition can exist without a run row that names it. A crash
+    # anywhere before the 'claimed' mark is ROLLED BACK by recover_claims —
+    # before this existed, a crash between the consumed insert and the claimed
+    # mark orphaned the whole batch silently (Q8, reproduced).
+    mark "$run_id" claiming "$cursor_from" "$cursor_to" 0 0 0 ""
+    crash_if claiming
+
+    # CONSUMED FIRST, BATCH FROM CONSUMED. The consumed insert is the ONE
+    # statement that reads the queue; the batch then derives from the pairs
+    # recorded under this run_id. The two statements therefore cannot disagree
+    # about which inserts were digested — with two independent reads, a marking
+    # surfacing between them would be recorded as digested yet never claimed,
+    # which is Q10 through the side door.
+    #
+    # The claim predicate is EXACT, not approximate: every settled marking in
+    # [cursor_from - LOOKBACK, cursor_to] whose (marked_at, insert_id) pair no
+    # finalizer has digested, and nothing else. The pair is what makes two
+    # same-millisecond inserts distinguishable (Q10); the LOOKBACK is what
+    # lets an insert that outlived the settle window still be found (its
+    # marked_at is behind the cursor); the consumed set is what keeps the
+    # lookback from re-deriving anything twice.
+    if [ -z "$FORCE_SESSIONS" ]; then
+      q "INSERT INTO cc_publish_consumed (marked_at, insert_id, run_id)
+         SELECT DISTINCT marked_at, insert_id, $run_id FROM session_dirty
+         WHERE marked_at >= toDateTime64('$cursor_from',3) - INTERVAL $LOOKBACK_S SECOND
+           AND marked_at <= toDateTime64('$cursor_to',3)
+           AND (marked_at, insert_id) NOT IN
+               (SELECT marked_at, insert_id FROM cc_publish_consumed)" >/dev/null
+    fi
+    crash_if consumed
+
     # The read window. For each claimed session take the union of
     #   (a) the event-time span of the markings we are consuming, and
     #   (b) the span of its CURRENTLY PUBLISHED intervals.
@@ -236,20 +569,16 @@ publish_once() {
     # (toStartOfHour(event_timestamp) first, ADR 0002) instead of depending on
     # the video_session_id projection that WALKTHROUGH §5 measured as not worth
     # shipping.
-    #
-    # The claim predicate is EXACT, not approximate: every settled marking in
-    # [cursor_from, cursor_to] that this finalizer has not already digested,
-    # and nothing else. cc_publish_consumed is what makes the boundary case
-    # (a marking whose timestamp equals the cursor) decidable instead of a
-    # choice between losing it and re-doing the whole previous batch.
     local where_dirty
     if [ -n "$FORCE_SESSIONS" ]; then
       local in_list; in_list="'$(printf '%s' "$FORCE_SESSIONS" | sed "s/,/','/g")'"
       where_dirty="video_session_id IN ($in_list)"
     else
-      where_dirty="marked_at >= toDateTime64('$cursor_from',3)
+      where_dirty="marked_at >= toDateTime64('$cursor_from',3) - INTERVAL $LOOKBACK_S SECOND
                    AND marked_at <= toDateTime64('$cursor_to',3)
-                   AND marked_at NOT IN (SELECT marked_at FROM cc_publish_consumed)"
+                   AND (marked_at, insert_id) IN
+                       (SELECT marked_at, insert_id FROM cc_publish_consumed
+                        WHERE run_id = $run_id)"
     fi
 
     q "INSERT INTO cc_publish_batch (run_id, video_session_id, lo_event_ts, hi_event_ts)
@@ -269,57 +598,75 @@ publish_once() {
               if(has = 1, greatest(c.hi, phi), c.hi)
        FROM claimed c LEFT JOIN prior p USING (video_session_id)" >/dev/null
 
+    crash_if batch
+    sleep_if batch
+
     sessions="$(qr "SELECT toString(count()) FROM cc_publish_batch WHERE run_id = $run_id")"
     if [ "$sessions" = "0" ]; then
-      say "== nothing to publish (0 sessions claimed)"
+      say "== nothing claimed (0 sessions) — rolling back run $run_id"
+      q "DELETE FROM cc_publish_consumed WHERE run_id = $run_id" >/dev/null
       q "ALTER TABLE cc_publish_batch DROP PARTITION $run_id" >/dev/null 2>&1 || true
+      mark "$run_id" aborted "$cursor_from" "$cursor_to" 0 0 0 "empty claim"
       return 0
     fi
-    # Record WHICH inserts this run digested, before any of them is acted on.
-    # Written at claim time, not at commit: a run that dies mid-flight is
-    # resumed from cc_publish_batch, so these markings must not be handed to a
-    # second run as well.
-    if [ -z "$FORCE_SESSIONS" ]; then
-      q "INSERT INTO cc_publish_consumed (marked_at, run_id)
-         SELECT DISTINCT marked_at, $run_id FROM session_dirty
-         WHERE marked_at >= toDateTime64('$cursor_from',3)
-           AND marked_at <= toDateTime64('$cursor_to',3)" >/dev/null
-    fi
 
-    mark "$run_id" claimed "$cursor_from" "$cursor_to" "$sessions" 0 0 ""
+    BV="$(alloc_bv)"
+    RESUMED_AT=""
+    mark "$run_id" claimed "$cursor_from" "$cursor_to" "$sessions" 0 0 "bv=$BV"
     phase=claimed
+    crash_if claimed
     say "== run $run_id  ·  $sessions session(s) claimed  ·  cursor $cursor_from -> $cursor_to"
   fi
 
-  local LO HI BV SCOPE t0 t1 rows
+  local LO HI SCOPE t0 t1 rows
   LO="$(qr "SELECT toString(min(lo_event_ts)) FROM cc_publish_batch WHERE run_id = $run_id")"
   HI="$(qr "SELECT toString(max(hi_event_ts)) FROM cc_publish_batch WHERE run_id = $run_id")"
   SCOPE="video_session_id IN (SELECT video_session_id FROM cc_publish_batch WHERE run_id = $run_id)"
 
-  # build_version must be monotonic AND must never collide with a build issued
-  # in the same second — two runs a few hundred ms apart would otherwise stamp
-  # the same value and ReplacingMergeTree(build_version) could not tell the new
-  # derivation from the old. Kept in SECONDS, the same unit
-  # tools/build-model.sh uses, so a later full rebuild still outranks us.
-  BV="$(qr "SELECT toString(greatest(toUInt64(toUnixTimestamp(now())),
-                                     toUInt64(ifNull(max(build_version), 0)) + 1))
-            FROM session_intervals")"
+  # Legacy resume (a run claimed before ADR 0019 recorded no bv= note).
+  if [ -z "$BV" ] || [ "$BV" = "0" ]; then
+    case "$phase" in
+      claimed|negated)
+        # Nothing derived yet — a fresh version is correct.
+        BV="$(alloc_bv)" ;;
+      *)
+        # The derivation landed at the crashed run's BV; that stamp is the
+        # newest within the batch scope. Reusing it keeps the prune exact.
+        BV="$(qr "SELECT toString(toUInt64(ifNull(max(build_version), 0)))
+                  FROM session_intervals WHERE $SCOPE")"
+        [ "$BV" != "0" ] || die "resuming run $run_id at phase '$phase' but no build_version is
+recoverable (no bv= note, no intervals in scope). Refusing to guess: a wrong
+BV here deletes the run's own derivation. Inspect cc_publish_runs run $run_id." ;;
+    esac
+  fi
 
   # -- PHASE: negate --------------------------------------------------------
   # Append -deltas(intervals_old(batch)). Must run BEFORE the new derivation
   # is promoted, because it reads session_intervals FINAL.
   if [ "$phase" = claimed ]; then
-    template_or_die sql/40_deltas.sql "$TMP/negate.sql" 'PUBLISH_NEGATE' \
-      -e "s|^    FROM session_intervals FINAL\$|    FROM session_intervals FINAL WHERE $SCOPE /*PUBLISH_SCOPE*/|" \
-      -e "s|^    sum(d)  AS delta,\$|    -sum(d)  AS delta, /*PUBLISH_NEGATE*/|" \
-      -e "s|^    sum(op) AS starts,\$|    -sum(op) AS starts,|" \
-      -e "s|^    sum(cl) AS ends\$|    -sum(cl) AS ends|"
-    grep -q 'PUBLISH_SCOPE' "$TMP/negate.sql" || die "negate template lost its scope"
-    t0=$(now_ms)
-    qf "$TMP/negate.sql" "publish-${run_id}-negate" "&insert_deduplication_token=${run_id}:negate" >/dev/null
-    t1=$(now_ms); rows="$(written_rows "publish-${run_id}-negate")"
-    mark "$run_id" negated "$cursor_from" "$cursor_to" "$sessions" "$rows" "$((t1-t0))" ""
-    say "   negated   ${rows} corrective delta rows   $((t1-t0)) ms"
+    lease_beat
+    if [ "$RESUMED_AT" = claimed ] && stmt_landed "publish-${run_id}-negate"; then
+      # The crashed run already appended these corrective rows; re-issuing
+      # would double them — the dedup token does NOT stop that (measured).
+      rows="$(written_rows "publish-${run_id}-negate")"
+      mark "$run_id" negated "$cursor_from" "$cursor_to" "$sessions" "$rows" 0 "landed-before-crash"
+      say "   negated   ${rows} corrective delta rows   (landed before the crash; not re-issued)"
+    else
+      template_or_die sql/40_deltas.sql "$TMP/negate.sql" 'PUBLISH_NEGATE' \
+        -e "s|^    FROM session_intervals FINAL\$|    FROM session_intervals FINAL WHERE $SCOPE /*PUBLISH_SCOPE*/|" \
+        -e "s|^    sum(d)  AS delta,\$|    -sum(d)  AS delta, /*PUBLISH_NEGATE*/|" \
+        -e "s|^    sum(op) AS starts,\$|    -sum(op) AS starts,|" \
+        -e "s|^    sum(cl) AS ends\$|    -sum(cl) AS ends|"
+      grep -q 'PUBLISH_SCOPE' "$TMP/negate.sql" || die "negate template lost its scope"
+      t0=$(now_ms)
+      qf "$TMP/negate.sql" "publish-${run_id}-negate" "&insert_deduplication_token=${run_id}:negate" >/dev/null
+      crash_if negate_stmt
+      t1=$(now_ms); rows="$(written_rows "publish-${run_id}-negate")"
+      mark "$run_id" negated "$cursor_from" "$cursor_to" "$sessions" "$rows" "$((t1-t0))" ""
+      crash_if negated
+      sleep_if negated
+      say "   negated   ${rows} corrective delta rows   $((t1-t0)) ms"
+    fi
     phase=negated
   fi
 
@@ -327,14 +674,17 @@ publish_once() {
   # Re-derive the batch's sessions from ev_raw, scoped by session id AND by the
   # event-time window computed above.
   if [ "$phase" = negated ]; then
+    lease_beat
     template_or_die sql/30_build_intervals.sql "$TMP/derive.sql" 'PUBLISH_SCOPE' \
       -e "s|^        FROM ev_raw\$|        FROM ev_raw WHERE $SCOPE AND event_timestamp >= toDateTime64('$LO',3) AND event_timestamp <= toDateTime64('$HI',3) /*PUBLISH_SCOPE*/|" \
       -e "s|^        toUInt64(toUnixTimestamp(now())) AS build_version,\$|        toUInt64($BV) AS build_version, /*PUBLISH_BV*/|"
     grep -q 'PUBLISH_BV' "$TMP/derive.sql" || die "derive template lost its build_version override"
     t0=$(now_ms)
     qf "$TMP/derive.sql" "publish-${run_id}-derive" "&insert_deduplication_token=${run_id}:derive" >/dev/null
+    crash_if derive_stmt
     t1=$(now_ms); rows="$(written_rows "publish-${run_id}-derive")"
     mark "$run_id" derived "$cursor_from" "$cursor_to" "$sessions" "$rows" "$((t1-t0))" "bv=$BV window=$LO..$HI"
+    crash_if derived
     say "   derived   ${rows} intervals   $((t1-t0)) ms   (window $LO .. $HI)"
     phase=derived
   fi
@@ -346,11 +696,14 @@ publish_once() {
   # runs into one). Without this the orphan survives FINAL for ever AND the
   # next run's negation would negate deltas that were never published.
   if [ "$phase" = derived ]; then
+    lease_beat
     t0=$(now_ms)
     q "DELETE FROM session_intervals WHERE $SCOPE AND build_version < $BV" \
       "&query_id=publish-${run_id}-prune" >/dev/null
+    crash_if prune_stmt
     t1=$(now_ms)
     mark "$run_id" pruned "$cursor_from" "$cursor_to" "$sessions" 0 "$((t1-t0))" ""
+    crash_if pruned
     say "   pruned    superseded intervals   $((t1-t0)) ms"
     phase=pruned
   fi
@@ -359,13 +712,22 @@ publish_once() {
   # Append +deltas(intervals_new(batch)). Identical SQL to the negate phase
   # with the sign left alone — that symmetry is the correctness argument.
   if [ "$phase" = pruned ]; then
-    template_or_die sql/40_deltas.sql "$TMP/emit.sql" 'PUBLISH_SCOPE' \
-      -e "s|^    FROM session_intervals FINAL\$|    FROM session_intervals FINAL WHERE $SCOPE /*PUBLISH_SCOPE*/|"
-    t0=$(now_ms)
-    qf "$TMP/emit.sql" "publish-${run_id}-emit" "&insert_deduplication_token=${run_id}:emit" >/dev/null
-    t1=$(now_ms); rows="$(written_rows "publish-${run_id}-emit")"
-    mark "$run_id" emitted "$cursor_from" "$cursor_to" "$sessions" "$rows" "$((t1-t0))" ""
-    say "   emitted   ${rows} delta rows   $((t1-t0)) ms"
+    lease_beat
+    if [ "$RESUMED_AT" = pruned ] && stmt_landed "publish-${run_id}-emit"; then
+      rows="$(written_rows "publish-${run_id}-emit")"
+      mark "$run_id" emitted "$cursor_from" "$cursor_to" "$sessions" "$rows" 0 "landed-before-crash"
+      say "   emitted   ${rows} delta rows   (landed before the crash; not re-issued)"
+    else
+      template_or_die sql/40_deltas.sql "$TMP/emit.sql" 'PUBLISH_SCOPE' \
+        -e "s|^    FROM session_intervals FINAL\$|    FROM session_intervals FINAL WHERE $SCOPE /*PUBLISH_SCOPE*/|"
+      t0=$(now_ms)
+      qf "$TMP/emit.sql" "publish-${run_id}-emit" "&insert_deduplication_token=${run_id}:emit" >/dev/null
+      crash_if emit_stmt
+      t1=$(now_ms); rows="$(written_rows "publish-${run_id}-emit")"
+      mark "$run_id" emitted "$cursor_from" "$cursor_to" "$sessions" "$rows" "$((t1-t0))" ""
+      crash_if emitted
+      say "   emitted   ${rows} delta rows   $((t1-t0)) ms"
+    fi
     phase=emitted
   fi
 
@@ -383,6 +745,7 @@ publish_once() {
   # superset is all that is needed: re-deriving an untouched hour rewrites the
   # identical row at a newer version.
   if [ "$phase" = emitted ]; then
+    lease_beat
     local HOURS_IN
     HOURS_IN="(SELECT toDateTime(h) FROM (SELECT DISTINCT arrayJoin(range(toUInt32(toStartOfHour(toDateTime(lo_event_ts))), toUInt32(toStartOfHour(toDateTime(hi_event_ts))) + 7201, 3600)) AS h FROM cc_publish_batch WHERE run_id = $run_id))"
     extract_insert sql/50_hour_agg.sql "$TMP/hours_src.sql"
@@ -392,8 +755,10 @@ publish_once() {
       -e "s|^    ARRAY JOIN \\[0, 1, 2, 3, 4, 5, 6, 7\\] AS g\$|    ARRAY JOIN [0, 1, 2, 3, 4, 5, 6, 7] AS g WHERE toStartOfHour(minute) IN $HOURS_IN /*PUBLISH_HOURS*/|"
     t0=$(now_ms)
     qf "$TMP/hours.sql" "publish-${run_id}-hours" "&insert_deduplication_token=${run_id}:hours" >/dev/null
+    crash_if hours_stmt
     t1=$(now_ms); rows="$(written_rows "publish-${run_id}-hours")"
     mark "$run_id" hours "$cursor_from" "$cursor_to" "$sessions" "$rows" "$((t1-t0))" ""
+    crash_if hours
     say "   hours     ${rows} hour-cube rows re-derived   $((t1-t0)) ms"
     phase=hours
   fi
@@ -412,6 +777,7 @@ publish_once() {
   # The interval prefilter is the blast-radius bound: only intervals that can
   # overlap the batch window are expanded, not all of session_intervals.
   if [ "$phase" = hours ]; then
+    lease_beat
     local MINS_IN
     MINS_IN="(SELECT toDateTime(m) FROM (SELECT DISTINCT arrayJoin(range(toUInt32(toStartOfMinute(toDateTime(lo_event_ts))), toUInt32(toStartOfMinute(toDateTime(hi_event_ts))) + 241, 60)) AS m FROM cc_publish_batch WHERE run_id = $run_id))"
     extract_insert sql/45_user_concurrency.sql "$TMP/users_src.sql"
@@ -423,18 +789,26 @@ publish_once() {
     grep -q 'PUBLISH_USER_PRE' "$TMP/users.sql" || die "users template lost its interval prefilter"
     t0=$(now_ms)
     qf "$TMP/users.sql" "publish-${run_id}-users" "&insert_deduplication_token=${run_id}:users" >/dev/null
+    crash_if users_stmt
     t1=$(now_ms); rows="$(written_rows "publish-${run_id}-users")"
     mark "$run_id" users "$cursor_from" "$cursor_to" "$sessions" "$rows" "$((t1-t0))" ""
+    crash_if users
     say "   users     ${rows} user-minute buckets re-derived   $((t1-t0)) ms"
     phase=users
   fi
 
   # -- PHASE: commit --------------------------------------------------------
   if [ "$phase" = users ]; then
+    lease_beat
     mark "$run_id" committed "$cursor_from" "$cursor_to" "$sessions" 0 0 ""
     say "   committed cursor now $cursor_to"
   fi
 }
+
+# Write paths only from here on: refuse a half-migrated schema, then take the
+# lease. --status exited above — it never blocks on, or takes, the lease.
+preflight_schema
+acquire_lease
 
 if [ "$LOOP" != 0 ]; then
   say "== publishing into '$DB' every ${LOOP}s (ctrl-c to stop)"

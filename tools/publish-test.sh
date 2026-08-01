@@ -21,7 +21,18 @@
 #   4. reads system.query_log back to show what each incremental run actually
 #      touched, against what the rebuild touches;
 #   5. republishes an UNCHANGED session and shows the curve does not move —
-#      the property that makes over-consuming the change log safe.
+#      the property that makes over-consuming the change log safe;
+#   6. (ADR 0019) CRASHES the publisher at every phase boundary — the marks
+#      and the statements between them, 16 points — and proves each recovery
+#      converges (PHASE 12, the longest phase: ~30 s per boundary);
+#   7. (ADR 0019) runs TWO publishers at once and shows the lease admits
+#      exactly one, the served number moves by exactly one viewer — not two,
+#      which is what the double-applied correction produced before the lease;
+#   8. (ADR 0019) lands two SAME-MILLISECOND markings where the slower insert
+#      commits after the faster was consumed, and shows the (marked_at,
+#      insert_id) pair identity claims it — marked_at alone suppressed it;
+#   9. (ADR 0019) shows the retention headroom columns: a marking older than
+#      the claim lookback trips retention_alert instead of expiring silently.
 #
 # EVERY convergence check covers all four serving tiers: minute deltas,
 # intervals, user-minute buckets (v_user_concurrency_minute*), and the
@@ -150,14 +161,30 @@ compare() {  # compare <label>
                content_id, app_version, audio_language, subtitle_language, player_version
       HAVING n != 0)
     UNION ALL
-    SELECT 3, 'served minutes differing',
-           toString(countIf(ifNull(a.concurrent, -1) != ifNull(b.concurrent, -1)))
-    FROM ${LIVE}.v_concurrency_minute_delta_total a
-    FULL OUTER JOIN ${CTL}.v_concurrency_minute_delta_total b USING (minute)
+    -- Served concurrency is the RUNNING SUM at each minute, compared over the
+    -- UNION of minutes either side knows about — not a row-membership join of
+    -- the *_total views. Those views emit a row only for minutes present in
+    -- cc_minute_delta, and the incremental path legitimately materializes
+    -- minutes the rebuild does not: a correction pair (-X then +X') touches a
+    -- minute with net-zero rows, the GROUP BY keeps it, and the carried value
+    -- it shows is CORRECT. A membership join counted 8 such minutes as
+    -- 'differing' while every actually-served number agreed (ADR 0019 PHASE
+    -- 12 caught this the first time the probe region was quiet).
+    SELECT 3, 'served minutes differing (running sum over union of minutes)',
+           toString(countIf(ca != cb)) FROM (
+      SELECT minute,
+             sum(sum(dl)) OVER (ORDER BY minute) AS ca,
+             sum(sum(dc)) OVER (ORDER BY minute) AS cb
+      FROM (
+        SELECT minute, delta AS dl, 0 AS dc FROM ${LIVE}.cc_minute_delta
+        UNION ALL
+        SELECT minute, 0, delta FROM ${CTL}.cc_minute_delta)
+      GROUP BY minute)
     UNION ALL
-    SELECT 4, 'served minutes compared', toString(count())
-    FROM ${LIVE}.v_concurrency_minute_delta_total a
-    FULL OUTER JOIN ${CTL}.v_concurrency_minute_delta_total b USING (minute)
+    SELECT 4, 'served minutes compared', toString(count()) FROM (
+      SELECT DISTINCT minute FROM (
+        SELECT minute FROM ${LIVE}.cc_minute_delta
+        UNION ALL SELECT minute FROM ${CTL}.cc_minute_delta))
     UNION ALL
     SELECT 5, 'peak — incremental',  toString(max(concurrent)) FROM ${LIVE}.v_concurrency_minute_delta_total
     UNION ALL
@@ -706,6 +733,249 @@ say "  Nothing moved, because nothing has arrived since the layer went on. The c
 say "  log is empty on a table that was already loaded, so the cursor starts at the"
 say "  current ingest position rather than at the beginning of history. Adoption is"
 say "  one DDL round trip — it does NOT trigger a rebuild to catch up."
+
+# ===========================================================================
+# ADR 0019 PHASES. Everything below runs the publisher with a short lease TTL
+# and settle so crash recovery does not wait out production-sized windows:
+# TTL 6 s (recovery must outwait a dead holder's lease), settle 2 s.
+# ===========================================================================
+FAST_ENV="PUBLISH_SETTLE_S=2 PUBLISH_LEASE_TTL_S=6 PUBLISH_LEASE_SETTLE_S=1"
+pub()       { env $FAST_ENV tools/publish.sh --database "$LIVE" "$@" 2>&1 | sed 's/^/    /' | tee -a "$OUT"; }
+pub_crash() { env $FAST_ENV PUBLISH_CRASH_AT="$1" tools/publish.sh --database "$LIVE" 2>&1 | sed 's/^/    /' | tee -a "$OUT" || true; }
+lagv()      { qr "SELECT toString($1) FROM ${LIVE}.v_cc_publish_lag"; }
+
+# SYNTHETIC PROBE SESSIONS. The ADR 0019 phases need an injection whose effect
+# on the served tiers is exactly predictable. Real sessions cannot give that:
+# on the complete file EVERY session carries a VideoSessionEnd, and a heartbeat
+# injected after it is absorbed without extending coverage (ADR 0007/0009) — a
+# first draft of PHASE 12 asserted "+30 s" against real sessions and learned
+# this the hard way (the re-derivation even retracts the tail to end AT the
+# closer once post-end beats exist). A synthetic heartbeat-only session never
+# has a closer, so its published end is always last beat + 60 s tail, and every
+# +30 s beat moves it by exactly +30 s. Placed after the data's last real event
+# (11:30) so the probe minutes carry zero background concurrency.
+SYN_DIMS="191919, '%SID%', 'adr19-user', 'VideoHeartbeat', 'network-activity', toDateTime64('%TS%',3), 'ADR19OS', '1.0', 'IN', 'hin', 'eng', '1.0', toDateTime64('%EPOCH%',3)"
+syn_beat() {  # syn_beat <session_id> <ts> [live-only]
+  local db row
+  row="$(printf '%s' "$SYN_DIMS" | sed -e "s|%SID%|$1|" -e "s|%TS%|$2|" -e "s|%EPOCH%|$2|")"
+  for db in "$LIVE" "$CTL"; do
+    [ "${3:-}" = live-only ] && [ "$db" = "$CTL" ] && continue
+    q "INSERT INTO ${db}.ev_raw (content_id, video_session_id, user_id, event_type, event,
+        event_timestamp, platform, app_version, country, audio_language, subtitle_language,
+        player_version, session_start_epoch) VALUES ($row)" >/dev/null
+  done
+}
+
+sess_end() {  # sess_end <session>  -> current published max interval_end
+  qr "SELECT toString(max(interval_end)) FROM ${LIVE}.session_intervals FINAL
+      WHERE video_session_id = '$1'"
+}
+
+plus() {  # plus <ts> <seconds>
+  qr "SELECT toString(toDateTime64('$1',3) + INTERVAL $2 SECOND)"
+}
+
+# ---------------------------------------------------------------------------
+say ""
+rule
+say "PHASE 12 — CRASH MATRIX (Q8, ADR 0019). Kill the publisher at EVERY phase"
+say "           boundary, then run it again and prove full recovery each time."
+say ""
+say "  Sixteen injection points: after each phase mark AND after each heavy"
+say "  statement (before its mark) — the two ADR 0016 phases included. Three"
+say "  recovery shapes are exercised:"
+say "    claiming/consumed/batch  -> ROLLBACK. The intent row (phase 'claiming',"
+say "        written before any side effect) names the run; recovery deletes its"
+say "        consumed rows, drops its batch partition, marks it aborted, and the"
+say "        markings become claimable again. Before ADR 0019 a crash between"
+say "        the consumed insert and the claimed mark orphaned the batch FOREVER"
+say "        — with pending_sessions reading 0 (reproduced)."
+say "    claimed..users marks     -> RESUME from the phase marker, reusing the"
+say "        run's recorded build_version. Recomputing BV on resume made the"
+say "        prune delete the crashed run's own derivation (reproduced: the"
+say "        session vanished from all four tiers, every status green)."
+say "    *_stmt points            -> RESUME must decide whether the statement"
+say "        landed. The insert_deduplication_token does NOT decide it: a replayed"
+say "        INSERT SELECT into the shared delta table executed BOTH times on"
+say "        26.2.1.525 (system.query_log showed two QueryFinish rows, each with"
+say "        written_rows > 0, and the correction double-applied — caught by this"
+say "        matrix's first green-to-red run). Recovery now consults the server's"
+say "        query log for the negate/emit query_ids; every other statement is"
+say "        replay-safe by construction (pinned build_version + Replacing/idempotent)."
+say "  Each recovery must also outwait the dead holder's lease (TTL 6 s here)."
+say "  Every round appends one +30 s beat to the synthetic probe session and"
+say "  requires the published end to advance by exactly +30 s through the crash."
+say ""
+SYN12="adr19-crash-probe"
+LAST12="2026-07-26 12:10:40.000"
+syn_beat "$SYN12" "2026-07-26 12:10:10.000"
+syn_beat "$SYN12" "$LAST12"
+sleep 5
+pub --quiet >/dev/null
+E="$(sess_end "$SYN12")"; WANT="$(plus "$LAST12" 60)"
+say "  probe session ${SYN12} published: end $E (expected $WANT)"
+[ "$E" = "$WANT" ] || { echo "PHASE 12: probe session baseline wrong" >&2; exit 1; }
+say ""
+CRASH_FAILED=0
+for CP in claiming consumed batch claimed \
+          negate_stmt negated derive_stmt derived prune_stmt pruned \
+          emit_stmt emitted hours_stmt hours users_stmt users; do
+  LAST12="$(plus "$LAST12" 30)"
+  syn_beat "$SYN12" "$LAST12"
+  sleep 5
+  pub_crash "$CP" >/dev/null
+  sleep 7   # the dead holder's lease must expire before recovery can win it
+  pub --quiet >/dev/null
+  E1="$(sess_end "$SYN12")"
+  WANT="$(plus "$LAST12" 60)"
+  RIF="$(lagv runs_in_flight)"; PEND="$(lagv pending_sessions)"
+  if [ "$E1" = "$WANT" ] && [ "$RIF" = "0" ] && [ "$PEND" = "0" ]; then
+    say "  crash@$(printf '%-12s' "$CP") recovered: end -> $E1 (+30s), in-flight 0, pending 0"
+  else
+    say "  crash@$(printf '%-12s' "$CP") FAILED: end $E1 (wanted $WANT), in-flight $RIF, pending $PEND"
+    CRASH_FAILED=1
+  fi
+done
+[ "$CRASH_FAILED" = 0 ] || { echo "PHASE 12: a crash boundary did not recover" >&2; exit 1; }
+say ""
+say "  convergence after all sixteen crash/recover cycles:"
+control_rebuild crashmatrix
+compare crashmatrix
+
+# ---------------------------------------------------------------------------
+say ""
+rule
+say "PHASE 13 — TWO PUBLISHERS AT ONCE (Q9, ADR 0019). The lease admits one."
+say ""
+say "  Without the lease this exact scenario was reproduced corrupting the tier:"
+say "  two publishers both claimed the same marking under different run_ids, both"
+say "  negated the SAME published contribution X and both emitted X-prime, so the"
+say "  served number landed at 2X'-X — one viewer became two. Both runs were"
+say "  green; nothing detected it; only a full rebuild could repair it."
+say ""
+SYN13="adr19-lease-probe"
+B13="2026-07-26 12:30:10.000"
+syn_beat "$SYN13" "$B13"
+syn_beat "$SYN13" "$(plus "$B13" 30)"
+sleep 5
+pub --quiet >/dev/null
+E0="$(sess_end "$SYN13")"
+[ "$E0" = "$(plus "$B13" 90)" ] || { echo "PHASE 13: probe baseline wrong" >&2; exit 1; }
+M9="$(qr "SELECT toString(toStartOfMinute(toDateTime64('$E0',3) + INTERVAL 30 SECOND))")"
+# The running sum probed directly from cc_minute_delta: the *_total view emits
+# only minutes that carry delta rows, so a quiet probe minute would read as
+# absent rather than as its true carried value.
+C0="$(qr "SELECT toString(toInt64(sum(delta))) FROM ${LIVE}.cc_minute_delta WHERE minute <= toDateTime('$M9')")"
+say "  probe session ${SYN13} ends $E0; probe minute ${M9} serves ${C0} before"
+syn_beat "$SYN13" "$(plus "$B13" 60)"
+sleep 5
+# A is held mid-claim for 6 s so B genuinely overlaps the window in which the
+# pre-lease publisher double-claimed; B must stand down, not corrupt.
+env $FAST_ENV PUBLISH_SLEEP_AT=batch:6 tools/publish.sh --database "$LIVE" > "$TMP/pubA.log" 2>&1 &
+PA=$!
+sleep 2
+env $FAST_ENV tools/publish.sh --database "$LIVE" > "$TMP/pubB.log" 2>&1 &
+PB=$!
+wait "$PA" || true; wait "$PB" || true
+sed 's/^/    A: /' "$TMP/pubA.log" | tee -a "$OUT"
+sed 's/^/    B: /' "$TMP/pubB.log" | tee -a "$OUT"
+COMMITS="$(cat "$TMP/pubA.log" "$TMP/pubB.log" | { grep -c 'committed cursor' || true; })"
+DECLINES="$(cat "$TMP/pubA.log" "$TMP/pubB.log" | { grep -c 'declining' || true; })"
+C1="$(qr "SELECT toString(toInt64(sum(delta))) FROM ${LIVE}.cc_minute_delta WHERE minute <= toDateTime('$M9')")"
+say ""
+say "  commits: ${COMMITS} (must be 1)   declines: ${DECLINES} (must be 1)"
+say "  probe minute ${M9}: ${C0} -> ${C1} (single-publisher answer $((C0+1)); the"
+say "  pre-lease double application produced $((C0+2)))"
+[ "$COMMITS" = "1" ] && [ "$DECLINES" = "1" ] && [ "$C1" = "$((C0+1))" ] \
+  || { echo "PHASE 13: lease did not serialize the publishers" >&2; exit 1; }
+control_rebuild lease
+compare lease
+
+# ---------------------------------------------------------------------------
+say ""
+rule
+say "PHASE 14 — SAME-MILLISECOND IDENTITY (Q10, ADR 0019)."
+say ""
+say "  Two inserts can share a marked_at — now64(3) is per-query, and two loads"
+say "  can land in the same millisecond. cc_publish_consumed used to key on the"
+say "  timestamp ALONE: if the slower insert's rows became visible after the"
+say "  faster was consumed, its marking matched the consumed set and was skipped"
+say "  for ever, with pending_sessions reading 0 (reproduced). The key is now"
+say "  the (marked_at, insert_id) pair — initialQueryID() of the firing INSERT,"
+say "  captured by mv_session_dirty."
+say ""
+SYN14="adr19-samems-probe"
+B14="2026-07-26 12:40:10.000"
+syn_beat "$SYN14" "$B14"
+syn_beat "$SYN14" "$(plus "$B14" 30)"
+sleep 5
+pub --quiet >/dev/null
+E="$(sess_end "$SYN14")"
+[ "$E" = "$(plus "$B14" 90)" ] || { echo "PHASE 14: probe baseline wrong" >&2; exit 1; }
+T14="$(qr "SELECT toString(now64(3) - INTERVAL 4 SECOND)")"
+say "  probe session ${SYN14} published (end $E); both markings stamped marked_at = ${T14}"
+# The FAST insert's marking: visible immediately, consumed by the next run.
+# (Inserted directly so the shared millisecond is exact, not probabilistic.)
+q "INSERT INTO ${LIVE}.session_dirty (marked_at, insert_id, video_session_id, min_event_ts, max_event_ts, events)
+   VALUES (toDateTime64('$T14',3), 'q10-fast', '${SYN14}',
+           toDateTime64('$(plus "$B14" 30)',3), toDateTime64('$(plus "$B14" 30)',3), 1)" >/dev/null
+sleep 5
+pub --quiet >/dev/null
+say "  fast marking consumed: $(qr "SELECT toString(count()) FROM ${LIVE}.cc_publish_consumed WHERE insert_id = 'q10-fast'") run(s) digested it"
+# The SLOW insert: its ev_raw rows and marking become visible only NOW — after
+# the same-millisecond sibling was consumed. The MV is dropped for the event
+# insert and re-applied after, so the fake same-ms marking below is the ONLY
+# path to this event in LIVE — end-advance then discriminates, not just the
+# pair count. (CTL takes the event through its normal path.)
+NEW14="$(plus "$B14" 60)"
+q "DROP TABLE ${LIVE}.mv_session_dirty" >/dev/null
+syn_beat "$SYN14" "$NEW14"
+env -u CH_DATABASE TARGET=cloud tools/apply-sql.sh --database "$LIVE" sql/12_publish.sql >/dev/null
+q "INSERT INTO ${LIVE}.session_dirty (marked_at, insert_id, video_session_id, min_event_ts, max_event_ts, events)
+   VALUES (toDateTime64('$T14',3), 'q10-slow', '${SYN14}',
+           toDateTime64('$NEW14',3), toDateTime64('$NEW14',3), 1)" >/dev/null
+sleep 5
+pub | grep -E 'claimed|committed' || true
+E1="$(sess_end "$SYN14")"
+WANT="$(plus "$NEW14" 60)"
+SLOW_CONSUMED="$(qr "SELECT toString(count()) FROM ${LIVE}.cc_publish_consumed WHERE insert_id = 'q10-slow'")"
+say ""
+say "  slow marking claimed: ${SLOW_CONSUMED} (timestamp-only identity claimed 0)"
+say "  session end: $E -> $E1 (wanted $WANT)"
+[ "$SLOW_CONSUMED" = "1" ] && [ "$E1" = "$WANT" ] \
+  || { echo "PHASE 14: the same-millisecond sibling was suppressed" >&2; exit 1; }
+control_rebuild samems
+compare samems
+
+# ---------------------------------------------------------------------------
+say ""
+rule
+say "PHASE 15 — RETENTION HEADROOM (Q11, ADR 0019). The TTL is a deadline."
+say ""
+say "  session_dirty, cc_publish_batch and cc_publish_consumed carry 7-day TTLs."
+say "  A marking that outlives them expires SILENTLY and the tiers are wrong with"
+say "  no signal — and a marking older than the claim lookback (PUBLISH_LOOKBACK_S,"
+say "  default 900 s behind the cursor) is already unreachable long before the TTL"
+say "  eats it. v_cc_publish_lag now carries the signal: retention_headroom_s is"
+say "  seconds until the oldest undigested marking hits the TTL, and"
+say "  retention_alert trips a full day before the cliff. This phase plants a"
+say "  6.5-day-old marking and reads the alarm."
+say ""
+say "  healthy: headroom $(lagv "ifNull(toString(retention_headroom_s), 'NULL')"), alert $(lagv retention_alert)"
+q "INSERT INTO ${LIVE}.session_dirty (marked_at, insert_id, video_session_id, min_event_ts, max_event_ts, events)
+   VALUES (now64(3) - INTERVAL 561600 SECOND, 'retention-probe', 'retention-probe-session',
+           now64(3) - INTERVAL 561600 SECOND, now64(3) - INTERVAL 561600 SECOND, 1)" >/dev/null
+say "  planted:  age $(lagv oldest_pending_age_s)s, headroom $(lagv retention_headroom_s)s, alert $(lagv retention_alert) (1 = a rebuild is due before the queue lies)"
+AL="$(lagv retention_alert)"
+pub >/dev/null   # must NOT claim it: 6.5 days is far beyond the lookback
+CLAIMED_PROBE="$(qr "SELECT toString(count()) FROM ${LIVE}.cc_publish_consumed WHERE insert_id = 'retention-probe'")"
+say "  a publish run against it claimed: ${CLAIMED_PROBE} (0 — beyond the lookback the"
+say "  ALERT is the path to repair, not the claim; the repair is a forced"
+say "  republication or a rebuild, both idempotent)"
+q "DELETE FROM ${LIVE}.session_dirty WHERE insert_id = 'retention-probe'" >/dev/null
+say "  cleared:  alert $(lagv retention_alert)"
+[ "$AL" = "1" ] && [ "$CLAIMED_PROBE" = "0" ] \
+  || { echo "PHASE 15: retention alert did not behave" >&2; exit 1; }
 
 say ""
 rule
