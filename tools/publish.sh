@@ -402,17 +402,35 @@ written_rows() {
 # successful finish as "landed — do not re-issue". The token stays attached as
 # a second layer, but nothing load-bearing rests on it any more. ADR 0019.
 # ---------------------------------------------------------------------------
+# Both reads are checked for a NUMERIC answer before being believed. This
+# function is called from an `if` condition, where `set -e` is suspended: a
+# failed curl would otherwise yield "" and `[ "" != "0" ]` would read as
+# "landed", silently DROPPING a correction that never ran. An unreadable
+# answer is a hard stop, not a guess — in this one place, guessing wrong in
+# either direction corrupts the served number.
 stmt_landed() {
-  local qid="$1" tries=0
-  while [ "$(qr "SELECT toString(count()) FROM system.processes WHERE query_id = '$qid'")" != "0" ]; do
+  local qid="$1" tries=0 running finished
+  while :; do
+    running="$(qr "SELECT toString(count()) FROM system.processes WHERE query_id = '$qid'")"
+    case "$running" in
+      0) break ;;
+      ''|*[!0-9]*) die "cannot read system.processes for $qid (got '$running').
+Refusing to guess whether that statement is still running." ;;
+    esac
     tries=$((tries+1))
     [ "$tries" -le 120 ] || die "statement $qid is still executing server-side after 120 s.
 Refusing to race it: wait for it to finish (or kill it) and re-run."
     sleep 1
   done
   q "SYSTEM FLUSH LOGS" >/dev/null 2>&1 || true
-  [ "$(qr "SELECT toString(countIf(type = 'QueryFinish')) FROM system.query_log
-           WHERE query_id = '$qid'")" != "0" ]
+  finished="$(qr "SELECT toString(countIf(type = 'QueryFinish')) FROM system.query_log
+                  WHERE query_id = '$qid'")"
+  case "$finished" in
+    ''|*[!0-9]*) die "cannot read system.query_log for $qid (got '$finished').
+Refusing to guess whether that statement landed: re-issuing a landed append
+doubles a correction, skipping an unlanded one drops it." ;;
+  esac
+  [ "$finished" != "0" ]
 }
 
 # ---------------------------------------------------------------------------

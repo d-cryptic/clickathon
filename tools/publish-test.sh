@@ -161,14 +161,30 @@ compare() {  # compare <label>
                content_id, app_version, audio_language, subtitle_language, player_version
       HAVING n != 0)
     UNION ALL
-    SELECT 3, 'served minutes differing',
-           toString(countIf(ifNull(a.concurrent, -1) != ifNull(b.concurrent, -1)))
-    FROM ${LIVE}.v_concurrency_minute_delta_total a
-    FULL OUTER JOIN ${CTL}.v_concurrency_minute_delta_total b USING (minute)
+    -- Served concurrency is the RUNNING SUM at each minute, compared over the
+    -- UNION of minutes either side knows about — not a row-membership join of
+    -- the *_total views. Those views emit a row only for minutes present in
+    -- cc_minute_delta, and the incremental path legitimately materializes
+    -- minutes the rebuild does not: a correction pair (-X then +X') touches a
+    -- minute with net-zero rows, the GROUP BY keeps it, and the carried value
+    -- it shows is CORRECT. A membership join counted 8 such minutes as
+    -- 'differing' while every actually-served number agreed (ADR 0019 PHASE
+    -- 12 caught this the first time the probe region was quiet).
+    SELECT 3, 'served minutes differing (running sum over union of minutes)',
+           toString(countIf(ca != cb)) FROM (
+      SELECT minute,
+             sum(sum(dl)) OVER (ORDER BY minute) AS ca,
+             sum(sum(dc)) OVER (ORDER BY minute) AS cb
+      FROM (
+        SELECT minute, delta AS dl, 0 AS dc FROM ${LIVE}.cc_minute_delta
+        UNION ALL
+        SELECT minute, 0, delta FROM ${CTL}.cc_minute_delta)
+      GROUP BY minute)
     UNION ALL
-    SELECT 4, 'served minutes compared', toString(count())
-    FROM ${LIVE}.v_concurrency_minute_delta_total a
-    FULL OUTER JOIN ${CTL}.v_concurrency_minute_delta_total b USING (minute)
+    SELECT 4, 'served minutes compared', toString(count()) FROM (
+      SELECT DISTINCT minute FROM (
+        SELECT minute FROM ${LIVE}.cc_minute_delta
+        UNION ALL SELECT minute FROM ${CTL}.cc_minute_delta))
     UNION ALL
     SELECT 5, 'peak — incremental',  toString(max(concurrent)) FROM ${LIVE}.v_concurrency_minute_delta_total
     UNION ALL
@@ -794,7 +810,7 @@ SYN12="adr19-crash-probe"
 LAST12="2026-07-26 12:10:40.000"
 syn_beat "$SYN12" "2026-07-26 12:10:10.000"
 syn_beat "$SYN12" "$LAST12"
-sleep 3
+sleep 5
 pub --quiet >/dev/null
 E="$(sess_end "$SYN12")"; WANT="$(plus "$LAST12" 60)"
 say "  probe session ${SYN12} published: end $E (expected $WANT)"
@@ -806,7 +822,7 @@ for CP in claiming consumed batch claimed \
           emit_stmt emitted hours_stmt hours users_stmt users; do
   LAST12="$(plus "$LAST12" 30)"
   syn_beat "$SYN12" "$LAST12"
-  sleep 3
+  sleep 5
   pub_crash "$CP" >/dev/null
   sleep 7   # the dead holder's lease must expire before recovery can win it
   pub --quiet >/dev/null
@@ -841,7 +857,7 @@ SYN13="adr19-lease-probe"
 B13="2026-07-26 12:30:10.000"
 syn_beat "$SYN13" "$B13"
 syn_beat "$SYN13" "$(plus "$B13" 30)"
-sleep 3
+sleep 5
 pub --quiet >/dev/null
 E0="$(sess_end "$SYN13")"
 [ "$E0" = "$(plus "$B13" 90)" ] || { echo "PHASE 13: probe baseline wrong" >&2; exit 1; }
@@ -852,7 +868,7 @@ M9="$(qr "SELECT toString(toStartOfMinute(toDateTime64('$E0',3) + INTERVAL 30 SE
 C0="$(qr "SELECT toString(toInt64(sum(delta))) FROM ${LIVE}.cc_minute_delta WHERE minute <= toDateTime('$M9')")"
 say "  probe session ${SYN13} ends $E0; probe minute ${M9} serves ${C0} before"
 syn_beat "$SYN13" "$(plus "$B13" 60)"
-sleep 3
+sleep 5
 # A is held mid-claim for 6 s so B genuinely overlaps the window in which the
 # pre-lease publisher double-claimed; B must stand down, not corrupt.
 env $FAST_ENV PUBLISH_SLEEP_AT=batch:6 tools/publish.sh --database "$LIVE" > "$TMP/pubA.log" 2>&1 &
@@ -892,7 +908,7 @@ SYN14="adr19-samems-probe"
 B14="2026-07-26 12:40:10.000"
 syn_beat "$SYN14" "$B14"
 syn_beat "$SYN14" "$(plus "$B14" 30)"
-sleep 3
+sleep 5
 pub --quiet >/dev/null
 E="$(sess_end "$SYN14")"
 [ "$E" = "$(plus "$B14" 90)" ] || { echo "PHASE 14: probe baseline wrong" >&2; exit 1; }
@@ -903,7 +919,7 @@ say "  probe session ${SYN14} published (end $E); both markings stamped marked_a
 q "INSERT INTO ${LIVE}.session_dirty (marked_at, insert_id, video_session_id, min_event_ts, max_event_ts, events)
    VALUES (toDateTime64('$T14',3), 'q10-fast', '${SYN14}',
            toDateTime64('$(plus "$B14" 30)',3), toDateTime64('$(plus "$B14" 30)',3), 1)" >/dev/null
-sleep 3
+sleep 5
 pub --quiet >/dev/null
 say "  fast marking consumed: $(qr "SELECT toString(count()) FROM ${LIVE}.cc_publish_consumed WHERE insert_id = 'q10-fast'") run(s) digested it"
 # The SLOW insert: its ev_raw rows and marking become visible only NOW — after
@@ -918,7 +934,7 @@ env -u CH_DATABASE TARGET=cloud tools/apply-sql.sh --database "$LIVE" sql/12_pub
 q "INSERT INTO ${LIVE}.session_dirty (marked_at, insert_id, video_session_id, min_event_ts, max_event_ts, events)
    VALUES (toDateTime64('$T14',3), 'q10-slow', '${SYN14}',
            toDateTime64('$NEW14',3), toDateTime64('$NEW14',3), 1)" >/dev/null
-sleep 3
+sleep 5
 pub | grep -E 'claimed|committed' || true
 E1="$(sess_end "$SYN14")"
 WANT="$(plus "$NEW14" 60)"

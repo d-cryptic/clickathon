@@ -8,8 +8,11 @@
 > `cc_publish_consumed` keyed on `marked_at` alone suppressed the slower of two same-millisecond inserts
 > permanently. Fixes: a `claiming` intent row + rollback sweep, BV recorded at claim and reused on
 > resume, a lease with deterministic tiebreak + per-phase fencing, the `(marked_at, insert_id)` pair
-> identity via `initialQueryID()`, and retention-headroom columns in `v_cc_publish_lag` (Q11).
-> Status: accepted, 2026-08-02. Proven by `tools/publish-test.sh` PHASES 12–15; nothing run against `sonyliv`.
+> identity via `initialQueryID()`, and retention-headroom columns in `v_cc_publish_lag` (Q11). The
+> crash matrix then caught a FIFTH defect: `insert_deduplication_token` does not drop a replayed
+> INSERT SELECT (measured — both executions wrote rows), so negate/emit replays are decided from
+> `system.query_log` instead. Status: accepted, 2026-08-02. Proven by `tools/publish-test.sh`
+> PHASES 12–15; nothing run against `sonyliv`.
 
 **Status** Accepted · 2026-08-02 · amends [ADR 0013](0013-continuous-publication-by-incremental-finalizer.md)
 and [ADR 0016](0016-publisher-owns-the-user-and-hour-tiers.md) — closes the crash/concurrency
