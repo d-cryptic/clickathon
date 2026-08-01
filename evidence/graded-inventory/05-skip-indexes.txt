@@ -1,0 +1,5 @@
+   ┌─table─────────────┬─name────────┬─type─────────┬─expr────────────┬─granularity─┐
+1. │ ev_raw            │ idx_content │ bloom_filter │ content_id      │           1 │
+2. │ ev_raw            │ idx_ts      │ minmax       │ event_timestamp │           1 │
+3. │ session_intervals │ idx_start   │ minmax       │ interval_start  │           1 │
+   └───────────────────┴─────────────┴──────────────┴─────────────────┴─────────────┘

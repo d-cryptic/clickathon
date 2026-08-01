@@ -4,6 +4,17 @@
 // Go binary and `tools/ch` always talk to the same server with the same
 // credentials. Adding a Go-only variable would create two sources of truth and
 // a class of bug where the two disagree about which database was loaded.
+//
+// Target resolution (ADR 0018): each target resolves to exactly one host and
+// one database, from variables that belong to that target alone —
+//
+//	cloud: CH_HOST + CH_DATABASE
+//	local: CH_LOCAL_URL + CH_DATABASE_LOCAL
+//
+// CH_DATABASE names the GRADED Cloud database and never applies to local.
+// Local work used to fall back to it, so `sonyliv verify -target local` looked
+// for a database that only exists on Cloud and 404ed. Missing configuration is
+// an error at Load time, never a silent fallback to a server default.
 package config
 
 import (
@@ -101,6 +112,10 @@ func loadCloud() (ClickHouse, error) {
 	if err != nil {
 		return ClickHouse{}, err
 	}
+	database, err := required("CH_DATABASE")
+	if err != nil {
+		return ClickHouse{}, err
+	}
 
 	host, port := ParseHost(rawHost)
 	if p := envInt("CH_PORT", 0); p != 0 {
@@ -115,13 +130,25 @@ func loadCloud() (ClickHouse, error) {
 		Port:     port,
 		User:     envStr("CH_USER", "default"),
 		Password: password,
-		Database: envStr("CH_DATABASE", "sonyliv"),
+		Database: database,
 		Secure:   envBool("CH_SECURE", true),
 		Target:   TargetCloud,
 	}, nil
 }
 
 func loadLocal() (ClickHouse, error) {
+	// NOT CH_DATABASE — that names the graded Cloud database, and reading it
+	// here is exactly the bug ADR 0018 removes: local verification 404ed
+	// looking for `sonyliv` on localhost.
+	database, err := required("CH_DATABASE_LOCAL")
+	if err != nil {
+		return ClickHouse{}, fmt.Errorf("%w (the local container's data lives in `default`; CH_DATABASE is the Cloud database and does not apply to local — ADR 0018)", err)
+	}
+	password, err := required("CH_PASSWORD_LOCAL")
+	if err != nil {
+		return ClickHouse{}, err
+	}
+
 	// CH_LOCAL_URL is a full URL (http://localhost:8123) in .env, so it goes
 	// through the same parser as the Cloud host.
 	host, port := ParseHost(envStr("CH_LOCAL_URL", "http://localhost:8123"))
@@ -132,8 +159,8 @@ func loadLocal() (ClickHouse, error) {
 		Host:     host,
 		Port:     port,
 		User:     envStr("CH_LOCAL_USER", "app"),
-		Password: os.Getenv("CH_PASSWORD_LOCAL"),
-		Database: envStr("CH_DATABASE", "default"),
+		Password: password,
+		Database: database,
 		Secure:   false,
 		Target:   TargetLocal,
 	}, nil
