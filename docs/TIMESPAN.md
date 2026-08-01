@@ -242,9 +242,11 @@ So the claim splits cleanly:
   minute tier (M1) reads **2,463,659 rows / 28.19 MiB across 543 parts** — 4.7× the bytes and 30×
   the parts, and that gap widens with span.
 
-The claim worth putting in the deck is therefore: *a long range costs one index granule per month of
-history, not one row per minute* — stronger and more defensible than the sentence it replaces,
-because it comes with a constant.
+The claim worth putting in the deck is therefore: *a long range costs a fixed number of index granules
+per month of history — not one row per minute.* At 8.3M that constant is 1 granule/month, at 50M it is
+3, because the cube held 3 parts per monthly partition; the constant is merge state, the **per-month**
+shape is the schema. Either way it is stronger and more defensible than the sentence it replaces,
+because it comes with a mechanism and a number rather than an assertion of invariance.
 
 Partition pruning never stopped working: the one-day minute-tier probe (M2) reads 3 parts of 543 at
 180 days / 50M.
