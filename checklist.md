@@ -1,816 +1,192 @@
-# ClickHouse Hackathon - Solution Design, Evaluation & Stress Testing Guide
+# CHECKLIST — what we are scored on, and where we stand
 
-> Consolidated from handwritten notes. This document serves as a checklist while designing, implementing, benchmarking, stress testing, and defending the proposed solution.
+> **Summary:** The judging rubric, compacted from handwritten notes and reconciled against the
+> organiser's actual spec in [docs/upstream/](docs/upstream/). This file is the **scoring view**: what
+> judges grade, what we must be able to defend, and where each answer already lives. It deliberately
+> does **not** re-explain the model — that is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and the
+> ADRs. Task queue is [TODOS.md](TODOS.md); honest status is [WALKTHROUGH.md](WALKTHROUGH.md).
+> For the minimum shippable cut, see [V0_CHECKLIST.md](V0_CHECKLIST.md).
 
----
-
-# 1. Problem Understanding
-
-The objective is **not just to count sessions**, but to accurately answer:
-
-> **"How many sessions overlap at a given minute?"**
-
-Key observations:
-
-- User activity is **dynamic**, not static.
-- Active ranges evolve continuously as new events arrive.
-- Solution should represent activity efficiently while supporting continuous updates.
-- Think from a **Data Engineer's POV**, not only as an algorithm problem.
+**Golden rule:** optimize ingestion *and* querying while holding correctness, scalability and
+robustness. Every choice — schema, interval representation, aggregation strategy, MVs, computational
+model — must be defensible on performance, maintainability and business value, not just algorithmic
+correctness. **Judges value *why* as much as *how*.**
 
 ---
 
-# 2. Core Data Model
+## 1. The five graded criteria
 
-## Interval Representation
+Straight from [PROBLEM_STATEMENT.md](docs/upstream/PROBLEM_STATEMENT.md#how-you-will-be-evaluated).
+Everything in this file exists to serve one of these.
 
-Understand:
+| # | Criterion | What judges actually check | Our state |
+|---|---|---|---|
+| C1 | **Correctness** | Benchmark answers vs private ground truth. Foreground-only means foreground-only; overcounting backgrounded time is *the* failure mode. | Gate passes vs `ev_raw` — [`evidence/reconcile.txt`](evidence/reconcile.txt) |
+| C2 | **Query performance** | Latency at the given volume, **and what the queries read** — not just wall time. | 299 KB / 23 ms vs 2.55 MB / 56 ms (8.5×) |
+| C3 | **Update handling** | Open sessions + late heartbeats absorbed **incrementally**, or recomputed? | ⚠️ **does not converge** — see §5 |
+| C4 | **Design quality** | Schema/representation choices *and the reasoning*. "A team that can defend its trade-offs beats a team with a lucky benchmark." | ADRs 0001–0007 |
+| C5 | **The unseen day** | Results on the sealed dataset, with latencies **and pipeline evidence**. *No pipeline evidence, no credit.* | `/unseen` skill exists, unexercised |
 
-- What is an **active interval**?
-- How are active ranges represented?
-- What constitutes session start?
-- What constitutes session end?
-- How are heartbeats incorporated?
+### Hard requirements (not scored — gating)
 
-Possible interval definition:
-
-```
-Session =
-Start Time
-End Time
-Heartbeat events
-Background/Idle Periods
-```
-
-Need a precise definition before implementation.
-
----
-
-# 3. Computational Model
-
-The computational model should answer:
-
-- How is concurrency computed?
-- How are overlapping intervals calculated?
-- How is the model updated as new data arrives?
-- How does the computation evolve over time?
-
-The solution should avoid treating sessions as immutable.
+- [ ] **ClickHouse is the primary datastore** — ingestion, modeling, all concurrency computation.
+- [ ] **Meaningfully integrate** ClickStack, Langfuse **or** LibreChat. *Superficial inclusion won't count.*
+      → ClickStack, charting real concurrency off Cloud. **Still shallow:** we observe ingestion lag but
+      not our own watermark lag; nothing of ours emits OTLP.
+- [ ] **No hand-computed answers.** Every number traceable to a query log or trace.
+- [ ] **No credentials in git.**
+- [ ] LICENSE present.
 
 ---
 
-# 4. Storage Model
+## 2. Correctness (C1)
 
-Consider whether aggregates should be:
+- [x] **Active-interval definition is precise and defended** — heartbeat gap > 150 s closes an
+      interval (backgrounding), **minus** explicit pause/resume windows. Two signals, because
+      heartbeats *survive* a pause at 0.756/min — inside any sane gap threshold. [ADR 0007](docs/adr/0007-gate-answers-pause-needs-explicit-handling.md)
+- [x] **Truth is recomputed from `ev_raw`**, not asserted against the serving layer. A test that reads
+      the model to check the model proves nothing — [docs/TESTS.md](docs/TESTS.md).
+- [x] **The gate can fail.** Negative-tested: inject one bad delta row → exit 1.
+- [x] Tier agreement: minute ↔ delta expansion (3,725 min, 0 mismatches); hour ↔ minute (98 h, 0).
+- [ ] **Unclosed-pause rule decided** — 23% of pauses never resume. Conservative 1,949.3 h vs
+      permissive 2,048.6 h (**+5.09%**). Unknowable from the file. **Operator/mentor call.**
+- [ ] Session-aware vs session-independent **numerically compared**, not just both built.
 
-- Session-aware
-- Session-independent
+### Edge cases — each needs a defined, tested behaviour
 
-Possible storage strategies:
-
-## Aggregate Tables
-
-Pros
-
-- Faster queries
-- Better scalability
-
-Need to evaluate:
-
-- Update friendliness
-- Query efficiency
-
----
-
-## Materialized Views
-
-Potential usage:
-
-- Pre-processing
-- Cleaning erroneous data
-- Maintaining derived aggregates
-
-Questions:
-
-- What should be materialized?
-- What should remain raw?
-- Can preprocessing eliminate expensive runtime work?
+Empty strings · NULL timestamps · duplicate records (**4,210 rows, 0.46%, 863 sessions — not yet
+deduped**) · missing session end · missing heartbeat · zero-length and invalid intervals ·
+out-of-order events · overlapping sessions for one user. Traps that actually bite are in
+[docs/DATA_DICTIONARY.md#traps](docs/DATA_DICTIONARY.md) — `event_timestamp` is epoch **ms**,
+backgrounding is universal, bg/fg events are **not guaranteed to pair**.
 
 ---
 
-# 5. Interval vs Delta Model
+## 3. Query performance (C2)
 
-Evaluate whether the solution should use:
+- [x] Serving layer answers without rescanning session history.
+- [x] Sort keys are dimension-first then time, per [docs/CONVENTIONS.md](docs/CONVENTIONS.md) and
+      [ADR 0002](docs/adr/0002-order-by-time-bucket-then-platform.md).
+- [ ] **`/bench` run on the full benchmark shapes** — peak **and** average concurrency × minute /
+      hour / day × dimension filters. Capture latency **and bytes read** for every shape.
+- [ ] Granule-pruning evidence per shape (`/ch-evidence`).
 
-## Interval Model
-
-Pros
-
-- Natural representation
-- Easier reasoning
-
-Cons
-
-- Expensive overlap computation
-
----
-
-## Delta/Event Model
-
-Represent:
-
-```
-Session Start  -> +1
-Session End    -> -1
-```
-
-Advantages:
-
-- Prefix sums
-- Efficient concurrency computation
-- Incremental updates
-
-Need comparison:
-
-- Complexity
-- Storage
-- Update cost
-- Query performance
+> **The dimension trap.** Peak is **not summable across dimensions**: platform alone and
+> platform+country peak at *different minutes* in the same range. Peak is never stored pre-combined —
+> hour-clipping is what makes it maxable over *time*. This is the single most likely place to be
+> silently wrong on a filtered benchmark query.
 
 ---
 
-# 6. Query Requirements
+## 4. Update handling (C3) — our weakest criterion
 
-The model should efficiently support queries like:
-
-- Per minute
-- Per hour
-- Per day
-
-Metrics:
-
-- Peak concurrency
-- Average concurrency
-
-Benchmark queries should cover all these granularities.
+- [x] Open sessions represented (`is_open`), watermark sized from measurement: stragglers arrive up
+      to **2,081 s** after `VideoSessionEnd` → W = 2400 s.
+- [x] Late-arrival correction-by-diff designed and arithmetically exact — [ADR 0006](docs/adr/0006-late-arrival-correction-by-diff.md).
+- [x] Absorption is **actually tested**, not asserted — `tools/truncation-test.sh` cuts the stream at
+      the peak and replays 447,081 withheld events.
+- [ ] **…and it does not converge.** +37 on the peak minute (2,924 vs 2,887, +1.3%). Two schema
+      fixes proven in §5.
+- [ ] **"Publish continuously updated aggregates"** — we batch-rebuild. Only `mv_stateless` is a real
+      MV. **The biggest architectural gap**; it is literally step 4 of the organiser's blueprint.
 
 ---
 
-# 7. Expected Filters
+## 5. Known defects — proven, unfixed
 
-Design schema assuming users will filter by:
+Both are schema changes to the graded database. **Ask the operator before applying.**
 
-- Time
-- Minute
-- Hour
-- Day
-
-Potential future filters should also be anticipated.
-
-Schema should remain filter-friendly.
+1. `session_intervals` is `ReplacingMergeTree(interval_end)`, which assumes re-derivation only ever
+   *extends* an interval. It doesn't — the `TAIL_S=60s` grace can overshoot, so a stale row wins
+   forever (316 intervals too long, 315 stuck `is_open=1`). → version on monotonic `build_version`.
+   **Fix proven to converge on all 1,578 minutes.**
+2. `cc_minute_delta.starts`/`ends` are `UInt64` and silently wrap on a negative corrective row
+   (`max()` returns 1.8e19). → `SimpleAggregateFunction(sum, Int64)`.
 
 ---
 
-# 8. Large Scale Considerations
+## 6. Deliverables from the organiser's blueprint
 
-The design should be:
+[README_START_HERE.md](docs/upstream/README_START_HERE.md) — "integration goal: join content and
+event streams in real time to produce one or more aggregated tables."
 
-- Query efficient
-- Update friendly
-- Suitable for large datasets
-- Scalable under continuous ingestion
-
-Avoid solutions that only perform well on static datasets.
-
----
-
-# 9. Handling Updating Data
-
-Critical consideration.
-
-Sessions continue receiving events.
-
-Need strategy for:
-
-- Updating active sessions
-- Finalizing sessions
-- Late arriving events
-- Incremental aggregation
-
-Possible approach:
-
-- Keep finalized data aggregated
-- Keep active sessions mutable
-- Merge after completion
+| Deliverable | State |
+|---|---|
+| Foreground concurrency | ✅ `cc_minute_delta` → `cc_hour_agg` |
+| Session-aware **and** session-independent tables | ✅ both; ⚠️ not yet compared numerically |
+| User-level concurrency (`uniqExact`, **not** deltas — a user holds several sessions) | ✅ `sql/45_user_concurrency.sql` |
+| **Content-level concurrency by title** (metadata enrichment) | ❌ missing |
+| **Time-window trend** — rolling / fixed windows | ❌ missing |
+| **Dedup of repeated events** | ❌ missing — 4,210 rows |
+| Schemas documented from `dataset_details.md` | ✅ [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) |
+| Filter dimensions survive derivation | ⚠️ only **3 of 10** — spec says "should work even if dimensions increase" |
 
 ---
 
-# 10. Handling Open Sessions
+## 7. Scale & stress — what "100×" answers require
 
-One important judging question:
+Judges will ask how the design behaves at 100×. Choices that only work at hackathon size (full
+rescans, per-minute explosion of all history) "will be treated as what they are."
 
-> How do you handle sessions that are still ongoing?
-
-Examples:
-
-- No end timestamp
-- Continuous heartbeat
-- Live session
-
-Need clearly defined behavior.
-
----
-
-# 11. Heartbeat Handling
-
-Heartbeats determine active state.
-
-Need to define:
-
-- Heartbeat interval
-- Missing heartbeat handling
-- Session timeout
-- Background idle period
-- Session continuation rules
+- [ ] High volume — millions of sessions / billions of events; state the growth law per tier.
+- [ ] High update rate — continuous heartbeats, frequent session mutation.
+- [ ] Concurrent queries during ingestion.
+- [ ] Long-running sessions (hours → days) — does hour-clipping hold?
+- [ ] Bursty traffic — mass simultaneous start/end.
+- [ ] Late and out-of-order data.
+- [ ] Duplicate events — idempotency demonstrated.
+- [ ] Missing events — no heartbeat, no session end.
 
 ---
 
-# 12. Aggregate Strategy
+## 8. The unseen day (C5)
 
-Need to justify:
+Released to all teams simultaneously in the final hours. **Build for it, not for the file we tuned on.**
 
-Why aggregate?
-
-Possible benefits:
-
-- Lower query latency
-- Reduced computation
-- Better scalability
-
-Need to explain:
-
-- Refresh strategy
-- Update mechanism
-- Consistency guarantees
+- [ ] `/unseen` runs end to end with **zero** hand edits, on a dataset never seen.
+- [ ] Benchmark answers + latencies captured.
+- [ ] Query-log / trace evidence packaged alongside. *No pipeline evidence, no credit.*
+- [ ] Nothing in the model is fitted to the tuning file's constants (gap threshold, tail, watermark
+      are declared tunables in one place, and the sensitivity sweep is run).
 
 ---
 
-# 13. Data Cleaning
+## 9. Defence — the questions to be ready for
 
-Dataset may contain:
+One list. Each should be answerable in under a minute, pointing at a doc.
 
-- Empty strings
-- NULL values
-- Duplicate records
-- Erroneous data
+**Model.** What is your interval definition, and why two signals instead of one? How are active
+ranges represented — arrays, normalized intervals, minute deltas, hybrid? Why hour-clipping?
 
-Need preprocessing pipeline.
+**Computation.** How do you compute overlap accurately? Peak vs average — why is peak not stored?
+Why is peak not summable across dimensions but maxable over time?
 
-Possible implementation:
+**Updates.** How are open sessions represented and finalized? How are late events absorbed
+incrementally rather than by rebuild? What is your watermark, and how did you *measure* it?
 
-- Materialized Views
-- Cleaning during ingestion
-- Validation layer
+**Storage.** Aggregate or raw? Session-aware or session-independent — and what did comparing them
+show? Why this ordering key? Why materialized views, and what stays raw?
 
----
+**Data quality.** Duplicates, NULLs, empty strings, erroneous records — where in the pipeline, and why there?
 
-# 14. Benchmarking
+**Evidence.** Which benchmark queries, which metrics, what did they read? Show the query log.
 
-Prepare benchmark query set.
+**Business.** What decision does this change? Naive counting says 2,976.9 h of watch time; the
+foreground-only model says 1,949.3 h — **34.5% of apparent watch time is backgrounded or paused**, and
+ad load, capacity and content calls are all made on that number. At the peak minute: 3,708 naive vs
+**2,887** actual, a 22.1% over-count removed.
 
-Should include:
-
-- Peak concurrency
-- Average concurrency
-
-Across:
-
-- Minute
-- Hour
-- Day
-
-Measure:
-
-- Query latency
-- Throughput
-- Resource usage
+**Trade-offs.** For every alternative you rejected — what did you measure? (Good answer on file: the
+`ev_raw` projection gives 27.7× on single-session lookups but **1.00×** on the real straggler path,
+for +94% storage. Measured, documented, deliberately not shipped.)
 
 ---
 
-# 15. Stress Testing Checklist
-
-Test:
-
-## High Volume
-
-- Millions of sessions
-- Billions of events
-
----
-
-## High Update Rate
-
-- Continuous heartbeats
-- Frequent session updates
-
----
-
-## Concurrent Queries
-
-- Multiple analytical queries
-- Simultaneous ingestion
-
----
-
-## Long Running Sessions
-
-Sessions lasting:
-
-- Hours
-- Days
-
----
-
-## Bursty Traffic
-
-Many sessions:
-
-- Start simultaneously
-- End simultaneously
-
----
-
-## Late Data
-
-- Delayed events
-- Out-of-order events
-
----
-
-## Duplicate Events
-
-Verify:
-
-- Idempotency
-- Deduplication
-
----
-
-## Missing Events
-
-Examples:
-
-- Missing heartbeat
-- Missing end event
-
----
-
-# 16. Edge Cases
-
-Must explicitly define handling for:
-
-- Empty strings
-- NULL timestamps
-- Duplicate records
-- Missing session end
-- Missing heartbeat
-- Invalid intervals
-- Zero-length sessions
-- Out-of-order events
-- Overlapping duplicate sessions
-
----
-
-# 17. Optimization Checklist
-
-The solution should be:
-
-- Query efficient
-- Update friendly
-- Incrementally maintainable
-- Scalable
-- Suitable for continuous ingestion
-- Filter efficient
-- Aggregation friendly
-
----
-
-# 18. Judgement Criteria (Expected)
-
-Judges are likely to evaluate:
-
-## Correctness
-
-- Accurate concurrency computation
-- Correct interval handling
-- Proper session definition
-
----
-
-## Scalability
-
-- Large dataset support
-- Continuous ingestion
-- Efficient updates
-
----
-
-## Query Performance
-
-- Low latency
-- Efficient filtering
-- Aggregate performance
-
----
-
-## Data Modeling
-
-- Sound schema
-- Appropriate computational model
-- Well justified aggregate design
-
----
-
-## Robustness
-
-- Handles erroneous data
-- Handles open sessions
-- Handles duplicates
-- Handles missing values
-
----
-
-## Practicality
-
-Solution should deliver real business value.
-
-Consider:
-
-- Is it useful for actual analytics?
-- Can businesses rely on it?
-- Does it scale in production?
-
----
-
-# 19. Questions You Must Be Ready to Answer
-
-## Interval Model
-
-- What is your interval definition?
-- How are active ranges represented?
-
----
-
-## Computation
-
-- How do you compute overlap accurately?
-- How do you compute average concurrency?
-- How do you compute peak concurrency?
-
----
-
-## Updates
-
-- How do you update active sessions?
-- How do you finalize sessions?
-- How do you process late events?
-
----
-
-## Open Sessions
-
-- How do you represent sessions without an end time?
-- How do you query ongoing sessions?
-
----
-
-## Aggregation
-
-- Why aggregate?
-- Why this aggregation strategy?
-- Why materialized views?
-
----
-
-## Storage
-
-- Aggregate table or raw table?
-- Session-aware or session-independent?
-- Why this schema?
-
----
-
-## Performance
-
-- Why is your model query efficient?
-- Why is it update friendly?
-- Why is it scalable?
-
----
-
-## Data Quality
-
-- How are duplicates handled?
-- How are NULLs handled?
-- How are erroneous records cleaned?
-
----
-
-## Benchmarking
-
-- Which benchmark queries did you run?
-- What metrics did you measure?
-
----
-
-## Business Perspective
-
-- Why is this solution valuable?
-- What business problem does it solve?
-- How would it be deployed in production?
-
----
-
-# 20. Final Submission Checklist
-
-- [ ] Clearly define active interval
-- [ ] Explain session lifecycle
-- [ ] Justify schema design
-- [ ] Justify interval vs delta model
-- [ ] Explain computational model
-- [ ] Handle open sessions
-- [ ] Handle late-arriving events
-- [ ] Handle heartbeats
-- [ ] Handle duplicates
-- [ ] Handle NULLs and empty values
-- [ ] Describe preprocessing pipeline
-- [ ] Justify materialized views
-- [ ] Explain aggregate tables
-- [ ] Demonstrate scalability
-- [ ] Benchmark minute/hour/day queries
-- [ ] Benchmark peak & average concurrency
-- [ ] Demonstrate filter efficiency
-- [ ] Demonstrate update efficiency
-- [ ] Explain business value
-- [ ] Be prepared to defend every design decision
-
----
-
-# 21. End-to-End Data Pipeline
-
-## Input Datasets
-
-### 1. Current Data (Metadata)
-
-```
-ch-hackathon-current-data.csv
-```
-
-Contains:
-
-- Session metadata
-- Current session state
-- Supporting metadata
-
----
-
-### 2. Raw Event Data
-
-```
-ch-hackathon-raw-data.csv
-```
-
-Contains:
-
-- Active events
-- Raw event stream
-- Heartbeats
-- Session activity
-
----
-
-## Data Flow
-
-```
-Current Metadata
-        +
-Raw Event Stream
-        │
-        ▼
-       JOIN
-        │
-        ▼
- Preprocessing / Validation
-        │
-        ▼
- Aggregate Tables
-```
-
----
-
-# 22. Aggregate Table Design Alternatives
-
-Two candidate approaches should be implemented or evaluated.
-
-## Option 1 — Session-Aware Aggregation
-
-Aggregate tables maintain explicit knowledge of session boundaries.
-
-Characteristics:
-
-- Uses your interval definition
-- Stores session lifecycle
-- Better semantic correctness
-- Easier handling of heartbeats
-- Better for interval-based analytics
-
-Questions:
-
-- How expensive are updates?
-- How large do aggregates become?
-- Does session mutation affect performance?
-
----
-
-## Option 2 — Session-Independent Aggregation
-
-Aggregate tables ignore session objects and focus only on activity.
-
-Characteristics:
-
-- Calculates active frequencies
-- Event-centric
-- Simpler aggregation
-- Potentially lower update cost
-
-Questions:
-
-- Does accuracy decrease?
-- Can all concurrency metrics still be derived?
-- How much information is lost?
-
----
-
-# 23. Compare Aggregation Strategies
-
-The solution should compare both models.
-
-Evaluation criteria:
-
-- Accuracy
-- Query latency
-- Update latency
-- Storage cost
-- Complexity
-- Scalability
-- Ease of maintenance
-
-Goal:
-
-> Determine which approach provides the best trade-off between accuracy, scalability, and operational simplicity.
-
----
-
-# 24. Real-Time Processing Pipeline
-
-Once aggregate tables are ready, the system should support continuous ingestion.
-
-Pipeline:
-
-```
-Incoming Events
-        │
-        ▼
-Validation
-        │
-        ▼
-Error Detection
-        │
-        ▼
-Real-time Filtering
-        │
-        ▼
-Aggregate Update
-        │
-        ▼
-Continuous Publishing
-```
-
----
-
-# 25. Event Ingestion Strategy
-
-The ingestion layer should support:
-
-- Continuous event arrival
-- Valid events
-- Erroneous events
-- Real-time filtering
-- Incremental aggregate updates
-
-The pipeline should avoid expensive recomputation whenever possible.
-
----
-
-# 26. Continuous Publishing
-
-The architecture should continuously publish updated aggregates instead of waiting for complete batch execution.
-
-Desired properties:
-
-- Low latency
-- Incremental updates
-- Near real-time analytics
-- Query-ready aggregates
-
----
-
-# 27. Accuracy vs Trade-off Analysis
-
-An important judging aspect will likely be demonstrating that multiple approaches were considered.
-
-Prepare a comparison similar to:
-
-| Criteria | Session Aware | Session Independent |
-|-----------|---------------|---------------------|
-| Accuracy | Higher | Moderate |
-| Update Cost | Higher | Lower |
-| Query Performance | Depends on aggregation | Faster |
-| Storage | Higher | Lower |
-| Complexity | Higher | Lower |
-| Scalability | Moderate | High |
-
-Explain **why your chosen approach is preferable** instead of simply presenting it.
-
----
-
-# 28. Architecture Decision Checklist
-
-Before finalizing the solution, ensure you can justify:
-
-- [ ] Why join metadata with raw events?
-- [ ] Why this preprocessing strategy?
-- [ ] Why aggregate tables?
-- [ ] Why session-aware or session-independent aggregation?
-- [ ] Why this interval definition?
-- [ ] Why this update mechanism?
-- [ ] Why this filtering strategy?
-- [ ] Why this publishing mechanism?
-- [ ] What are the trade-offs compared to alternative designs?
-
----
-
-# 29. Suggested Overall Architecture
-
-```
-Current Metadata CSV
-            │
-            │
-            ├──────────────┐
-            │              │
-            ▼              ▼
-      Metadata Join   Raw Event Stream
-              │
-              ▼
-      Validation & Cleaning
-              │
-              ▼
-      Real-time Filtering
-              │
-              ▼
-      Aggregate Tables
-       ├───────────────┐
-       │               │
-       ▼               ▼
-Session-aware     Session-independent
-Aggregation       Aggregation
-       │               │
-       └──────┬────────┘
-              ▼
-      Benchmark & Compare
-              ▼
-   Continuous Query Serving
-              ▼
- Real-time Publishing / Dashboard
-```
-
----
-
-# 30. Final Principle
-
-The solution should not only compute concurrency correctly but also demonstrate **production-grade data engineering practices**:
-
-- Robust ingestion
-- Efficient preprocessing
-- Incremental aggregation
-- Real-time updates
-- Scalable query execution
-- Clear trade-off analysis
-- Defensible architectural decisions
-
-The judges are likely to value **why** a particular design was chosen as much as **how** it was implemented.
-
----
-
-# Golden Rule
-
-The winning solution should optimize **both ingestion and querying** while maintaining **correctness, scalability, and robustness**. Every design choice—schema, interval representation, aggregation strategy, materialized views, and computational model—should be defensible in terms of **performance, maintainability, and real-world business value**, not just algorithmic correctness.
+## 10. Submission
+
+- [ ] Every unchecked box above is either done or **consciously accepted and stated**.
+- [ ] [WALKTHROUGH.md](WALKTHROUGH.md) matches reality; `evidence/` regenerated and committed.
+- [ ] Deck: 15 slides mapped to C1–C5.
+- [ ] Demo rehearsed twice — replay a live-event day: ingest → curve builds → apply a filter →
+      minute-grain answers instantly.
+- [ ] **Team Captain confirmed and awake before the freeze.** Only they can submit.
