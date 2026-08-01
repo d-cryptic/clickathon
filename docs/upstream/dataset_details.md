@@ -1,6 +1,12 @@
 # Dataset Details — SonyLIV Streaming Datasets
 ### ClickHouse Click-a-thon 2026 · "Real-Time Foreground-Only Concurrency"
 
+> **Vendored verbatim from the upstream problem package. Do not edit the body.**
+> Its relative links (`data/…`) describe the *upstream* layout, not this repo. Here the CSVs live
+> at repo-root [`data/`](../../data/) and are **gitignored**, so they resolve only after a local
+> download. Those dangling links are fidelity to the original, not rot — leave them. For what we
+> actually observed in the data, including the traps, see [`docs/DATA_DICTIONARY.md`](../DATA_DICTIONARY.md).
+
 This page is the canonical data dictionary for the two SonyLIV datasets in [`data/`](data/): use it as the reference for field names, data types, timestamps, identifiers, and business meaning.
 
 ## Raw dataset — [`ch-hackathon-raw-data.csv`](data/ch-hackathon-raw-data.csv)

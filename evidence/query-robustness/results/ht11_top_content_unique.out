@@ -1,0 +1,5 @@
+content_id	title	video_type	peak	peak_minute	avg_concurrent
+101	Alpha Live	live	4	2026-06-01 10:20:00	1.6
+102	Beta Movie	vod	2	2026-06-01 10:15:00	0.9
+101	Alpha Live	live	1	2026-06-01 10:20:00	0.2
+999	(unknown)	(unknown)	1	2026-06-01 10:22:00	0.3

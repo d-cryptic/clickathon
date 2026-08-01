@@ -1,0 +1,10 @@
+Row 1:
+──────
+name:                        dict_content
+status:                      LOADED
+origin:                      ff8a2b1b-e41a-4124-b2cf-5e892688af48
+type:                        ComplexKeyHashed
+source:                      ClickHouse: sonyliv.content_dim
+last_successful_update_time: 2026-08-01 17:43:09
+loading_duration:            0.052
+last_exception:              

@@ -1,0 +1,9 @@
+cube_mask	cells_compared	violations	max_excess	verdict
+0	408	0	0	PASS
+1	507	0	0	PASS
+2	408	0	0	PASS
+3	507	0	0	PASS
+4	489	0	0	PASS
+5	559	0	0	PASS
+6	489	0	0	PASS
+7	559	0	0	PASS

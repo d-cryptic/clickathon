@@ -1,35 +1,54 @@
 RECONCILE — serving layer vs ev_raw
-target: cloud   commit: 81c0161
+target: cloud   commit: 791c05d
 
 == 1. THE GATE — truth recomputed from ev_raw, five minutes
    (peak, both data boundaries, two arbitrary; any non-zero delta is a failure)
 
-   ┌─ord─┬─scope───┬─c1─────────────────────┬─c2───────────┬─c3─────────────┬─c4────────┬─verdict─┐
-1. │   0 │ SUMMARY │ minutes_compared=17028 │ mismatched=0 │ max_abs_diff=0 │ peak=2887 │ PASS    │
-2. │   2 │ sample  │ 2026-07-14 15:43:00    │ 1            │ 1              │ 0         │ PASS    │
-3. │   2 │ sample  │ 2026-07-16 12:35:00    │ 0            │ 0              │ 0         │ PASS    │
-4. │   2 │ sample  │ 2026-07-17 08:56:00    │ 0            │ 0              │ 0         │ PASS    │
-5. │   2 │ sample  │ 2026-07-26 10:56:00    │ 2887         │ 2887           │ 0         │ PASS    │
-6. │   2 │ sample  │ 2026-07-26 11:30:00    │ 193          │ 193            │ 0         │ PASS    │
-   └─────┴─────────┴────────────────────────┴──────────────┴────────────────┴───────────┴─────────┘
+    ┌─ord─┬─scope────┬─c1─────────────────────┬─c2─────────────┬─c3───────────────┬─c4────────┬─verdict──┐
+ 1. │   0 │ SUMMARY  │ minutes_compared=17028 │ mismatched=970 │ max_abs_diff=193 │ peak=2917 │ MISMATCH │
+ 2. │   1 │ MISMATCH │ 2026-07-26 10:40:00    │ 1909           │ 1985             │ 76        │ MISMATCH │
+ 3. │   1 │ MISMATCH │ 2026-07-26 10:41:00    │ 2042           │ 2107             │ 65        │ MISMATCH │
+ 4. │   1 │ MISMATCH │ 2026-07-26 10:42:00    │ 2170           │ 2240             │ 70        │ MISMATCH │
+ 5. │   1 │ MISMATCH │ 2026-07-26 10:47:00    │ 2554           │ 2614             │ 60        │ MISMATCH │
+ 6. │   1 │ MISMATCH │ 2026-07-26 10:54:00    │ 2825           │ 2889             │ 64        │ MISMATCH │
+ 7. │   1 │ MISMATCH │ 2026-07-26 11:05:00    │ 2732           │ 2656             │ -76       │ MISMATCH │
+ 8. │   1 │ MISMATCH │ 2026-07-26 11:09:00    │ 2547           │ 2487             │ -60       │ MISMATCH │
+ 9. │   1 │ MISMATCH │ 2026-07-26 11:16:00    │ 2026           │ 1952             │ -74       │ MISMATCH │
+10. │   1 │ MISMATCH │ 2026-07-26 11:19:00    │ 1780           │ 1695             │ -85       │ MISMATCH │
+11. │   1 │ MISMATCH │ 2026-07-26 11:20:00    │ 1656           │ 1581             │ -75       │ MISMATCH │
+12. │   1 │ MISMATCH │ 2026-07-26 11:21:00    │ 1522           │ 1415             │ -107      │ MISMATCH │
+13. │   1 │ MISMATCH │ 2026-07-26 11:22:00    │ 1409           │ 1324             │ -85       │ MISMATCH │
+14. │   1 │ MISMATCH │ 2026-07-26 11:23:00    │ 1273           │ 1162             │ -111      │ MISMATCH │
+15. │   1 │ MISMATCH │ 2026-07-26 11:24:00    │ 1162           │ 1067             │ -95       │ MISMATCH │
+16. │   1 │ MISMATCH │ 2026-07-26 11:25:00    │ 1033           │ 912              │ -121      │ MISMATCH │
+17. │   1 │ MISMATCH │ 2026-07-26 11:26:00    │ 883            │ 762              │ -121      │ MISMATCH │
+18. │   1 │ MISMATCH │ 2026-07-26 11:27:00    │ 748            │ 616              │ -132      │ MISMATCH │
+19. │   1 │ MISMATCH │ 2026-07-26 11:28:00    │ 593            │ 471              │ -122      │ MISMATCH │
+20. │   1 │ MISMATCH │ 2026-07-26 11:29:00    │ 428            │ 250              │ -178      │ MISMATCH │
+21. │   1 │ MISMATCH │ 2026-07-26 11:30:00    │ 197            │ 4                │ -193      │ MISMATCH │
+22. │   2 │ sample   │ 2026-07-14 15:43:00    │ 1              │ 0                │ -1        │ MISMATCH │
+23. │   2 │ sample   │ 2026-07-16 12:35:00    │ 0              │ 0                │ 0         │ PASS     │
+24. │   2 │ sample   │ 2026-07-17 08:56:00    │ 0              │ 0                │ 0         │ PASS     │
+25. │   2 │ sample   │ 2026-07-26 10:56:00    │ 2917           │ 2950             │ 33        │ MISMATCH │
+26. │   2 │ sample   │ 2026-07-26 11:30:00    │ 197            │ 4                │ -193      │ MISMATCH │
+    └─────┴──────────┴────────────────────────┴────────────────┴──────────────────┴───────────┴──────────┘
 
 == 2. MODEL COMPARISON — the same minutes under three definitions
 
    ┌──────────────minute─┬─session_aware─┬─stateless─┬─naive_session_span─┬─naive_overcount─┬─pct_overcount─┐
-1. │ 2026-07-14 15:43:00 │             1 │         1 │                  1 │               0 │             0 │
-2. │ 2026-07-26 06:09:00 │            16 │        13 │                 25 │               9 │            36 │
-3. │ 2026-07-26 10:56:00 │          2887 │      2894 │               3708 │             821 │          22.1 │
-4. │ 2026-07-26 11:10:00 │          2450 │      2397 │               3163 │             713 │          22.5 │
-5. │ 2026-07-26 11:31:00 │             5 │         0 │                  0 │              -5 │          -inf │
+1. │ 2026-07-26 06:09:00 │            14 │        13 │                 25 │              11 │            44 │
+2. │ 2026-07-26 10:56:00 │          2950 │      2894 │               3708 │             758 │          20.4 │
+3. │ 2026-07-26 11:10:00 │          2460 │      2397 │               3163 │             703 │          22.2 │
+4. │ 2026-07-26 11:31:00 │             0 │         0 │                  0 │               0 │           nan │
    └─────────────────────┴───────────────┴───────────┴────────────────────┴─────────────────┴───────────────┘
 
 == 3. HEADLINE — total counted watch time
 
 Row 1:
 ──────
-session_aware_hours: 1949.3
+session_aware_hours: 1760.2
 naive_span_hours:    2976.9
-pct_excluded:        34.5
+pct_excluded:        40.9
 
 Note on 2026-07-26 11:31: naive reads 0 while the model reads 5. That is TAIL_S —
 the model credits one cadence past the last event, which at the very end of the
