@@ -1,0 +1,37 @@
+Q29 EXPERIMENT 2 — realistic late-arrival batch (rest of stream >= 2026-07-26 10:56:00)
+db sonyliv_q29vis · 2026-08-01T17:44:49Z
+baseline (3 reads):  [probe A: 10:54 minute/hour-peak/users | probe B: 11:30 same]
+2026-08-01 17:44:50.171	2825	2825	2737	0	0	0
+2026-08-01 17:44:50.596	2825	2825	2737	0	0	0
+2026-08-01 17:44:51.718	2825	2825	2737	0	0	0
+
+landing the remaining stream…
+loaded: 905558 events · 10866 sessions (cumulative)
+settling 6s…
+
+publishing…
+  == run 1785606301247  ·  7723 session(s) claimed  ·  cursor 2026-08-01 17:40:52.351 -> 2026-08-01 17:44:53.252
+     negated   7194 corrective delta rows   618 ms
+     derived   21946 intervals   1480 ms   (window 2026-07-26 03:54:23.000 .. 2026-07-26 11:30:04.847)
+     pruned    superseded intervals   1487 ms
+     emitted   20385 delta rows   856 ms
+     hours     23654 hour-cube rows re-derived   640 ms
+     users     83658 user-minute buckets re-derived   718 ms
+     committed cursor now 2026-08-01 17:44:53.252
+
+post-run (3 reads):
+2026-08-01 17:45:32.150	2825	2917	2737	197	2873	191
+2026-08-01 17:45:32.633	2825	2917	2737	197	2873	191
+2026-08-01 17:45:33.152	2825	2917	2737	197	2873	191
+
+poller samples: 52  ->  evidence/publish-visibility/20-poll-realistic.tsv
+
+phase timings from system.query_log (server-side truth):
+   ┌─phase──┬────────────────────started─┬───────────────────finished─┬─dur_ms─┐
+1. │ negate │ 2026-08-01 17:45:05.038167 │ 2026-08-01 17:45:05.240167 │    202 │
+2. │ derive │ 2026-08-01 17:45:10.586966 │ 2026-08-01 17:45:11.629966 │   1043 │
+3. │ prune  │ 2026-08-01 17:45:16.367007 │ 2026-08-01 17:45:17.394007 │   1027 │
+4. │ emit   │ 2026-08-01 17:45:18.396685 │ 2026-08-01 17:45:18.844685 │    448 │
+5. │ hours  │ 2026-08-01 17:45:22.424804 │ 2026-08-01 17:45:22.639804 │    215 │
+6. │ users  │ 2026-08-01 17:45:25.825037 │ 2026-08-01 17:45:26.132037 │    307 │
+   └────────┴────────────────────────────┴────────────────────────────┴────────┘

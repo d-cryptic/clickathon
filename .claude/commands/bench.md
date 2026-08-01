@@ -2,6 +2,9 @@
 description: Run the benchmark query set and capture latency + bytes read as evidence.
 ---
 Run every query in `evidence/benchmark/*.sql` against the current serving layer and capture evidence.
+The whole procedure below is scripted: `tools/bench.sh` does it end to end and writes
+`evidence/bench.txt` + `evidence/benchmark/results/`. Warm the Cloud service first — it
+auto-suspends, and the first query after idle has been measured at 29.3 s.
 
 For each query:
 - run it 3 times, report median duration

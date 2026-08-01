@@ -1,0 +1,12 @@
+    ┌─platform──────────┬─concurrent─┐
+ 1. │ ANDROID_PHONE     │       1837 │
+ 2. │ IPHONE            │        355 │
+ 3. │ SONY_ANDROID_TV   │        275 │
+ 4. │ JIO_ANDROID_TV    │        208 │
+ 5. │ Mweb              │         57 │
+ 6. │ SAMSUNG_HTML_TV   │         53 │
+ 7. │ ANDROID_TAB       │         46 │
+ 8. │ XIAOMI_ANDROID_TV │         33 │
+ 9. │ FIRE_TV           │         31 │
+10. │ LG_HTML_TV        │         22 │
+    └───────────────────┴────────────┘

@@ -38,3 +38,7 @@ evidence/*.png
 # --- session context: local, not shared. Context-aware but never committed. ---
 CLAUDE.local.md
 .claude/context/
+
+# agent scratch — session-local, never committed
+scratchpad/
+sqlite_mcp_server.db
