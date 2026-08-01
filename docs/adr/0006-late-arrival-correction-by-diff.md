@@ -8,7 +8,20 @@
 > serving layer needs no `UPDATE`, no mutation, and no rebuild. Cost scales with stragglers, not with
 > history. Status: proposed, 2026-08-01.
 
-**Status** Proposed · 2026-08-01
+**Status** **Accepted and live** · proposed 2026-08-01, implemented 2026-08-01 by
+[ADR 0013](0013-continuous-publication-by-incremental-finalizer.md)
+
+> **IMPLEMENTED, with one correction and one promotion.**
+> *Promotion:* this is no longer the exception path for stragglers older than `W` — it is the **only**
+> update path, applied to every touched session on every batch. That is what let ADR 0013 delete the
+> two-tier split entirely.
+> *Correction:* the "Requires a trigger" consequence below proposed finding stragglers by comparing
+> per-session max event timestamps against the previous run. That is a `GROUP BY` over all of `ev_raw`
+> on every batch — O(history) per run, the shape the problem statement calls out. Replaced by an
+> incremental MV (`mv_session_dirty`) that records what each INSERT touched, which is O(arrivals).
+> Measured live: one straggler 46 minutes behind the watermark, corrected in **3.4 s**, reading
+> **11.6%** of `ev_raw`, landing byte-identical to a full rebuild on all 1,579 minutes —
+> `evidence/publish.txt`.
 
 ## Context
 

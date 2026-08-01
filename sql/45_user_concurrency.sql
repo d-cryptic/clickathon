@@ -6,7 +6,7 @@
 -- a time, so +1/-1 deltas are additive and a running sum is a valid count. A
 -- USER is not exclusive that way: one user can run several sessions at once
 -- (measured on session_intervals — see verification below, 772 users with >1
--- concurrent-capable session, one outlier user with 297 sessions total).
+-- concurrent-capable session, one outlier user with 301 sessions total).
 -- Summing per-session deltas grouped by user_id would count that user once per
 -- overlapping session — the same 9x over-count class CONVENTIONS.md already
 -- warns about for "never sum a distinct count". User concurrency is inherently
@@ -65,14 +65,26 @@ SETTINGS min_bytes_for_wide_part = 0;
 -- cross-block state, so (unlike interval DERIVATION itself, ADR 0004) this is
 -- a legitimate streaming MV.
 --
--- Re-processing: session_intervals is ReplacingMergeTree(interval_end), so a
--- late heartbeat that EXTENDS an interval arrives as a new inserted row with
--- the same (video_session_id, interval_start) and a longer interval_end. The
--- MV fires again on that new row's raw insert (MVs see inserted blocks, not
--- the post-merge/FINAL view) and adds only the NEWLY covered minutes' worth of
--- user_id to the uniqExact state. Because uniqExact state merging is a SET
--- UNION, re-adding a user_id already present in a bucket is a no-op — safe by
+-- Re-processing: session_intervals is ReplacingMergeTree(build_version) — a
+-- MONOTONIC build counter, since 388a845. (It was ReplacingMergeTree(interval_end),
+-- which assumed re-derivation only ever EXTENDS an interval; it does not — a
+-- provisional interval carries TAIL_S=60s of grace and the completed derivation
+-- can place the true end EARLIER, so the stale longer row outranked the correct
+-- one permanently. Measured: 316 intervals too long, 315 stuck at is_open=1, +37
+-- on the peak minute. See evidence/truncation.txt and docs/TESTS.md.)
+--
+-- A re-derived interval therefore arrives as a new inserted row with the same
+-- (video_session_id, interval_start) and a HIGHER build_version, whether it grew
+-- or shrank. The MV fires again on that new row's raw insert (MVs see inserted
+-- blocks, not the post-merge/FINAL view) and adds that row's covered minutes'
+-- worth of user_id to the uniqExact state. Because uniqExact state merging is a
+-- SET UNION, re-adding a user_id already present in a bucket is a no-op — safe by
 -- construction, unlike the delta model where a replay doubles every number.
+--
+-- Note the asymmetry a shrinking interval creates: the set union cannot RETRACT
+-- a user from a minute the superseded row had covered. Over-coverage of that kind
+-- is bounded by the tail grace and is not corrected here; the delta model handles
+-- it by ADR 0006 negate-and-re-emit instead.
 -- ---------------------------------------------------------------------------
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_user_minute TO cc_user_minute AS
 SELECT
