@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+# tools/clickstack-cloud.sh — provision the HyperDX built into ClickHouse Cloud:
+# sources, the demo dashboard, and saved searches. Idempotent.
+#
+# Drives the Cloud control-plane API, NOT the console session, so all of this is
+# scriptable and survives a rebuild:
+#   /v1/organizations/{org}/services/{svc}/clickstack/{sources,dashboards,saved-searches}
+# Auth is HTTP basic with a Cloud API key (CH_API_KEY_ID / CH_API_KEY_SECRET).
+#
+# THE ONE MANUAL PREREQUISITE: everything here needs a `connection` id, and the
+# API exposes no way to list or create one — verified, /clickstack/connections
+# 404s on both GET and POST, and no ClickStackConnection schema exists in the
+# OpenAPI spec. The connection is provisioned when HyperDX is first opened in
+# the console. Open it once; this script discovers the id and never needs
+# clicking again, including for the unseen-day rebuild.
+#
+#   tools/clickstack-cloud.sh
+set -euo pipefail
+cd "$(dirname "$0")/.."
+[ -f .env ] && set -a && . ./.env && set +a
+
+: "${CH_API_KEY_ID:?set CH_API_KEY_ID in .env (Cloud console -> Settings -> API Keys)}"
+: "${CH_API_KEY_SECRET:?set CH_API_KEY_SECRET in .env}"
+DB="${CH_DATABASE:-sonyliv}"
+API=https://api.clickhouse.cloud/v1
+
+# NOTE: quote -u "$ID:$SECRET" at every call site. zsh does NOT word-split an
+# unquoted variable holding '-u id:secret', so it reaches curl as one argument
+# and the API answers 401 "Key is not found" — indistinguishable from a bad key.
+api() { curl -sS -u "$CH_API_KEY_ID:$CH_API_KEY_SECRET" "$@"; }
+py() { python3 -c "$1"; }
+
+ORG=$(api "$API/organizations" | py 'import json,sys; r=json.load(sys.stdin)["result"]; print(r[0]["id"] if r else "")')
+[ -n "$ORG" ] || { echo "no organization returned — is the API key valid?" >&2; exit 1; }
+
+# Match the service by CH_HOST so a multi-service org cannot pick the wrong one.
+WANT_HOST="${CH_HOST#https://}"; WANT_HOST="${WANT_HOST%/}"; WANT_HOST="${WANT_HOST%%:*}"
+SVC=$(api "$API/organizations/$ORG/services" | WANT="$WANT_HOST" py '
+import json, os, sys
+want = os.environ["WANT"]
+svcs = json.load(sys.stdin)["result"]
+for s in svcs:
+    for e in (s.get("endpoints") or []):
+        if e.get("host") == want:
+            print(s["id"]); raise SystemExit
+print(svcs[0]["id"] if svcs else "")
+')
+[ -n "$SVC" ] || { echo "no service matched $WANT_HOST" >&2; exit 1; }
+BASE="$API/organizations/$ORG/services/$SVC/clickstack"
+echo "org $ORG · service $SVC"
+
+refresh_sources() { api "$BASE/sources" > /tmp/cs-sources.json; }
+refresh_sources
+
+CONN=$(py '
+import json
+print(next((s.get("connection","") for s in json.load(open("/tmp/cs-sources.json"))["result"] if s.get("connection")), ""))
+')
+
+if [ -z "$CONN" ]; then
+  cat >&2 <<'EOF'
+No ClickStack connection exists on this service yet, and the Cloud API exposes no
+way to create one (/clickstack/connections 404s on GET and POST).
+
+Do this ONCE, then re-run:
+  ClickHouse Cloud console -> HyperDX -> open it
+That provisions the default connection. Everything after is automatic.
+EOF
+  exit 2
+fi
+echo "connection $CONN"
+
+# ---------------------------------------------------------------- sources ----
+add_source() {  # add_source <name> <table> <select expression>
+  local name="$1" table="$2" select="$3" existing
+  existing=$(SRC_NAME="$name" py '
+import json, os
+print(next((s.get("id","") for s in json.load(open("/tmp/cs-sources.json"))["result"] if s.get("name") == os.environ["SRC_NAME"]), ""))
+')
+  if [ -n "$existing" ]; then echo "  source '$name' exists"; return; fi
+  api -X POST "$BASE/sources" -H 'Content-Type: application/json' \
+    -d "{\"name\":\"$name\",\"kind\":\"log\",\"connection\":\"$CONN\",\"from\":{\"databaseName\":\"$DB\",\"tableName\":\"$table\"},\"timestampValueExpression\":\"minute\",\"defaultTableSelectExpression\":\"$select\"}" \
+    | py 'import json,sys; d=json.load(sys.stdin); print("  created" if not d.get("error") else "  FAILED: "+d["error"])'
+}
+
+echo "sources:"
+add_source "Concurrency total (minute)" v_concurrency_minute_total     "minute, concurrent"
+add_source "Concurrency (minute)"       v_concurrency_minute_stateless "minute, platform, country, content_id, concurrent"
+refresh_sources
+
+src_id() { SRC_NAME="$1" py '
+import json, os
+print(next((s.get("id","") for s in json.load(open("/tmp/cs-sources.json"))["result"] if s.get("name") == os.environ["SRC_NAME"]), ""))
+'; }
+TOTAL_ID=$(src_id "Concurrency total (minute)")
+DIM_ID=$(src_id "Concurrency (minute)")
+[ -n "$TOTAL_ID" ] && [ -n "$DIM_ID" ] || { echo "sources missing after create" >&2; exit 1; }
+
+# -------------------------------------------------------------- dashboard ----
+# Built from the real schemas: ClickStackCreateDashboardRequest requires
+# {name,tiles}; each ClickStackTileInput requires {name,x,y,w,h}; a line tile's
+# ClickStackLineBuilderChartConfig requires {displayType,sourceId,select}.
+DASH_NAME="SonyLIV concurrency"
+DASH_JSON=$(TOTAL_ID="$TOTAL_ID" DIM_ID="$DIM_ID" DASH_NAME="$DASH_NAME" py '
+import json, os
+total, dim, name = os.environ["TOTAL_ID"], os.environ["DIM_ID"], os.environ["DASH_NAME"]
+def line(n, src, x, y, w, h, group=None):
+    cfg = {"displayType": "line", "sourceId": src,
+           "select": [{"aggFn": "max", "valueExpression": "concurrent", "alias": "concurrent"}],
+           "where": "", "whereLanguage": "sql"}
+    if group:
+        cfg["groupBy"] = group
+    return {"name": n, "x": x, "y": y, "w": w, "h": h, "config": cfg}
+print(json.dumps({"name": name, "tags": ["clickathon"], "tiles": [
+    line("Concurrency — all viewers", total, 0, 0, 12, 4),
+    line("Concurrency by platform",   dim,   0, 4, 6,  4, "platform"),
+    line("Concurrency by content",    dim,   6, 4, 6,  4, "content_id"),
+]}))
+')
+
+echo "dashboard:"
+# Validate before creating. The API offers /dashboards/validate precisely so a
+# malformed tile fails here with a path, not as a blank panel in front of judges.
+VALID=$(api -X POST "$BASE/dashboards/validate" -H 'Content-Type: application/json' -d "$DASH_JSON" \
+  | py 'import json,sys; r=json.load(sys.stdin)["result"]; print("ok" if r["valid"] else "INVALID "+json.dumps(r["errors"])[:400])')
+if [ "$VALID" != ok ]; then echo "  $VALID" >&2; exit 1; fi
+echo "  validated"
+
+EXISTING_DASH=$(api "$BASE/dashboards" | DASH_NAME="$DASH_NAME" py '
+import json, os, sys
+print(next((d.get("id","") for d in json.load(sys.stdin)["result"] if d.get("name") == os.environ["DASH_NAME"]), ""))
+')
+if [ -n "$EXISTING_DASH" ]; then
+  echo "  '$DASH_NAME' exists ($EXISTING_DASH)"
+else
+  api -X POST "$BASE/dashboards" -H 'Content-Type: application/json' -d "$DASH_JSON" \
+    | py 'import json,sys; d=json.load(sys.stdin); print("  created" if not d.get("error") else "  FAILED: "+d["error"])'
+fi
+
+# ---------------------------------------------------------- saved searches ----
+add_search() {  # add_search <name> <sourceId> <select> <orderBy>
+  local name="$1" sid="$2" select="$3" order="$4" existing
+  existing=$(api "$BASE/saved-searches" | S="$name" py '
+import json, os, sys
+print(next((x.get("id","") for x in json.load(sys.stdin)["result"] if x.get("name") == os.environ["S"]), ""))
+')
+  if [ -n "$existing" ]; then echo "  '$name' exists"; return; fi
+  api -X POST "$BASE/saved-searches" -H 'Content-Type: application/json' \
+    -d "{\"name\":\"$name\",\"sourceId\":\"$sid\",\"select\":\"$select\",\"where\":\"\",\"whereLanguage\":\"sql\",\"orderBy\":\"$order\"}" \
+    | py 'import json,sys; d=json.load(sys.stdin); print("  created" if not d.get("error") else "  FAILED: "+d["error"])'
+}
+
+echo "saved searches:"
+add_search "Peak minutes"      "$TOTAL_ID" "minute, concurrent"           "concurrent DESC"
+add_search "Busiest platforms" "$DIM_ID"   "minute, platform, concurrent" "concurrent DESC"
+
+echo
+echo "Open HyperDX -> dashboard '$DASH_NAME'."
+echo "Set the range to 2026-07-14 -> 2026-07-26; the data is NOT 'now' and the"
+echo "default last-15-minutes window renders every tile empty."

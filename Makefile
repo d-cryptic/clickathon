@@ -98,11 +98,16 @@ stack-up:
 stack-down:
 	docker compose --profile oss down
 
-## clickstack: bootstrap the team, then register our concurrency sources
+## clickstack: self-hosted — bootstrap the team, then register our sources
 .PHONY: clickstack
 clickstack:
 	tools/clickstack-bootstrap.sh
 	tools/clickstack-sources.sh
+
+## clickstack-cloud: hosted HyperDX — sources, dashboard and saved searches
+.PHONY: clickstack-cloud
+clickstack-cloud:
+	tools/clickstack-cloud.sh
 
 ## sql-local: apply sql/*.sql to the local container
 .PHONY: sql-local

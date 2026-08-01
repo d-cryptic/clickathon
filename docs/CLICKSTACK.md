@@ -5,7 +5,7 @@
 > custom frontend. **Two ways to run it. We use Option B:** HyperDX built into ClickHouse Cloud
 > (confirm via the `hyperdx-alert-internal` user) reads `sonyliv` directly — no connection string, no
 > IP allowlist. It **is** scriptable through the Cloud control-plane API
-> (`tools/clickstack-cloud-sources.sh`); the only manual step is opening HyperDX once, because a
+> (`tools/clickstack-cloud.sh`); the only manual step is opening HyperDX once, because a
 > source needs a `connection` id and no API creates one. **Option A** is the local all-in-one
 > (`make stack-up && make clickstack`). Both chart `sql/20_views.sql`, because no chart tool can read
 > an `AggregateFunction` column. Data ends **2026-07-26**: the default 15-minute window renders empty.
@@ -45,7 +45,7 @@ The local `cs` container and `tools/clickstack-sources.sh` are only for Option A
 **It IS scriptable** — via the Cloud control-plane API, not the console session:
 `/v1/organizations/{org}/services/{svc}/clickstack/{sources,dashboards,alerts,saved-searches,...}`,
 HTTP basic with a Cloud API key (`CH_API_KEY_ID` / `CH_API_KEY_SECRET` in `.env`). Run
-`tools/clickstack-cloud-sources.sh`.
+`tools/clickstack-cloud.sh`, which provisions sources, the demo dashboard and saved searches.
 
 **One manual prerequisite, once.** A source needs a `connection` id, and the API exposes no way to
 list or create connections — `/clickstack/connections` 404s; only sources, dashboards, alerts,
@@ -75,7 +75,8 @@ Then set the time range to **2026-07-14 → 2026-07-26** before concluding anyth
 | Script | Job |
 |---|---|
 | `tools/clickstack-bootstrap.sh` | registers the team and prints `CLICKSTACK_INGESTION_KEY`. OTLP 4317/4318 do **not** bind until a team exists |
-| `tools/clickstack-sources.sh` | registers a ClickHouse connection to Cloud + sources over the concurrency views. Idempotent |
+| `tools/clickstack-sources.sh` | self-hosted: registers a ClickHouse connection + sources. Idempotent |
+| `tools/clickstack-cloud.sh` | hosted: sources + dashboard + saved searches over the Cloud API. Idempotent |
 
 ## The sources
 
@@ -106,6 +107,18 @@ POST /clickhouse-proxy?query=... with header x-hyperdx-connection-id
    elapsed 0.050s · rows_read 91,292 · bytes_read 18.6 MB
 ```
 
+## The dashboard
+
+`tools/clickstack-cloud.sh` creates **SonyLIV concurrency** with three line tiles: all viewers, by
+platform, by content. It runs the payload through `POST /clickstack/dashboards/validate` *before*
+creating, so a malformed tile fails with a JSON path rather than as a blank panel mid-demo.
+
+Schema notes, from the spec rather than guesswork: `ClickStackCreateDashboardRequest` requires
+`{name, tiles}`; each `ClickStackTileInput` requires `{name, x, y, w, h}`; a line tile's
+`ClickStackLineBuilderChartConfig` requires `{displayType, sourceId, select}`. There is also a
+raw-SQL variant (`ClickStackLineRawSqlChartConfig`) needing `{configType:"sql", connectionId,
+sqlTemplate, displayType}` if a tile ever outgrows the builder.
+
 ## Gotchas
 
 - **Empty chart?** Time range. The data is July 2026, not now. This costs everyone ten minutes once.
@@ -115,5 +128,10 @@ POST /clickhouse-proxy?query=... with header x-hyperdx-connection-id
 - The `cs` container needs a TTY or it boots fully and then exits 129 — `tty: true` in compose.
 - ClickStack bundles its **own** ClickHouse 26.5.6 for otel data. That is not our database; do not
   build the project on it. Our connection points at Cloud explicitly.
+- The Cloud API has **no connections endpoint** — `/clickstack/connections` 404s on GET and POST and
+  no `ClickStackConnection` schema exists. Opening HyperDX once in the console is unavoidable.
+- `-u "$ID:$SECRET"` must be **quoted at the call site**. zsh does not word-split an unquoted
+  variable holding `-u id:secret`, so curl gets one argument and the API returns
+  `401 "Key is not found"` — which reads exactly like a bad key and sends you debugging the wrong thing.
 - `/clickhouse-proxy` requires **POST** with the query in the URL. GET returns 405; a missing
   `x-hyperdx-connection-id` header returns a Zod validation error.
