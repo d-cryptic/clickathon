@@ -3,12 +3,13 @@
 > **Summary:** Click-a-thon India 2026 · SonyLIV **foreground-only concurrency**. The pipeline is
 > built end to end on ClickHouse Cloud (`sonyliv`) and the correctness gate **passes**: concurrency
 > recomputed from `ev_raw` matches the serving layer exactly on five sampled minutes, peak **2,887 @
-> 2026-07-26 10:56**. Charts are live in HyperDX. Two **known, unfixed** defects block the "absorbs
-> late data" claim, and three required deliverables from a spec file we read late are still missing.
-> Read [What is NOT done](#what-is-not-done) before believing anything is finished. Rebuild with
-> `make model`; prove it with `make reconcile`.
+> 2026-07-26 10:56**. Charts are live in HyperDX. Session, **user** and **content** concurrency all
+> serve off the delta layer, with rolling and tumbling windows. The absorption bug is **fixed**. What
+> remains is one architectural gap — aggregates are **batch-rebuilt, not continuously updated** — plus
+> 7 of 10 filter dimensions dropped at derivation. Read [What is NOT done](#what-is-not-done) before
+> believing anything is finished. Rebuild with `make model`; prove it with `make reconcile`.
 
-**Last verified:** 2026-08-01 · commits through `5db36ed` · ClickHouse Cloud 26.2.1.525
+**Last verified:** 2026-08-01 · commits through `4a89399` · ClickHouse Cloud 26.2.1.525
 
 ---
 
@@ -89,6 +90,18 @@ ev_raw  905,558 events · 10,866 sessions · 2026-07-14 15:43 -> 2026-07-26 11:3
   ├─▶ cc_hour_agg  26,162 rows         peak + integral per hour, 8-level cube
   │      peak is NOT summable across dimensions; it IS maxable over time
   │
+  ├─▶ cc_user_minute                   USER concurrency — uniqExact state, NOT deltas
+  │      a user can hold several concurrent sessions (72 do, at the peak),
+  │      so summing deltas by user_id would double count exactly those
+  │
+  ├─▶ dict_content + v_concurrency_minute_{title,video_type,category}
+  │      COMPLEX_KEY_HASHED — a plain HASHED dictionary cannot dictGet a
+  │      NEGATIVE key, and content_dim has one
+  │
+  ├─▶ v_cc_rolling_* / v_cc_tumbling_* / v_cc_window_range
+  │      RANGE frames, not ROWS: the delta layer stores rows only where
+  │      concurrency CHANGES, so "5 rows back" is not "5 minutes back"
+  │
   └─▶ cc_minute_stateless  91,292 rows session-INDEPENDENT baseline (the comparison deliverable)
 ```
 
@@ -124,37 +137,49 @@ Everything here was run, not reasoned about.
 | Charts render real data | HyperDX `clickstack_timeseries`: 61 → **2,887** → 7, 28 ms |
 | Load is exact | `ev_raw` 905,558 = source rows; `content_dim` 33,464 |
 | From-scratch rebuild is deterministic | isolated DB reproduces production exactly |
+| User concurrency correct | peak 2,815 vs session 2,887; `uniqExactMerge` 9,517 = 9,517 distinct users |
+| Content concurrency correct | hour-peak reconcile, **0** mismatches over 6,764 rows |
+| Rolling/tumbling windows correct | vs brute-force self-join, **0** mismatches at 5/15/60 min |
+| Duplicates are inert | full derivation run raw vs deduped: identical intervals, **0** of 3,725 minutes differ |
+| Absorption converges (after the fix) | incremental = clean rebuild, row for row, all 1,578 minutes |
 
 ---
 
 ## 5. What is NOT done
 
-### Two known defects — both proven, neither fixed
+### Two defects — found by test, both now FIXED
 
-1. **Incremental absorption does not converge.** `tools/truncation-test.sh` cuts the stream at the
-   peak, absorbs the withheld 447,081 events, and overcounts the peak minute by **37 (2,924 vs
-   2,887, +1.3%)**. Cause: `session_intervals` is `ReplacingMergeTree(interval_end)`, which assumes
-   re-derivation only ever *extends* an interval. It doesn't — 316 intervals end up to 60 s too long
-   and 315 stick at `is_open=1` forever. **Fix proven**: version on a monotonic `build_version`
-   instead; converges on all 1,578 minutes.
-2. **`cc_minute_delta.starts/ends` are `UInt64`** and silently wrap when a corrective row is negated
-   (`max()` returns 1.8e19). Must be `Int64`.
+1. **Incremental absorption did not converge** — overcounted the peak minute by 37 (2,924 vs 2,887).
+   `session_intervals` was `ReplacingMergeTree(interval_end)`, which assumes re-derivation only ever
+   *extends* an interval. It doesn't: 316 intervals ran up to 60 s too long, 315 stuck at
+   `is_open=1`. Now versioned on a monotonic `build_version` — incremental equals a clean rebuild on
+   all 1,578 minutes.
+2. **`cc_minute_delta.starts/ends` were `UInt64`** and wrapped when a corrective row was negated
+   (`max()` returned 1.8e19, `starts` inflated 22%). Now `Int64`.
 
-Both are schema changes to the graded database, not yet applied.
+Both applied to the graded database, gate re-run green.
 
 ### Required deliverables still missing
 
 Found late — `tools/fetch_data.sh` originally pulled only the CSVs, so
 `README_START_HERE.md` and `dataset_details.md` went unread. The fetcher now syncs all three.
 
-| Missing | Source |
-|---|---|
-| **Content-metadata enrichment** + content-level concurrency by title | README step 2 + core aggregation |
-| **User-level concurrency** — needs `uniqExact`, *not* deltas (a user can hold several sessions) | dataset_details |
-| **Time-window trend** — rolling/fixed windows | core aggregation |
-| **Dedup of repeated events** — 4,210 duplicate rows (0.46%) across 863 sessions | README step 3 |
-| **"Publish continuously updated aggregates"** — we batch-rebuild; only `mv_stateless` is a real MV | README step 4 — **the biggest architectural gap** |
-| Only **3 of 10** filter dimensions survive derivation | dataset_details ("should work even if dimensions increase") |
+| Item | Source | State |
+|---|---|---|
+| Content-metadata enrichment + concurrency by title | README step 2 | **done** |
+| User-level concurrency | dataset_details | **done** |
+| Time-window trend | core aggregation | **done** |
+| Dedup of repeated events | README step 3 | **proven unnecessary** — see below |
+| **"Publish continuously updated aggregates"** | README step 4 | **STILL MISSING — the biggest gap.** We batch-rebuild via `make model`; only `mv_stateless` and `mv_user_minute` are real MVs |
+| Only **3 of 10** filter dimensions survive derivation | dataset_details ("should work even if dimensions increase") | **still missing** — `app_version`, `audio_language`, `subtitle_language`, `player_version` are dropped in `30_build_intervals.sql` |
+| H7 OTLP self-instrumentation | ClickStack "meaningful integration" bar | nothing of ours emits OTLP; ClickStack is read-only charting |
+| Unseen-day dry run + evidence packaging | "no pipeline evidence, no credit" | not rehearsed |
+
+**On dedup:** the 4,210 duplicate rows are *provably inert* — the full derivation run raw vs
+deduplicated gives identical intervals and 0 of 3,725 minutes differ, because the model reads a
+session's events as a set of instants. One caveat: exactly one duplicate group is not a byte-identical
+replay — it differs in `subtitle_language` (`UNK` vs `OFF`). That is harmless only while
+`subtitle_language` is not a dimension, and `dataset_details` names it as one.
 
 ### Decisions only a human can make
 
