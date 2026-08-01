@@ -144,6 +144,20 @@ TARGET="$TARGET" APPLY_GRADED_DESTRUCTIVE="${REBUILD_GRADED:-}" tools/apply-sql.
 q "SELECT concat('   delta rows: ', toString(count()), '  opens ', toString(sum(starts)), '  closes ', toString(sum(ends))) FROM cc_minute_delta FORMAT TSVRaw"
 
 echo "== 4/6  cc_hour_agg (the hour tier, ADR 0003)"
+# A pre-ADR-0022 database has no `cube_level` column, and 50_hour_agg.sql's
+# CREATE is `IF NOT EXISTS` — so a truncate leaves the OLD shape in place and the
+# INSERT dies with "No such column cube_level". Same situation as cc_user_minute
+# above and the same answer: the cube is pure derived state rebuilt from
+# cc_minute_delta, so the migration IS the rebuild. ADR 0022 added the column and
+# did not add this step; found when the first authorised rebuild after it failed
+# at stage 4/6.
+HOUR_HAS_CUBE_LEVEL="$(q "SELECT count() FROM system.columns WHERE database = currentDatabase() AND table = 'cc_hour_agg' AND name = 'cube_level' FORMAT TSVRaw" | tr -d '[:space:]')"
+HOUR_EXISTS="$(q "SELECT count() FROM system.tables WHERE database = currentDatabase() AND name = 'cc_hour_agg' FORMAT TSVRaw" | tr -d '[:space:]')"
+if [ "$HOUR_EXISTS" = "1" ] && [ "$HOUR_HAS_CUBE_LEVEL" = "0" ]; then
+  echo "   cc_hour_agg has no cube_level (pre-ADR-0022) — dropping and recreating."
+  echo "   Derived state only; sql/50_hour_agg.sql rebuilds it from cc_minute_delta below."
+  q "DROP TABLE cc_hour_agg" >/dev/null
+fi
 q "TRUNCATE TABLE IF EXISTS cc_hour_agg" >/dev/null   # IF EXISTS: 50_hour_agg.sql creates it just below
 TARGET="$TARGET" APPLY_GRADED_DESTRUCTIVE="${REBUILD_GRADED:-}" tools/apply-sql.sh sql/50_hour_agg.sql >/dev/null
 q "SELECT concat('   hour rows: ', toString(count()), '  peak ', toString(max(peak))) FROM cc_hour_agg FINAL WHERE platform='*' AND country='*' AND content_id=-1 FORMAT TSVRaw"
