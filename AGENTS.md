@@ -39,7 +39,8 @@ what is verified, what is broken, and what is still missing, in one page.
 | Know what is already **verified** vs assumed | [docs/VERIFIED.md](docs/VERIFIED.md) ← **read before trusting any ClickHouse claim** |
 | **Answer "how does this behave at 100×?"** | [evidence/scale.txt](evidence/scale.txt) — measured at 1×/10×/100×, and what breaks first. Regenerate with `tools/scale-test.sh` |
 | Record a design decision | [docs/adr/](docs/adr/) |
-| **Understand the model in depth, with diagrams** | [docs/artifacts/](docs/artifacts/) — open the newest `.html` in a browser |
+| **Present at a mentor checkpoint** | [docs/artifacts/2026-08-01-mentor-checkpoint.html](docs/artifacts/2026-08-01-mentor-checkpoint.html) — 11 diagrams: what we show, explain, and need answered |
+| **Understand the model in depth, with diagrams** | [docs/artifacts/](docs/artifacts/) — the 4-part deep dive: `deep-1-data` · `deep-2-model` · `deep-3-correctness` · `deep-4-scale-ops` |
 | Know what we must **ask a mentor** (and what we assumed meanwhile) | [docs/MENTOR_QUESTIONS.md](docs/MENTOR_QUESTIONS.md) ← **every unanswered one is a silent-failure risk** |
 | **Ask a mentor the questions that carry measured evidence** | [doubts/](doubts/) — evidence + exact wording + a decision table per answer. `02` is worth **9.7%** of our headline number |
 | **What happened in the last session, and every bug it found** | [docs/SESSION-2026-08-01.md](docs/SESSION-2026-08-01.md) |
