@@ -30,6 +30,45 @@ else
   FILES=(sql/*.sql)
 fi
 
+die() { printf 'tools/apply-sql.sh: %s\n' "$*" >&2; exit 1; }
+
+# ── Destructive DDL against the graded database must be deliberate ──────────
+# Placed HERE, not at argument-parsing time, because FILES only defaults to
+# sql/*.sql just above — a guard before that point would have waved through the
+# single most dangerous invocation, a bare `TARGET=cloud tools/apply-sql.sh`.
+#
+# On 2026-08-01 a rebuild on a stale base overwrote the graded answers with
+# pre-ADR-0009 SQL and the service served two model generations for two hours.
+# The tooling never objected, because it never asked.
+#
+# Only DROP and TRUNCATE are gated. CREATE and CREATE OR REPLACE are how views
+# and UDFs are legitimately applied to `sonyliv`, and gating those would turn
+# this into ceremony people learn to route around. Local is never gated: the
+# graded database lives only on Cloud.
+GRADED_DB="${GRADED_DB:-sonyliv}"
+if [ "$TARGET" = cloud ] && [ "${CH_DATABASE:-}" = "$GRADED_DB" ] \
+   && [ "${APPLY_GRADED_DESTRUCTIVE:-}" != yes ]; then
+  for f in "${FILES[@]}"; do
+    [ -f "$f" ] || continue
+    # Strip `--` comments first: ADR 0010's own commentary QUOTES a DROP, and a
+    # guard that greps comments as code blocks a clean run. The unseen-day
+    # rehearsal hit exactly that (finding R2).
+    if sed 's/--.*//' "$f" | grep -qiE '(^|[[:space:];])(DROP|TRUNCATE)[[:space:]]'; then
+      die "$f contains DROP or TRUNCATE and '$GRADED_DB' is the GRADED database.
+
+Applying it destroys answers we are scored on, and there is no undo. If that is
+genuinely what you want, confirm the tree is the one you mean to apply
+(git log --oneline -1 · git status --porcelain), then:
+
+  APPLY_GRADED_DESTRUCTIVE=yes TARGET=cloud tools/apply-sql.sh $f
+
+Otherwise point CH_DATABASE at a scratch database, or drop TARGET=cloud for
+local. CREATE and CREATE OR REPLACE are NOT gated — this stops destructive
+DDL only."
+    fi
+  done
+fi
+
 apply() {  # apply <file>
   local f="$1"
   if [ "$TARGET" = cloud ]; then
