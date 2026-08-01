@@ -141,17 +141,48 @@ WITH
             --   0 = PERMISSIVE — paused only until the next event of any kind,
             --       treating the unresolved pause as a blip.
             -- Flipping the constant at the top of this file is the whole change.
-            arraySort(arrayMap(
+            --
+            -- THE RESUME LOOKUP IS `>=`, NOT `>`, AND THAT IS A CORRECTNESS FIX.
+            -- `ts` is toUnixTimestamp(event_timestamp), i.e. TRUNCATED TO WHOLE
+            -- SECONDS, and 23.67% of adjacent event pairs already share the exact
+            -- same millisecond. A strict `>` therefore cannot see a resume that
+            -- lands in the SAME truncated second as its pause: the window ran on
+            -- to the NEXT resume, or — with no next resume — became unclosed and
+            -- ate the rest of the run. MEASURED on the real file:
+            --   pause events                                        27,340
+            --   with a resume in the same truncated second           2,697  (9.86%)
+            --   closed-pause time, strict >                          834.1 h
+            --   closed-pause time, inclusive >=                      792.6 h
+            --   raw over-exclusion from the tie                       41.5 h
+            -- Most of that raw over-exclusion overlaps time the GAP rule already
+            -- excludes, exactly as ADR 0007 found for the unclosed-pause question
+            -- (330 h estimated -> 99.3 h real). Clipped into runs and merged, the
+            -- model actually over-excluded 309.5 h -> 286.2 h, i.e. 23.3 h. See
+            -- ADR 0009 for the end-to-end effect on the PEAK.
+            -- `>=` yields a ZERO-LENGTH window (p, p) for a tie. The fold below
+            -- already absorbs it correctly — it pushes the segment up to p and
+            -- leaves the cursor at p, so no active time is lost and none is
+            -- invented — but it SPLITS one interval into two abutting ones at p.
+            -- Measured: 31,938 intervals with the split vs 30,323 without, both
+            -- at PEAK 2,917 / 1,978.1 h and both gate-green over 17,028 minutes.
+            -- The split is dropped, because an interval
+            -- boundary is also a DIMENSION ATTRIBUTION boundary (ADR 0008) and a
+            -- pause that resumed in its own second is not a boundary of anything.
+            -- Hence the outer arrayFilter(w -> w.2 > w.1, …).
+            -- The PERMISSIVE branch's lookup into `run` stays STRICT: the pause
+            -- event is itself in `run` at p, so `>=` there would match the pause
+            -- and collapse every permissive window to zero.
+            arrayFilter(w -> w.2 > w.1, arraySort(arrayMap(
                 p -> (p, least(
-                        if(arrayFirst(x -> x > p, resumes) = 0,
+                        if(arrayFirst(x -> x >= p, resumes) = 0,
                            if(UNCLOSED_PAUSE_TO_RUN_END = 1,
                               run[length(run)],
                               -- next event inside this run; run end if it is the last
                               if(arrayFirst(x -> x > p, run) = 0, run[length(run)], arrayFirst(x -> x > p, run))),
-                           arrayFirst(x -> x > p, resumes)),
+                           arrayFirst(x -> x >= p, resumes)),
                         run[length(run)])),
                 arrayFilter(p -> (p >= run[1]) AND (p < run[length(run)]), pauses)
-            )) AS pause_windows
+            ))) AS pause_windows
         FROM runs
     ),
 
