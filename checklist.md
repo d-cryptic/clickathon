@@ -128,14 +128,23 @@ event streams in real time to produce one or more aggregated tables."
 Judges will ask how the design behaves at 100×. Choices that only work at hackathon size (full
 rescans, per-minute explosion of all history) "will be treated as what they are."
 
-- [ ] High volume — millions of sessions / billions of events; state the growth law per tier.
+Measured at 1×, 10× and 100× — [evidence/scale.txt](evidence/scale.txt), regenerate with
+`tools/scale-test.sh`. 100× = 1,086,600 sessions / 89.85M events / peak concurrency 251,668.
+
+- [x] High volume — **1.09M sessions, 89.85M events**; growth law per tier is in the file
+      (serving reads are flat at the hour tier, delta rows stay 88.7% of the ADR 0008 ceiling).
 - [ ] High update rate — continuous heartbeats, frequent session mutation.
 - [ ] Concurrent queries during ingestion.
 - [ ] Long-running sessions (hours → days) — does hour-clipping hold?
-- [ ] Bursty traffic — mass simultaneous start/end.
+- [x] Bursty traffic — mass simultaneous start/end. The synthetic stream keeps the real
+      **85% of events inside two of 99 hours**, and the gate passes on all 6,799 minutes.
 - [ ] Late and out-of-order data.
 - [ ] Duplicate events — idempotency demonstrated.
 - [ ] Missing events — no heartbeat, no session end.
+- [x] **What breaks first, with the number.** The interval derivation's memory —
+      4.48 GiB of a 5.56 GiB server at 100×, `Code: 241` at default settings.
+      NOT part count (28 of 3,000), NOT merge throughput, NOT dictionary memory
+      (17.00 MiB at every scale). Thread cap to 2 → 2.59 GiB and *faster*.
 
 ---
 

@@ -754,6 +754,11 @@ same discipline applied to the *gate* found it passing on zero rows.
 | Unclosed-pause cost **at the peak** | conservative 2,887 vs permissive **3,018** — **+4.5%** | commit `cf80acc` |
 | `any()` was picking sentinels | **44.5%** audio / **47.6%** subtitle attributions wrong; **73.5%** at the graded peak minute — and non-deterministic across thread counts | commit `8bfeeb2` |
 | Dimension count has a **hard row ceiling** | `cc_minute_delta` ≤ **36,930** rows *regardless of how many dimensions* — 3 dims 24,951 (67.6%), 7 dims 28,139 (76.2%). Whole table 111 KiB | commit `8bfeeb2` |
+| The ADR 0008 ceiling **holds at 100×** | 4,086,387 rows against a ceiling of 4,606,268 — **88.7%**, and the headroom *widens* with scale (96.0% at 1×, 93.2% at 10×) | `evidence/scale.txt` |
+| The model runs at **100× the provided file** | 89,850,838 events · 1,086,600 sessions · peak **251,668** · gate PASSES on all **6,799** minutes | `evidence/scale.txt` |
+| Day-grain peak is **scale-invariant** | **176 KiB read at 1× and at 100×**, ~2 ms — the hour tier reads 8,192 rows either way | `evidence/scale.txt` |
+| What breaks first: **derivation memory** | 4.48 GiB of a 5.56 GiB server at 100×; `Code: 241` at default settings. Not the parts (28 of 3,000), not the dictionary (**17.00 MiB at every scale**) | `evidence/scale.txt` |
+| Thread count is a **memory multiplier** | 10 threads 4.48 GiB / 73.4 s · 2 threads **2.59 GiB / 50.5 s** — fewer threads is leaner *and* faster once the stage is memory-bound | `evidence/scale.txt` |
 
 ## E.2 · Claimed, but not proven
 
@@ -776,7 +781,13 @@ same discipline applied to the *gate* found it passing on zero rows.
      ✗  NO /bench. evidence/bench.txt and evidence/benchmark/ do not exist.
 
  "designed for petabyte scale"
-     ✗  ZERO measurements above 1×. Only timing: 47 s / 30K events.
+     🟡 MEASURED at 10× and 100× — evidence/scale.txt. 89.85M events,
+        1,086,600 sessions, peak concurrency 251,668, and the gate still
+        PASSES on all 6,799 minutes. Serving stays cheap: day-grain peak is
+        FLAT at 176 KiB / ~2 ms from 1× to 100×.
+        But the interval derivation does NOT fit at default settings at 100×
+        (Code: 241, 5.56 GiB budget) and needs spill + max_threads=2.
+        Still a 10-core docker box, not a petabyte.
 
  "filter-friendly across business dimensions"
      ✗  hin / HIN / hin-hindi / hin-Hindi are four buckets.
@@ -828,9 +839,18 @@ database — which is exactly the shape of the unseen-day run (`sonyliv_unseen`)
 
 Three more improvements not tracked elsewhere: **`session_start_epoch` is never used** by the model,
 though it is the only exactly-reliable start signal (0 ms deviation across all 10,866 sessions) and is
-precisely what a session truncated at the window edge needs; **no scale evidence exists above 1×**; and
-`cc_minute_stateless` remains at **3 dimensions** while `cc_minute_delta` now carries **7**, so the
-mandated session-aware vs session-independent comparison can only run at the coarser grain.
+precisely what a session truncated at the window edge needs; and `cc_minute_stateless` remains at
+**3 dimensions** while `cc_minute_delta` now carries **7**, so the mandated session-aware vs
+session-independent comparison can only run at the coarser grain.
+
+**Scale evidence now exists** (`evidence/scale.txt`, `tools/scale-test.sh`) and it moved one item off
+this list and put a new one on. The new one: `sql/30_build_intervals.sql` is a single
+`GROUP BY video_session_id` holding a `groupArray` of every event timestamp per session, and at 100×
+that is the only thing in the pipeline that does not fit — 4.48 GiB against a 5.56 GiB server, failing
+outright with `Code: 241` when ingest merges are still running. It is not an algorithmic problem: time
+is linear, and capping `max_threads` to 2 cuts peak memory 4.48 → 2.59 GiB **and** the runtime
+73.4 → 50.5 s, because each aggregation thread keeps its own hash table. The production fix is to
+derive in session-hash shards rather than in one pass; the one-line fix is the thread cap.
 
 ## E.4 · What we can honestly say today
 
@@ -842,8 +862,14 @@ mandated session-aware vs session-independent comparison can only run at the coa
 > of three definitional questions we cannot resolve without the answer key, we have measured what each
 > is worth, and we can show the envelope."*
 
-Every sentence there is backed. What we **cannot** say is "it is fast" (unmeasured), "it scales"
-(unmeasured), or "our gate proves it" (it does not, off-day).
+Every sentence there is backed. What we **cannot** say is "it is fast" (unmeasured against the real
+benchmark set) or "our gate proves it" (it does not — it cannot see a definitional error).
+
+"It scales" is no longer unmeasured, and the honest version has two halves. **Serving scales**: at 100×
+the file the day-grain peak still reads 176 KiB, the gate still passes on every minute, and the
+delta table sits *further* below its ceiling than at 1×. **Building does not, unattended**: the
+interval derivation is the one stage whose memory is set by distinct sessions rather than by rows,
+and at 100× it needs its thread count capped to fit. Both numbers are in `evidence/scale.txt`.
 
 ## E.5 · Highest grade-change per hour
 
