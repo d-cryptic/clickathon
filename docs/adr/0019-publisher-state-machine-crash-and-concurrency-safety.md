@@ -126,11 +126,23 @@ a no-op by idempotence (PHASE 8), not a correctness event.
 **Atomic** (single statements, visible-or-not): each phase's INSERT/DELETE; the intent mark; lease
 rows. Nothing else is atomic — the run as a whole never is, which is why everything below exists.
 
-**Idempotent** (safe to repeat): every heavy statement under its `run_id:phase` dedup token, now
-actually replay-identical because BV is pinned (before this ADR the resumed derive was *not* the
-same statement); the prune (`DELETE … < BV`); the hours/users re-derivations (rewrite the same row
-at a newer version); republication of an unchanged session (`−X + X = 0`, PHASE 8); the rollback
-sweep (deleting already-deleted rows and dropping already-dropped partitions are no-ops).
+**Idempotent** (safe to repeat): the derive (same rows at the same pinned BV — Replacing absorbs
+the duplicate; before this ADR the resumed derive was *not* the same statement); the prune
+(`DELETE … < BV`); the hours/users re-derivations (rewrite the same row at a newer version);
+republication of an unchanged session (`−X + X = 0`, PHASE 8); the rollback sweep (deleting
+already-deleted rows and dropping already-dropped partitions are no-ops).
+
+**NOT idempotent, and no longer pretending to be: negate and emit.** ADR 0013 attached
+`insert_deduplication_token` to every heavy statement as belt-and-braces against replays. The crash
+matrix **measured that belt broken**: on Cloud 26.2.1.525 a replayed `INSERT SELECT` into the
+`SharedAggregatingMergeTree` delta table executed both times — `system.query_log` recorded two
+`QueryFinish` entries for the same query_id, each with `written_rows > 0` — and the served number
+double-counted the correction by exactly one viewer (the matrix's convergence check caught it; the
+original ADR 0013 verification evidently used a different insert shape). A resumed run therefore
+decides negate/emit replays from the server's own record (`stmt_landed`): wait until the query_id
+is no longer in `system.processes` — a crashed *client* does not stop a statement already running
+server-side — flush logs, and treat a recorded successful finish as "landed, do not re-issue". The
+tokens stay attached, but nothing load-bearing rests on them.
 
 **Fenced** (cannot run without currently holding the lease): the *decision to issue* every write
 phase, via `lease_beat` = renew + re-check winner. The recovery sweep and the claim run under the
@@ -141,13 +153,14 @@ same fence.
 - **A statement already in flight when its issuer loses the lease is not fenced.** The fence is
   checked before issuing, not inside the server. A holder that stalls *mid-statement* past the TTL
   can have its statement land concurrently with the new holder's work. The blast radius is bounded,
-  not eliminated: the dedup token makes a *replay* of the same phase inert, the prune and the
-  hours/users phases are idempotent, and the new holder resumes the same `run_id` with the same BV —
-  so the overlap collapses to the same writes. The residual exposure is a zombie's `negate`/`emit`
-  landing after the new holder has already moved the intervals further; PHASE 13 exercises the seam
-  at the claim, but a mid-`emit` zombie is not reproducible on demand and is accepted as a bounded
-  risk. Mitigation if it ever matters: per-statement fencing tokens in a `WHERE` clause, at the cost
-  of putting the lease table on every hot path.
+  not eliminated: the new holder resumes the same `run_id` with the same BV, so derive/prune/hours/
+  users overlaps collapse to the same writes, and for negate/emit `stmt_landed` *waits* for the
+  zombie's query_id to leave `system.processes` before deciding — so the specific
+  landed-then-replayed shape is closed. The residual exposure is a zombie statement that has not
+  yet *started* server-side when the new holder checks (client sent, server not yet registered):
+  vanishingly narrow, not reproducible on demand, and accepted as a bounded risk. Mitigation if it
+  ever matters: per-statement fencing tokens in a `WHERE` clause, at the cost of putting the lease
+  table on every hot path.
 - **The settle bound is still an assumption.** `PUBLISH_SETTLE_S` (markings) and
   `PUBLISH_LEASE_SETTLE_S` (lease lottery) both assume an insert's rows are visible within the
   window. The lookback + pair identity now make a *marking* that violates it recoverable (it is
