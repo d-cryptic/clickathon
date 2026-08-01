@@ -157,16 +157,17 @@
 </figure>
 
 <figure>
-  <figcaption><span class="num">4.6</span><span class="cap">Six dashboards · 41 tiles · 24 sources</span></figcaption>
+  <figcaption><span class="num">4.6</span><span class="cap">Seven dashboards · 53 tiles · 24 sources</span></figcaption>
   <div class="dash">
-    <div><b>SonyLIV concurrency</b><em>10 tiles · the headline</em><br><span class="tile">4 peak numbers</span><span class="tile">accurate curve</span><span class="tile">3-model comparison</span><span class="tile">users</span><span class="tile">rolling 15m</span></div>
-    <div><b>drilldown — sessions &amp; users</b><em>8 tiles + 8 filters</em><br><span class="tile">platform</span><span class="tile">country</span><span class="tile">app_version</span><span class="tile">audio</span><span class="tile">subtitle</span><span class="tile">player</span><span class="tile">title</span></div>
-    <div><b>content</b><em>7 tiles</em><br><span class="tile">top titles</span><span class="tile">NOW by title</span><span class="tile">video_type</span><span class="tile">category</span></div>
+    <div><b>SonyLIV concurrency</b><em>11 tiles · the headline</em><br><span class="tile">caption</span><span class="tile">4 peak numbers</span><span class="tile">accurate curve</span><span class="tile">3-model comparison</span><span class="tile">users</span><span class="tile">rolling 15m</span></div>
+    <div><b>drilldown — sessions &amp; users</b><em>9 tiles + 8 filters</em><br><span class="tile">caption</span><span class="tile">platform</span><span class="tile">country</span><span class="tile">app_version</span><span class="tile">audio</span><span class="tile">subtitle</span><span class="tile">player</span><span class="tile">title</span></div>
+    <div><b>content</b><em>8 tiles</em><br><span class="tile">caption</span><span class="tile">top titles</span><span class="tile">NOW by title</span><span class="tile">video_type</span><span class="tile">category</span></div>
     <div><b>time-window trend</b><em>4 tiles</em><br><span class="tile">rolling peaks 5/15/60</span><span class="tile">rolling averages</span><span class="tile">tumbling 15m</span><span class="tile">tumbling 1h</span></div>
     <div><b>pipeline health</b><em>7 tiles · observes us</em><br><span class="tile">watermark lag</span><span class="tile">hour complete</span><span class="tile">build stage ms</span><span class="tile">rows written</span><span class="tile">gate runs</span><span class="tile">exceptions</span></div>
     <div><b>query cost</b><em>5 tiles · observes us</em><br><span class="tile">p95/p50/max latency</span><span class="tile">BYTES read</span><span class="tile">rows read</span><span class="tile">memory</span><span class="tile">heaviest shapes</span></div>
+    <div><b>user-level</b><em>9 tiles · added 2026-08-01</em><br><span class="tile">caption: users are a set</span><span class="tile">peak users 2,844</span><span class="tile">users vs sessions gap</span><span class="tile">by platform</span><span class="tile">by title</span></div>
   </div>
-  <p class="note">Provisioned and re-provisioned by one idempotent script over the Cloud control-plane API — a re-run <b>PUT</b>s the dashboards, so the script stays the source of truth and a hand-edit in the UI cannot silently outlive it.</p>
+  <p class="note">Provisioned and re-provisioned by one idempotent script over the Cloud control-plane API — a re-run <b>PUT</b>s the dashboards, so the script stays the source of truth and a hand-edit in the UI cannot silently outlive it. All 53 tiles verified signed-in on 2026-08-01 (evidence/clickstack/tile-verification-2026-08-01.txt); dashboards 1–3 and 7 open with a caption tile naming the trap a viewer would otherwise fall into.</p>
 </figure>
 
 <figure>
@@ -209,7 +210,7 @@
       <tr><td>the answer + THE GATE</td><td class="n">6 s</td><td class="n">7 s</td></tr>
       <tr><td><b>total</b></td><td class="n yes"><b>47 s</b></td><td class="n yes"><b>58 s</b></td></tr>
     </table>
-    <p class="note" style="margin-top:.8rem">28× the events cost <b>1.23×</b> the wall clock — the path is dominated by DDL, view creation and round trips, not volume. Only the load tracks size. A 1 GB unseen day extrapolates to <b>~2.5 minutes</b>.</p>
+    <p class="note" style="margin-top:.8rem">28× the events cost <b>1.23×</b> the wall clock — the path is dominated by DDL, view creation and round trips, not volume. Only the load tracks size. A 1 GB unseen day extrapolates to <b>~2.5 minutes</b> (runbook budgets ~3). A third rehearsal ran a <b>manufactured day with an analytically known answer</b> (6,887 events, every documented trap planted): 54 s, gate green, and the pipeline matched the designed truth on all 1,081 minutes (evidence/unseen/rehearsal.txt).</p>
   </div>
   <div class="flagbox">
     <h3>Decisions to make BEFORE the file drops, not during</h3>
@@ -222,13 +223,14 @@
   <div class="panel">
     <table>
       <tr><th>item</th><th>state</th></tr>
-      <tr><td>publisher deployed on the graded database</td><td class="n no">not installed — objects exist only in scratch</td></tr>
-      <tr><td>publisher maintains user + hour/day tiers</td><td class="n no">it does not · uniqExact set union cannot retract</td></tr>
-      <tr><td>crash / concurrent-publisher safety</td><td class="n no">by code inspection only, not reproduced</td></tr>
-      <tr><td>benchmark evidence bundle</td><td class="n no">absent — official query set not in hand</td></tr>
-      <tr><td>normalisation applied to Cloud</td><td class="n warn">wired into the build path; not yet run</td></tr>
-      <tr><td>dashboard screenshots</td><td class="n warn">needs console SSO — a human step</td></tr>
+      <tr><td>a committed publisher run on the graded database</td><td class="n no">zero — schema + dirty-session MV are installed there, but it is still batch-rebuilt</td></tr>
+      <tr><td>publisher maintains user + hour/day tiers</td><td class="n">closed by ADR 0016 — replaceable buckets make user retraction expressible; all four tiers converge, 0 differing cells (scratch)</td></tr>
+      <tr><td>crash / concurrent-publisher safety</td><td class="n no">by code inspection only, not reproduced (ADR 0017 queued)</td></tr>
+      <tr><td>benchmark evidence bundle</td><td class="n">13-query reconstruction committed with answers + bytes read (evidence/benchmark/) · <span class="no">the official set was never released</span></td></tr>
+      <tr><td>normalisation applied to Cloud</td><td class="n">live — <span style="font-family:var(--mono)">v_concurrency_minute_audio_norm</span> reads peak hin 2,196 vs 1,774 raw, verified 2026-08-01</td></tr>
+      <tr><td>dashboard screenshots</td><td class="n warn">offline preview captured (evidence/clickstack/dashboard-preview.png); full-page console shots still a human step</td></tr>
       <tr><td>repo public · Team Captain</td><td class="n no">required for submission</td></tr>
+      <tr><td>gate's peak-minute pick under ties</td><td class="n warn">serving tiers resolve earliest-first (ADR 0014); <span style="font-family:var(--mono)">90_reconcile.sql</span> still picks a bare argMax</td></tr>
     </table>
   </div>
   <p class="note">Stated rather than discovered. The scale numbers above say the <em>design</em> holds at 100×; they say nothing about whether the <em>operations</em> around it are finished, and conflating those two would be the easiest way to overclaim.</p>

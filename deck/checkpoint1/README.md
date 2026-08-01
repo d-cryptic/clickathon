@@ -43,6 +43,6 @@ Requires Google Chrome (default macOS path). Any Chromium works:
 | 10 | Cost: 7 ms / 329 KiB, what queries read | query performance |
 | 11 | Scale: the 36,930 ceiling, what breaks first | scalability |
 | 12 | ClickStack in both directions + vendored agent-skills | OSS depth |
-| 13 | Update handling: 3 arrival classes, 3 mechanisms | implementation |
-| 14 | The four definitional forks, each measured | maturity |
+| 13 | Update handling: one mechanism (ADR 0013/0016 publisher), every arrival class | implementation |
+| 14 | The five definitional forks, each measured | maturity |
 | 15 | Next steps + the close | impact |
