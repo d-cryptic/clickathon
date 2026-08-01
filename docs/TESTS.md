@@ -137,9 +137,13 @@ Both are `Int64` now.
 
 | Test | Proves |
 |---|---|
-| `TestReadReconcileEvidence_Pass` | the gate-evidence parser reads the REAL box-drawing `evidence/reconcile.txt` format byte-for-byte, including the peak minute (2887 @ 10:56) — not a simplified stand-in |
-| `TestReadReconcileEvidence_Mismatch` | a failing gate is surfaced, not averaged away — pinned to the historical `+37 at the peak` defect TESTS.md already documents above |
-| `TestReconcileEvidence_PassOnEmptyIsFalse` | a format change that silently parses zero rows cannot read as "everything passed" |
+| `TestReadReconcileEvidence_GreenFixture` | the parser reads `testdata/reconcile_green.txt` — a byte-for-byte CAPTURE of a real green `tools/reconcile.sh` run (2026-08-01, commit d6c85e2), never a hand-written stand-in. The verdict comes from the SUMMARY row (`minutes_compared=17028`), not from counting sample rows |
+| `TestReadReconcileEvidence_MismatchFixture` | a failing gate is surfaced, not averaged away — the fixture is a REAL captured failure (cloud serving-layer drift, 177 mismatched minutes, max abs diff 39) |
+| `TestReadReconcileEvidence_OldFormatIsNotAPass` | the pre-81c0161 five-column format — the exact shape the parser once pinned while production output had moved on — parses as NOT a pass: no SUMMARY row means unattested evidence |
+| `TestReadReconcileEvidence_OldFormatMismatchStillVisible` | even without a SUMMARY, the row-level fallback still surfaces the historical `+37 at the peak` defect magnitude |
+| `TestReadReconcileEvidence_EmptyFileIsNotAPass` / `_MalformedFileIsNotAPass` | an empty or garbage evidence file cannot read as "everything passed" |
+| `TestReadReconcileEvidence_SurvivesAddedColumn` | the regression the 2026-08-01 rewrite exists for: adding a column to the gate's table must not silently zero the parse — SUMMARY tokens are key=value, detail rows anchor on the timestamp |
+| `TestPass_SummaryGuards` | `Pass()` requires all of: summary present, verdict PASS, ≥1 minute compared, 0 mismatched — a self-contradictory summary fails |
 | `TestIntAttrEncodesAsJSONString` | OTLP/HTTP JSON's int64-as-decimal-string mapping is actually followed — a bare `int64` JSON field would lose precision above 2^53 |
 | `TestSeverityConstantsAreLowerCase` | `severity:error` saved searches keep matching — HyperDX stores `SeverityText` lower-cased (VERIFIED.md), and this is the one constant a careless edit would recapitalize |
 | `TestNewTraceID` / `TestNewSpanID` / `TestNewTraceIDIsRandom` | id shape (16/8 random bytes, lower-case hex) and that two runs do not collide |
