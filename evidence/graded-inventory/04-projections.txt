@@ -1,0 +1,7 @@
+Row 1:
+──────
+table:            ev_raw
+name:             proj_by_session
+projection_query: SELECT * ORDER BY video_session_id, event_timestamp
+active_parts:     7
+proj_size:        3.42 MiB

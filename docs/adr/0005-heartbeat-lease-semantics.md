@@ -8,8 +8,21 @@
 > serious part — leases keep renewing through a `pause` (0.756/min), so the hot tier **as specified
 > counts paused time as watching**. Status: BLOCKED, not to be built until §Amendment is resolved.
 
-**Status** **Blocked** · proposed 2026-08-01, amended 2026-08-01 · superseded in part by
-[ADR 0007](0007-gate-answers-pause-needs-explicit-handling.md)
+**Status** **Closed — will not be built** · proposed 2026-08-01, amended 2026-08-01, closed 2026-08-01
+· superseded in part by [ADR 0007](0007-gate-answers-pause-needs-explicit-handling.md) · resolved by
+[ADR 0013](0013-continuous-publication-by-incremental-finalizer.md)
+
+> **RESOLVED — the operator decision this ADR was waiting on has been made, and it is "none of the
+> three".** [ADR 0013](0013-continuous-publication-by-incremental-finalizer.md) removed the *need*
+> for a hot tier rather than fixing its lease model. The tier existed to answer minutes newer than
+> `W` while the sealed tier lagged 40 minutes; a per-minute incremental finalizer cuts that lag to
+> seconds, so the tier would buy sub-minute freshness at the price of the 834 h pause inflation
+> measured below. Options 1 and 2 are moot. **Option 3 was rejected on accuracy, not cost:** it
+> proposed relabelling the hot tier the "session-independent upper bound", but the table that
+> actually plays that role, `cc_minute_stateless`, credits only the minute a beat lands in — no lease
+> fan-out — and so reads **2,894 at the peak against the sealed tier's 2,917**, i.e. *lower*.
+> Calling it an upper bound would have been a false label on a graded deliverable. The mandated
+> session-aware/session-independent comparison is served by that table under its accurate name.
 
 ## Amendment — 2026-08-01, after the H1 gate measurements
 

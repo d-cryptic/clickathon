@@ -1,0 +1,54 @@
+Row 1:
+──────
+name:               cc_hour_agg
+create_table_query: CREATE TABLE sonyliv.cc_hour_agg (`platform` LowCardinality(String), `country` LowCardinality(String), `content_id` Int64, `hour` DateTime, `peak` Int64, `peak_minute` DateTime, `integral` Int64, `computed_at` DateTime64(3) DEFAULT now64(3)) ENGINE = SharedReplacingMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}', computed_at) PARTITION BY toYYYYMM(hour) ORDER BY (platform, country, content_id, hour) SETTINGS index_granularity = 8192, min_bytes_for_wide_part = 0
+
+Row 2:
+──────
+name:               cc_minute_delta
+create_table_query: CREATE TABLE sonyliv.cc_minute_delta (`minute` DateTime, `platform` LowCardinality(String), `country` LowCardinality(String), `content_id` Int64, `subtitle_language` LowCardinality(String), `player_version` LowCardinality(String), `audio_language` LowCardinality(String), `app_version` LowCardinality(String), `delta` SimpleAggregateFunction(sum, Int64), `starts` SimpleAggregateFunction(sum, Int64), `ends` SimpleAggregateFunction(sum, Int64)) ENGINE = SharedAggregatingMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}') PARTITION BY toYYYYMMDD(minute) PRIMARY KEY (platform, country, content_id, minute) ORDER BY (platform, country, content_id, minute, subtitle_language, player_version, audio_language, app_version) SETTINGS min_bytes_for_wide_part = 0, index_granularity = 8192
+
+Row 3:
+──────
+name:               cc_minute_stateless
+create_table_query: CREATE TABLE sonyliv.cc_minute_stateless (`minute` DateTime, `platform` LowCardinality(String), `country` LowCardinality(String), `content_id` Int64, `active_state` AggregateFunction(uniqExact, String)) ENGINE = SharedAggregatingMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}') PARTITION BY toYYYYMMDD(minute) ORDER BY (platform, country, content_id, minute) SETTINGS min_bytes_for_wide_part = 0, index_granularity = 8192
+
+Row 4:
+──────
+name:               cc_publish_batch
+create_table_query: CREATE TABLE sonyliv.cc_publish_batch (`run_id` UInt64, `video_session_id` String, `lo_event_ts` DateTime64(3), `hi_event_ts` DateTime64(3)) ENGINE = SharedMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}') PARTITION BY run_id ORDER BY (run_id, video_session_id) TTL toDateTime(fromUnixTimestamp(intDiv(run_id, 1000))) + toIntervalDay(7) SETTINGS min_bytes_for_wide_part = 0, index_granularity = 8192
+
+Row 5:
+──────
+name:               cc_publish_consumed
+create_table_query: CREATE TABLE sonyliv.cc_publish_consumed (`marked_at` DateTime64(3), `run_id` UInt64) ENGINE = SharedReplacingMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}') ORDER BY marked_at TTL toDateTime(marked_at) + toIntervalDay(7) SETTINGS min_bytes_for_wide_part = 0, index_granularity = 8192
+
+Row 6:
+──────
+name:               cc_publish_runs
+create_table_query: CREATE TABLE sonyliv.cc_publish_runs (`run_id` UInt64, `phase` LowCardinality(String), `at` DateTime64(3), `cursor_from` DateTime64(3), `cursor_to` DateTime64(3), `sessions` UInt32, `rows_written` UInt64, `elapsed_ms` UInt32, `note` String) ENGINE = SharedMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}') ORDER BY (run_id, at) SETTINGS min_bytes_for_wide_part = 0, index_granularity = 8192
+
+Row 7:
+──────
+name:               cc_user_minute
+create_table_query: CREATE TABLE sonyliv.cc_user_minute (`minute` DateTime, `platform` LowCardinality(String), `country` LowCardinality(String), `content_id` Int64, `active_state` AggregateFunction(uniqExact, String)) ENGINE = SharedAggregatingMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}') PARTITION BY toYYYYMMDD(minute) ORDER BY (platform, country, content_id, minute) SETTINGS min_bytes_for_wide_part = 0, index_granularity = 8192
+
+Row 8:
+──────
+name:               content_dim
+create_table_query: CREATE TABLE sonyliv.content_dim (`content_id` Int64, `title` String, `video_type` LowCardinality(String), `category` LowCardinality(String)) ENGINE = SharedReplacingMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}') ORDER BY content_id SETTINGS index_granularity = 8192
+
+Row 9:
+───────
+name:               ev_raw
+create_table_query: CREATE TABLE sonyliv.ev_raw (`content_id` Int64, `video_session_id` String, `user_id` String, `event_type` LowCardinality(String), `event` LowCardinality(String), `event_timestamp` DateTime64(3), `platform` LowCardinality(String), `app_version` LowCardinality(String), `country` LowCardinality(String), `audio_language` LowCardinality(String), `subtitle_language` LowCardinality(String), `player_version` LowCardinality(String), `session_start_epoch` DateTime64(3), INDEX idx_content content_id TYPE bloom_filter(0.01) GRANULARITY 1, INDEX idx_ts event_timestamp TYPE minmax GRANULARITY 1, PROJECTION proj_by_session (SELECT * ORDER BY video_session_id, event_timestamp)) ENGINE = SharedMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}') PARTITION BY toYYYYMMDD(event_timestamp) ORDER BY (toStartOfHour(event_timestamp), platform, video_session_id, event_timestamp) SETTINGS index_granularity = 8192, min_bytes_for_wide_part = 0, non_replicated_deduplication_window = 1000
+
+Row 10:
+───────
+name:               session_dirty
+create_table_query: CREATE TABLE sonyliv.session_dirty (`marked_at` DateTime64(3), `video_session_id` String, `min_event_ts` DateTime64(3), `max_event_ts` DateTime64(3), `events` UInt32) ENGINE = SharedMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}') PARTITION BY toYYYYMMDD(marked_at) ORDER BY (marked_at, video_session_id) TTL toDateTime(marked_at) + toIntervalDay(7) SETTINGS min_bytes_for_wide_part = 0, index_granularity = 8192
+
+Row 11:
+───────
+name:               session_intervals
+create_table_query: CREATE TABLE sonyliv.session_intervals (`video_session_id` String, `user_id` String, `content_id` Int64, `platform` LowCardinality(String), `country` LowCardinality(String), `app_version` LowCardinality(String), `audio_language` LowCardinality(String), `subtitle_language` LowCardinality(String), `player_version` LowCardinality(String), `interval_start` DateTime64(3), `interval_end` DateTime64(3), `is_open` UInt8, `build_version` UInt64, INDEX idx_start interval_start TYPE minmax GRANULARITY 1) ENGINE = SharedReplacingMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}', build_version) ORDER BY (video_session_id, interval_start) SETTINGS min_bytes_for_wide_part = 0, index_granularity = 8192
