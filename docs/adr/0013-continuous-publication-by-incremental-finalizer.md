@@ -14,7 +14,10 @@
 
 **Status** Accepted · 2026-08-01 · supersedes the serving-topology half of
 [ADR 0004](0004-two-tier-lambda-serving.md); resolves [ADR 0005](0005-heartbeat-lease-semantics.md)
-by declining to build it; makes [ADR 0006](0006-late-arrival-correction-by-diff.md) live
+by declining to build it; makes [ADR 0006](0006-late-arrival-correction-by-diff.md) live ·
+**amended by [ADR 0016](0016-publisher-owns-the-user-and-hour-tiers.md)** — as accepted, this
+finalizer maintained only `session_intervals` and `cc_minute_delta`; the user and hour/day tiers
+went stale (Codex audit §4.1). ADR 0016 adds the `hours` and `users` phases that close that gap.
 
 ## Context
 

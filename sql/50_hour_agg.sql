@@ -107,8 +107,23 @@ SETTINGS index_granularity = 8192,
 
 
 -- ---------------------------------------------------------------------------
--- Populate. Full rebuild of the tier; add `WHERE minute >= …` to the
--- cc_minute_delta scan to re-derive only the hours a finalizer run touched.
+-- Populate. Run whole, this is a full rebuild of the tier. tools/publish.sh
+-- re-derives ONLY the hours a batch touched by sed-templating the
+-- 'FROM cc_minute_delta' anchor line below with an hour scope (ADR 0016) —
+-- deltas are hour-clipped (ADR 0003), so an hour is self-contained and
+-- re-deriving it reads nothing outside it. Over-covering an hour is
+-- idempotent: same input -> same row at a newer computed_at.
+--
+-- An hour whose net deltas all cancel (a correction retracted its only
+-- coverage) still yields a row here — peak 0, integral 0 — because the
+-- cancelling rows keep the GROUP alive. That zero row is the RETRACTION: it
+-- supersedes the stale nonzero row under FINAL. The serving views below
+-- filter it out, so "no concurrency" serves as no row, exactly as a
+-- from-scratch rebuild would.
+--
+-- PUBLISH_EXTRACT_BEGIN:hour — tools/publish.sh and tools/publish-test.sh cut
+-- the single statement between these two markers to run it over HTTP. Keep the
+-- markers immediately around ONE statement.
 -- ---------------------------------------------------------------------------
 INSERT INTO cc_hour_agg (platform, country, content_id, hour, peak, peak_minute, integral)
 
@@ -189,6 +204,7 @@ SELECT
     sum(concurrent * hold_s) AS integral
 FROM curve
 GROUP BY lv_platform, lv_country, lv_content_id, hour;
+-- PUBLISH_EXTRACT_END:hour
 
 
 -- ===========================================================================
@@ -199,6 +215,14 @@ GROUP BY lv_platform, lv_country, lv_content_id, hour;
 -- row. FINAL is cheap at this tier's size (tens of thousands of rows) and the
 -- alternative — an argMax(computed_at) wrapper — is the same work with more
 -- ways to get it wrong.
+--
+-- All drop all-zero rows (`peak != 0 OR integral != 0`): an all-zero row is a
+-- retraction tombstone written by an incremental re-derivation whose hour lost
+-- its coverage entirely (see the populate comment above), and "no concurrency"
+-- must serve as no row — the same answer a from-scratch rebuild gives. The
+-- filter deliberately keeps NEGATIVE values visible: peak and integral are
+-- signed precisely so a broken delta model shows up loud (see the table
+-- comment), and a tombstone filter that also hid negatives would re-bury that.
 --
 -- `avg_concurrent` is the TIME-WEIGHTED average: integral / elapsed seconds,
 -- with zero-concurrency minutes included in the denominator. That is the honest
@@ -224,7 +248,8 @@ SELECT
     peak_minute,
     integral,
     integral / 3600 AS avg_concurrent
-FROM cc_hour_agg FINAL;
+FROM cc_hour_agg FINAL
+WHERE peak != 0 OR integral != 0;
 
 -- ---------------------------------------------------------------------------
 -- Hour grain, all dimensions collapsed — the headline curve's hour tier.
@@ -239,7 +264,8 @@ SELECT
     integral,
     integral / 3600 AS avg_concurrent
 FROM cc_hour_agg FINAL
-WHERE (platform = '*') AND (country = '*') AND (content_id = -1);
+WHERE (platform = '*') AND (country = '*') AND (content_id = -1)
+  AND (peak != 0 OR integral != 0);
 
 -- ---------------------------------------------------------------------------
 -- Day grain. Peak is max() over the day's hours — legal ONLY over time, and
@@ -277,6 +303,7 @@ SELECT
     sum(cc_hour_agg.integral) / 86400 AS avg_concurrent,
     count() AS active_hours
 FROM cc_hour_agg FINAL
+WHERE cc_hour_agg.peak != 0 OR cc_hour_agg.integral != 0
 GROUP BY platform, country, content_id, day;
 
 -- Day grain, all dimensions collapsed.
@@ -290,6 +317,7 @@ SELECT
     count() AS active_hours
 FROM cc_hour_agg FINAL
 WHERE (platform = '*') AND (country = '*') AND (content_id = -1)
+  AND (cc_hour_agg.peak != 0 OR cc_hour_agg.integral != 0)
 GROUP BY day;
 
 

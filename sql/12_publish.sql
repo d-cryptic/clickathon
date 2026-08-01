@@ -12,8 +12,9 @@
 -- with INGEST time (`session_dirty`). A finalizer claims everything marked
 -- since its cursor, re-derives ONLY those sessions from ev_raw, appends the
 -- NEGATION of their currently-published deltas and then their new deltas
--- (ADR 0006 correction-by-diff), promotes the new intervals and advances the
--- cursor. Nothing is truncated and nothing is rebuilt.
+-- (ADR 0006 correction-by-diff), promotes the new intervals, re-derives the
+-- hour-tier rows and user-minute buckets the batch touched (ADR 0016), and
+-- advances the cursor. Nothing is truncated and nothing is rebuilt.
 --
 -- WHY THIS IS EXACT, and not an approximation. A session's contribution to
 -- cc_minute_delta is a pure function of THAT SESSION'S intervals alone:
@@ -186,6 +187,8 @@ SETTINGS min_bytes_for_wide_part = 0;
 --   derived   intervals_new(batch) inserted into session_intervals @ build_version
 --   pruned    intervals_old(batch) removed (build_version < this run's)
 --   emitted   +deltas(intervals_new(batch)) appended to cc_minute_delta
+--   hours     cc_hour_agg re-derived for the batch's touched hours (ADR 0016)
+--   users     cc_user_minute re-derived for the batch's touched minutes (ADR 0016)
 --   committed cursor advanced; the run is durable
 --
 -- WHY `pruned` EXISTS. session_intervals is ReplacingMergeTree keyed

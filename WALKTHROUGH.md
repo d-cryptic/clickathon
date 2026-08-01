@@ -60,6 +60,7 @@ Start at [`AGENTS.md`](AGENTS.md) — it is a router, not a manual. Then:
 | `20_views.sql` | all serving views | a chart tool cannot read an `AggregateFunction` |
 | `30_build_intervals.sql` | **the model** — active intervals | gaps + explicit pause exclusion |
 | `40_deltas.sql` | `cc_minute_delta` | hour-clipped, ADR 0003 |
+| `45_user_concurrency.sql` | `cc_user_minute` + user views | replace-not-union buckets, ADR 0016; its INSERT is the canonical re-derivation the publisher templates |
 | `50_hour_agg.sql` | `cc_hour_agg` | peak + integral, 8-level cube |
 | `60_projection.sql` | `ev_raw` projection | **measured not worth shipping** — see §5 |
 | `70_truncation_test.sql` | isolated absorption test | runs in `sonyliv_trunc`, never production |
@@ -97,6 +98,8 @@ ev_raw  905,558 events · 10,866 sessions · 2026-07-14 15:43 -> 2026-07-26 11:3
   ├─▶ cc_user_minute                   USER concurrency — uniqExact state, NOT deltas
   │      a user can hold several concurrent sessions (72 do, at the peak),
   │      so summing deltas by user_id would double count exactly those
+  │      buckets are REPLACED per re-derivation, never set-unioned (ADR 0016),
+  │      so a correction can retract a user; the old MV could only ever add
   │
   ├─▶ dict_content + v_concurrency_minute_{title,video_type,category}
   │      COMPLEX_KEY_HASHED — a plain HASHED dictionary cannot dictGet a
@@ -141,7 +144,7 @@ Everything here was run, not reasoned about.
 | Charts render real data | HyperDX `clickstack_timeseries`: 61 → **2,887** → 7, 28 ms |
 | Load is exact | `ev_raw` 905,558 = source rows; `content_dim` 33,464 |
 | From-scratch rebuild is deterministic | isolated DB reproduces production exactly |
-| User concurrency correct | peak 2,815 vs session 2,887; `uniqExactMerge` 9,517 = 9,517 distinct users |
+| User concurrency correct | peak 2,815 vs session 2,887; `uniqExactMerge` 9,517 = 9,517 distinct users *(pre-ADR-0009 lineage — this branch is off `main`, which does not carry wave 2; the drift-up-on-rebuild defect in `cc_user_minute` itself is closed by ADR 0016 — buckets are replaced, not unioned)* |
 | Content concurrency correct | hour-peak reconcile, **0** mismatches over 6,764 rows |
 | Rolling/tumbling windows correct | vs brute-force self-join, **0** mismatches at 5/15/60 min |
 | Duplicates are inert | full derivation run raw vs deduped: identical intervals, **0** of 3,725 minutes differ |

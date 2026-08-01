@@ -80,6 +80,21 @@ our own query log does not support.
 Kept as a standing lesson: a figure inherited from a different dataset is a hypothesis, not a
 verified fact, and this file is specifically for facts.
 
+## Verified for ADR 0016 — replaceable uniqExact buckets (2026-08-01, Cloud 26.2.1.525)
+
+Probed on a scratch database before `sql/45_user_concurrency.sql` was rewritten:
+
+- `ReplacingMergeTree(DateTime64 version)` **accepts an `AggregateFunction(uniqExact, String)`
+  payload column** (Cloud maps it to `SharedReplacingMergeTree`). `FINAL` keeps the newest version
+  per key, and a bucket re-inserted with FEWER members reads back smaller (2 → 1 across 4 physical
+  rows) — replacement genuinely retracts, which a set-union `AggregatingMergeTree` cannot.
+- `uniqExactStateIf(x, cond)` **is assignable into a plain `AggregateFunction(uniqExact, String)`
+  column** — the `-If` state is compatible — and over zero qualifying rows it produces a valid
+  EMPTY state that merges as identity and reads back as 0. That empty state is what makes an
+  explicit retraction row expressible in one INSERT.
+- In the hour-cube INSERT shape, **`WHERE` cannot precede `ARRAY JOIN`** (`Code: 62`); a templated
+  scope must ride the `ARRAY JOIN` line, not the `FROM` line. `tools/publish.sh` does exactly that.
+
 ## Correction — a dictionary layout trap not previously recorded (2026-08-01)
 
 A simple-key `LAYOUT(HASHED())`, `FLAT()` or `CACHE()` dictionary **cannot serve a negative key via
