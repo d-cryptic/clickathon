@@ -32,6 +32,18 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 HOSTNAME_="${CH_HOST#https://}"; HOSTNAME_="${HOSTNAME_#http://}"; HOSTNAME_="${HOSTNAME_%/}"
 
 q()    { tools/ch -c "$1"; }
+
+# Drop the scratch database before every run. sql/70 uses CREATE TABLE IF NOT
+# EXISTS, so a table left by a previous run SURVIVES a schema change and the
+# test then runs against a stale shape — which is exactly what happened when
+# ADR 0008 added four dimensions: `Code: 16, No such column app_version`. A test
+# whose result depends on leftovers from the last run is not a test. This is the
+# one DROP in the script and it names the scratch database explicitly; $PROD is
+# never a write target.
+reset_scratch_db() {
+  tools/ch -c "DROP DATABASE IF EXISTS ${DB}" >/dev/null
+  tools/ch -c "CREATE DATABASE ${DB}" >/dev/null
+}
 qr()   { tools/ch -c "$1 FORMAT TSVRaw"; }
 say()  { printf '%s\n' "$*" | tee -a "$OUT"; }
 rule() { say "--------------------------------------------------------------------------"; }
@@ -51,14 +63,24 @@ run_file() {
 }
 
 # build_intervals <target> <source> [where] [build_version]
-# Passing a build_version appends the extra column the FIX variant needs.
+# Since ADR 0008, sql/30_build_intervals.sql computes build_version itself
+# (toUInt64(toUnixTimestamp(now())) AS build_version, inside the inner
+# subquery) and is_open no longer ends the column list, so the old
+# "append after is_open" trick has nothing to attach to. Passing a
+# build_version now overrides that now()-derived line directly, which is
+# what the FIX variant needs: two build_intervals() calls issued inside the
+# same second would otherwise both stamp the same now() value and the
+# ReplacingMergeTree(build_version) resolution the fix depends on would be
+# unable to tell old from new.
 build_intervals() {
-  local iso="    is_open"
-  [ -n "${4:-}" ] && iso="    is_open, toUInt64($4) AS build_version"
-  sed -e "s|^INSERT INTO session_intervals|INSERT INTO $1|" \
-      -e "s|^        FROM ev_raw\$|        FROM $2 ${3:-}|" \
-      -e "s|^    is_open\$|$iso|" \
-      sql/30_build_intervals.sql > "$TMP/bi.sql"
+  local args=(
+    -e "s|^INSERT INTO session_intervals|INSERT INTO $1|"
+    -e "s|^        FROM ev_raw\$|        FROM $2 ${3:-}|"
+  )
+  if [ -n "${4:-}" ]; then
+    args+=(-e "s|^        toUInt64(toUnixTimestamp(now())) AS build_version,\$|        toUInt64($4) AS build_version,|")
+  fi
+  sed "${args[@]}" sql/30_build_intervals.sql > "$TMP/bi.sql"
   run_file "$TMP/bi.sql"
 }
 
@@ -95,12 +117,14 @@ say "cut ${CUT}  ·  isolated database ${DB}  ·  ${PROD} read-only"
 rule
 
 say "PHASE 0 — reset the test database (never touches ${PROD})"
-for t in ev_raw session_intervals session_intervals_prev cc_minute_delta \
-         cc_minute_delta_stump session_intervals_control cc_minute_delta_control \
-         cc_minute_delta_probe session_intervals_fix session_intervals_fix_prev \
-         cc_minute_delta_fix probe_uint; do
-  q "TRUNCATE TABLE ${DB}.${t}" >/dev/null
-done
+# DROP + recreate, not TRUNCATE. Truncating preserves the SHAPE, so when ADR
+# 0008 added four dimensions the tables here silently kept the 3-dim schema and
+# the whole run died with `Code: 16, No such column app_version`. The schema is
+# then reapplied from sql/70, so this script is self-contained rather than
+# depending on an apply-sql.sh someone remembered to run first.
+reset_scratch_db
+run_file sql/70_truncation_test.sql >/dev/null
+say "  ${DB} dropped, recreated and schema reapplied from sql/70_truncation_test.sql"
 
 say ""
 say "PHASE 1 — load the truncated slice: event_timestamp < ${CUT}"
@@ -145,7 +169,8 @@ say "          never mutated, never rebuilt. Only appended to."
 say "  4a  snapshot the OLD derivation for the touched sessions"
 q "INSERT INTO ${DB}.session_intervals_prev
    SELECT video_session_id, user_id, content_id, platform, country,
-          interval_start, interval_end, is_open
+          app_version, audio_language, subtitle_language, player_version,
+          interval_start, interval_end, is_open, build_version
    FROM ${DB}.session_intervals FINAL ${TOUCHED}"
 say "      $(qr "SELECT concat(toString(count()),' old intervals over ',
                   toString(uniqExact(video_session_id)),' sessions')
@@ -391,20 +416,25 @@ say "VERDICT"
 rule
 say "  1. The from-scratch build in an isolated database reproduces production exactly"
 say "     (2887 @ 10:56, 2450 @ 11:10) — the derivation is deterministic."
-say "  2. Incremental absorption as the schema stands today does NOT converge: it"
-say "     overcounts the PEAK minute by 37 (2924 vs 2887, +1.3%), plus 10:55 and 10:54."
-say "  3. The cause is NOT the ADR 0006 correction-by-diff arithmetic, which is exact on"
-say "     all 1578 minutes. It is session_intervals' ReplacingMergeTree(interval_end)"
-say "     version column, which assumes re-derivation only ever extends an interval."
-say "  4. Changing the version column to a monotonic build counter converges on all"
-say "     1578 minutes, row for row, with no other change to the model."
-say "  5. Separately, cc_minute_delta.starts/ends are UInt64 and silently wrap when the"
-say "     corrective row is negated. Make them Int64."
+say "  2. This test is TWO-SIDED, so read both halves before concluding anything."
+say "     sql/70 deliberately KEEPS a ReplacingMergeTree(interval_end) variant to"
+say "     reproduce the historical defect. On that variant absorption still DIVERGES —"
+say "     3 of 1578 minutes, overcounting the PEAK by 37 (2924 vs 2887). That is the"
+say "     test proving it can still DETECT the bug, not a report that we have it."
+say "  3. On the build_version variant — which is what ${PROD} runs today — absorption"
+say "     CONVERGES on all 1578 minutes, row for row against the clean rebuild, peak 2887."
+say "  4. Root cause, for the record: versioning on interval_end assumes re-derivation"
+say "     only ever EXTENDS an interval. It does not — a provisional interval carries"
+say "     60s of tail grace and the completed derivation can place the true end EARLIER,"
+say "     so the stale longer row outranked the correct one permanently."
+say "  5. cc_minute_delta.starts/ends are Int64. As UInt64 they silently WRAPPED when"
+say "     ADR 0006 negated a corrective row — sum() stayed right by modular arithmetic"
+say "     so the bug hid, while max() returned 1.8e19."
 say "  6. Watermark W = 2400 s, set by the 2081 s straggler tail, not by truncation."
 say ""
-say "  Actions (schema changes — NOT applied to ${PROD} by this test):"
-say "    sql/10_intervals.sql  session_intervals: add build_version UInt64,"
-say "                          ENGINE = ReplacingMergeTree(build_version)"
-say "    sql/10_intervals.sql  cc_minute_delta: starts/ends -> SimpleAggregateFunction(sum, Int64)"
+say "  Both schema fixes are APPLIED to ${PROD} (commit 388a845) and the reconcile"
+say "  gate passes against them. This test is now a regression guard, not a bug report:"
+say "    sql/10_intervals.sql  session_intervals  ReplacingMergeTree(build_version)"
+say "    sql/10_intervals.sql  cc_minute_delta    starts/ends SimpleAggregateFunction(sum, Int64)"
 
 echo; echo "wrote $OUT"

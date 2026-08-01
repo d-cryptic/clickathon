@@ -68,9 +68,17 @@ CREATE TABLE IF NOT EXISTS sonyliv_trunc.session_intervals
     content_id       Int64,
     platform         LowCardinality(String),
     country          LowCardinality(String),
+    -- ADR 0008: the four raw dimensions that used to be dropped at derivation.
+    -- Order must match sql/10_intervals.sql exactly — truncation-test.sh seds
+    -- the REAL 30/40 derivations into this schema, so a mismatch is Code: 16.
+    app_version       LowCardinality(String),
+    audio_language    LowCardinality(String),
+    subtitle_language LowCardinality(String),
+    player_version    LowCardinality(String),
     interval_start   DateTime64(3),
     interval_end     DateTime64(3),
     is_open          UInt8,
+    build_version    UInt64,
     INDEX idx_start interval_start TYPE minmax GRANULARITY 1
 )
 ENGINE = ReplacingMergeTree(interval_end)
@@ -83,6 +91,10 @@ CREATE TABLE IF NOT EXISTS sonyliv_trunc.cc_minute_delta
     platform    LowCardinality(String),
     country     LowCardinality(String),
     content_id  Int64,
+    subtitle_language LowCardinality(String),
+    player_version    LowCardinality(String),
+    audio_language    LowCardinality(String),
+    app_version       LowCardinality(String),
     delta       SimpleAggregateFunction(sum, Int64),
     starts      SimpleAggregateFunction(sum, UInt64),
     ends        SimpleAggregateFunction(sum, UInt64)
@@ -110,9 +122,17 @@ CREATE TABLE IF NOT EXISTS sonyliv_trunc.session_intervals_prev
     content_id       Int64,
     platform         LowCardinality(String),
     country          LowCardinality(String),
+    -- ADR 0008: the four raw dimensions that used to be dropped at derivation.
+    -- Order must match sql/10_intervals.sql exactly — truncation-test.sh seds
+    -- the REAL 30/40 derivations into this schema, so a mismatch is Code: 16.
+    app_version       LowCardinality(String),
+    audio_language    LowCardinality(String),
+    subtitle_language LowCardinality(String),
+    player_version    LowCardinality(String),
     interval_start   DateTime64(3),
     interval_end     DateTime64(3),
-    is_open          UInt8
+    is_open          UInt8,
+    build_version    UInt64
 )
 ENGINE = MergeTree
 ORDER BY (video_session_id, interval_start)
@@ -129,6 +149,10 @@ CREATE TABLE IF NOT EXISTS sonyliv_trunc.cc_minute_delta_control
     platform    LowCardinality(String),
     country     LowCardinality(String),
     content_id  Int64,
+    subtitle_language LowCardinality(String),
+    player_version    LowCardinality(String),
+    audio_language    LowCardinality(String),
+    app_version       LowCardinality(String),
     delta       SimpleAggregateFunction(sum, Int64),
     starts      SimpleAggregateFunction(sum, UInt64),
     ends        SimpleAggregateFunction(sum, UInt64)
@@ -145,9 +169,17 @@ CREATE TABLE IF NOT EXISTS sonyliv_trunc.session_intervals_control
     content_id       Int64,
     platform         LowCardinality(String),
     country          LowCardinality(String),
+    -- ADR 0008: the four raw dimensions that used to be dropped at derivation.
+    -- Order must match sql/10_intervals.sql exactly — truncation-test.sh seds
+    -- the REAL 30/40 derivations into this schema, so a mismatch is Code: 16.
+    app_version       LowCardinality(String),
+    audio_language    LowCardinality(String),
+    subtitle_language LowCardinality(String),
+    player_version    LowCardinality(String),
     interval_start   DateTime64(3),
     interval_end     DateTime64(3),
-    is_open          UInt8
+    is_open          UInt8,
+    build_version    UInt64
 )
 ENGINE = ReplacingMergeTree(interval_end)
 ORDER BY (video_session_id, interval_start)
@@ -165,6 +197,10 @@ CREATE TABLE IF NOT EXISTS sonyliv_trunc.cc_minute_delta_stump
     platform    LowCardinality(String),
     country     LowCardinality(String),
     content_id  Int64,
+    subtitle_language LowCardinality(String),
+    player_version    LowCardinality(String),
+    audio_language    LowCardinality(String),
+    app_version       LowCardinality(String),
     delta       SimpleAggregateFunction(sum, Int64),
     starts      SimpleAggregateFunction(sum, UInt64),
     ends        SimpleAggregateFunction(sum, UInt64)
@@ -213,6 +249,13 @@ CREATE TABLE IF NOT EXISTS sonyliv_trunc.session_intervals_fix
     content_id       Int64,
     platform         LowCardinality(String),
     country          LowCardinality(String),
+    -- ADR 0008: the four raw dimensions that used to be dropped at derivation.
+    -- Order must match sql/10_intervals.sql exactly — truncation-test.sh seds
+    -- the REAL 30/40 derivations into this schema, so a mismatch is Code: 16.
+    app_version       LowCardinality(String),
+    audio_language    LowCardinality(String),
+    subtitle_language LowCardinality(String),
+    player_version    LowCardinality(String),
     interval_start   DateTime64(3),
     interval_end     DateTime64(3),
     is_open          UInt8,
@@ -229,6 +272,13 @@ CREATE TABLE IF NOT EXISTS sonyliv_trunc.session_intervals_fix_prev
     content_id       Int64,
     platform         LowCardinality(String),
     country          LowCardinality(String),
+    -- ADR 0008: the four raw dimensions that used to be dropped at derivation.
+    -- Order must match sql/10_intervals.sql exactly — truncation-test.sh seds
+    -- the REAL 30/40 derivations into this schema, so a mismatch is Code: 16.
+    app_version       LowCardinality(String),
+    audio_language    LowCardinality(String),
+    subtitle_language LowCardinality(String),
+    player_version    LowCardinality(String),
     interval_start   DateTime64(3),
     interval_end     DateTime64(3),
     is_open          UInt8,
