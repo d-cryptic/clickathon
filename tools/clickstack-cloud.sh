@@ -27,9 +27,10 @@
 #                                  per-dimension user counts (never delta sums)
 #
 # Dashboards 1–3 and 7 carry a MARKDOWN CAPTION tile stating the traps a viewer
-# would otherwise fall into (peak not summable: +2.4% platform / +94.7% content,
-# re-measured 2026-08-01 — docs/EXPLAINER.md §E.1; 33.6% of apparent watch time
-# excluded; title is not a key). The caption is part of the dashboard, not the
+# would otherwise fall into (dimension peaks are not summable, distinct users
+# are not session deltas, and title is not a key). Captions deliberately avoid
+# delivered-file-specific totals now that the official unseen release changes
+# them. The caption is part of the dashboard, not the
 # demo script, so the warning survives us.
 #
 # ARITHMETIC RULE the tiles obey (learned the hard way — the first version of
@@ -50,7 +51,9 @@
 #   tools/clickstack-cloud.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
+[ -n "${CH_DATABASE+x}" ] && CALLER_CH_DATABASE="$CH_DATABASE" || CALLER_CH_DATABASE=""
 [ -f .env ] && set -a && . ./.env && set +a
+[ -n "$CALLER_CH_DATABASE" ] && CH_DATABASE="$CALLER_CH_DATABASE"
 
 : "${CH_API_KEY_ID:?set CH_API_KEY_ID in .env (Cloud console -> Settings -> API Keys)}"
 : "${CH_API_KEY_SECRET:?set CH_API_KEY_SECRET in .env}"
@@ -303,6 +306,12 @@ plat, ctry, appv        = E["PLAT"], E["CTRY"], E["APPV"]
 audl, subl, plyv        = E["AUDL"], E["SUBL"], E["PLYV"]
 title, vt, cat          = E["TITLE"], E["VT"], E["CAT"]
 roll, ql                = E["ROLL"], E["QL"]
+# The observability tiles below watch OUR OWN pipeline in the query log. They
+# used to hardcode "sonyliv.", so pointing the dashboards at any other database
+# left every one of them silently empty — a panel that renders blank in a demo
+# reads as "the pipeline is idle", not "this filter is looking in the wrong
+# place". Follow CH_DATABASE like every other source does.
+DBN = E["DB"]
 now_title, now_vt, now_cat = E["NOW_TITLE"], E["NOW_VT"], E["NOW_CAT"]
 tumb, wm, conn, db      = E["TUMB"], E["WM"], E["CONN"], E["DB"]
 
@@ -350,8 +359,8 @@ dashboards = []
 
 # 1 ── THE HEADLINE ───────────────────────────────────────────────────────────
 # Three definitions of "watching", side by side and NEVER merged behind one
-# name. The naive tile makes the 3,743-vs-2,917 over-count visible instead of
-# asserted. No filters here: every tile is a total, and the two total-only
+# name. The live tiles make the naive over-count visible for whichever dataset
+# is loaded. No filters here: every tile is a total, and the two total-only
 # sources have no dimension columns to filter on.
 dashboards.append({
   "name": "SonyLIV concurrency",
@@ -360,12 +369,10 @@ dashboards.append({
   "tiles": [
     md("The gap IS the thesis", 0, 0, 12, 2,
        "**Three definitions of “watching”, never merged behind one name.** "
-       "At the accurate model's peak minute (2026-07-26 10:56) NAIVE session-span reads "
-       "**3,708** vs ACCURATE **2,917** — a **21.3% over-count eliminated**. "
-       "**33.6% of apparent watch time is backgrounded or paused** and is excluded. "
-       "Naive's own peak is 3,743 and lands *later* (10:59): it keeps counting sessions "
-       "after their viewers are gone. Stateless (2,894) still counts paused viewers — "
-       "the small accurate-vs-stateless gap is the pause exclusion, made visible."),
+       "NAIVE session-span keeps counting after viewers background, pause, or stop "
+       "heartbeating. ACCURATE uses state-gated active intervals; STATELESS is the "
+       "session-independent baseline. Read the live tiles for the loaded dataset—no "
+       "headline number in this caption is hand-computed or frozen."),
     number("Peak — ACCURATE (foreground-only)", acc,   0, 2, 3, 3,
            [sel("concurrent", "peak accurate")]),
     number("Peak — stateless baseline",         total, 3, 2, 3, 3,
@@ -374,7 +381,7 @@ dashboards.append({
            [sel("concurrent", "peak naive")], color="chart-cyan"),
     number("Peak — distinct users",             user,  9, 2, 3, 3,
            [sel("concurrent_users", "peak users")], color="chart-cyan"),
-    line("Concurrency — ACCURATE, gap + pause excluded (peak 2,917 @ 2026-07-26 10:56)",
+    line("Concurrency — ACCURATE, background + pause + heartbeat loss excluded",
          acc, 0, 5, 12, 4, [sel("concurrent", "accurate")]),
     line("ACCURATE (session-aware)",            acc,   0, 9, 4, 4, [sel("concurrent", "accurate")]),
     line("STATELESS (session-independent MV)",  total, 4, 9, 4, 4, [sel("concurrent", "stateless")]),
@@ -388,8 +395,8 @@ dashboards.append({
 # Every tile reads session-minute rows and counts distinct sessions/users, the
 # one aggregation that stays correct under ANY filter combination (a delta view
 # would need its running sum rebuilt after the filter — inexpressible in a
-# chart builder). At 1-minute zoom the count IS concurrency (verified: 2,917 /
-# 2,844 at the peak minute); at coarser buckets it is unique-actives-in-bucket
+# chart builder). At 1-minute zoom the count IS concurrency; at coarser buckets
+# it is unique-actives-in-bucket
 # and the tile names say so. Filters name ONLY the session-minute source: the
 # other sources on this dashboard lack the columns and would error, not no-op.
 sm_only = [sm]
@@ -412,10 +419,9 @@ dashboards.append({
   ],
   "tiles": [
     md("⚠ Peak is NOT summable across dimensions", 0, 0, 12, 2,
-       "**Do not add the bars.** Summing per-platform peaks overstates the true peak by "
-       "**+2.4%**; per-content by **+94.7%** (re-measured 2026-08-01 — sub-peaks land at "
-       "different minutes). Tiles count distinct sessions/users per bucket: at 1-minute "
-       "zoom that *is* concurrency (2,917 / 2,844 at the peak minute); zoomed out it is "
+       "**Do not add the bars.** Per-dimension peaks can land at different minutes, so "
+       "their sum is not the total peak. Tiles count distinct sessions/users per bucket: "
+       "at 1-minute zoom that *is* concurrency; zoomed out it is "
        "“distinct actives in the bucket”, a larger number — say which you mean. "
        "`audio_language` shows Hindi four ways (`hin`, `HIN`, `hin-hindi`, `hin-Hindi`): "
        "real un-normalised source data, not a panel bug (ADR 0011, not deployed to Cloud)."),
@@ -440,19 +446,18 @@ dashboards.append({
 # Time-series tiles read the per-label delta views (sum deltas at label grain,
 # then running sum — 80_content.sql), so max() is a genuine peak. The NOW panel
 # is argMax at each label's last minute (v_concurrency_*_now), timestamped by
-# as_of — on the frozen file that is 2026-07-26 ~11:30, inside the demo range.
+# as_of — it follows the loaded file's current endpoint.
 dashboards.append({
   "name": "SonyLIV content",
   "tags": ["clickathon"],
   "filters": [],
   "tiles": [
     md("⚠ Read the labels carefully", 0, 0, 12, 2,
-       "**`title` is not a key** — 2,773 titles are shared by 2–4 different `content_id`s "
-       "(1,418 collisions span categories), so a title row can merge distinct assets. The "
-       "arithmetic is right; the label is ambiguous. **`video_type` has three values**: "
-       "`vod`, `live`, and the empty string (2.85% of events) — the blank third series is "
-       "real. Summing peaks across titles overstates the true peak by **+94.7%** at "
-       "content grain: peaks are not summable."),
+       "**`title` is not a key**: multiple `content_id` values can share a title, so a "
+       "title row may merge distinct assets. The arithmetic is right; the label is "
+       "ambiguous. Blank catalog values are rendered explicitly rather than silently "
+       "dropped. Summing peaks across titles is invalid at content grain because peaks "
+       "land at different minutes."),
     table("Top titles by peak", title, 0, 2, 6, 4, "title",
           [sel("concurrent", "peak")], '"peak" DESC'),
     table("NOW — concurrency by title (as of last minute)", now_title, 6, 2, 6, 4, "title",
@@ -506,10 +511,10 @@ dashboards.append({
 # local stack; query_log can only show that and when the gate ran, and errors.
 # Time range for THIS dashboard: recent (e.g. last 24h) — build/reconcile runs
 # happen at operator time, and the watermark source is stamped now().
-W_SI  = "type = 'QueryFinish' AND query_kind = 'Insert' AND has(tables, 'sonyliv.session_intervals') AND has(tables, 'sonyliv.ev_raw')"
-W_CMD = "type = 'QueryFinish' AND query_kind = 'Insert' AND has(tables, 'sonyliv.cc_minute_delta') AND has(tables, 'sonyliv.session_intervals') AND NOT has(tables, 'sonyliv.ev_raw')"
-W_GATE = "type = 'QueryFinish' AND query_kind = 'Select' AND has(tables, 'sonyliv.ev_raw') AND has(tables, 'sonyliv.cc_minute_delta')"
-W_ERR = "type = 'ExceptionWhileProcessing' AND arrayExists(t -> startsWith(t, 'sonyliv.'), tables)"
+W_SI  = f"type = 'QueryFinish' AND query_kind = 'Insert' AND has(tables, '{DBN}.session_intervals') AND has(tables, '{DBN}.ev_raw')"
+W_CMD = f"type = 'QueryFinish' AND query_kind = 'Insert' AND has(tables, '{DBN}.cc_minute_delta') AND has(tables, '{DBN}.session_intervals') AND NOT has(tables, '{DBN}.ev_raw')"
+W_GATE = f"type = 'QueryFinish' AND query_kind = 'Select' AND has(tables, '{DBN}.ev_raw') AND has(tables, '{DBN}.cc_minute_delta')"
+W_ERR = f"type = 'ExceptionWhileProcessing' AND arrayExists(t -> startsWith(t, '{DBN}.'), tables)"
 dashboards.append({
   "name": "SonyLIV pipeline health (cloud)",
   "tags": ["clickathon", "observability"],
@@ -530,7 +535,7 @@ dashboards.append({
     line("Reconcile gate — runs and duration (ms)", ql, 0, 7, 6, 4,
          [sel("query_duration_ms", "gate duration ms", where=W_GATE),
           sel("query_duration_ms", "runs", agg="count", where=W_GATE)]),
-    line("Query exceptions touching sonyliv (should be flat 0)", ql, 6, 7, 6, 4,
+    line(f"Query exceptions touching {DBN} (should be flat 0)", ql, 6, 7, 6, 4,
          [sel("query_duration_ms", "exceptions", agg="count", where=W_ERR)]),
   ]})
 
@@ -539,7 +544,7 @@ dashboards.append({
 # AND bytes read, per the statement's "fast dashboard queries" requirement.
 # Scoped to SELECTs that touch sonyliv.* so ClickStack's own polling of
 # system tables does not drown the signal.
-W_OURS = "type = 'QueryFinish' AND query_kind = 'Select' AND arrayExists(t -> startsWith(t, 'sonyliv.'), tables)"
+W_OURS = f"type = 'QueryFinish' AND query_kind = 'Select' AND arrayExists(t -> startsWith(t, '{DBN}.'), tables)"
 dashboards.append({
   "name": "SonyLIV query cost",
   "tags": ["clickathon", "observability"],
@@ -592,9 +597,9 @@ dashboards.append({
     md("Users are a set, not a sum", 0, 0, 12, 2,
        "**Signed-in concurrency is `uniqExact(user_id)` per minute** — exact, not the "
        "HLL estimator, and never a sum of per-session deltas: one user can run several "
-       "sessions at once, and a delta sum would count them once per session. At the peak "
-       "minute (2026-07-26 10:56): **2,917 sessions vs 2,844 distinct users — 73 "
-       "multi-session viewers**. Peaks are **not summable** across platforms/countries/"
+       "sessions at once, and a delta sum would count them once per session. The live "
+       "session-minus-user tile measures the multi-session gap for the loaded dataset. "
+       "Peaks are **not summable** across platforms/countries/"
        "titles: a user watching on two devices is one user in the total but appears "
        "under both platforms."),
     number("Peak — concurrent users (uniqExact)", user, 0, 2, 4, 3,
@@ -624,6 +629,38 @@ dashboards.append({
     line("Users by title (top 20)", sm, 6, 13, 6, 4,
          [sel("user_id", "users", agg="count_distinct")], group="title"),
   ]})
+
+# ---------------------------------------------------------------------------
+# FULL-WIDTH LAYOUT. The tile helpers above carry hand-placed x/w on a 12-column
+# grid, which produced quarter-width (w=3) and half-width (w=6) panels sitting
+# side by side. At demo and screenshot resolution those are unreadable — axis
+# labels collide, series legends truncate, and a concurrency curve rendered in a
+# quarter of the width hides exactly the peaks and ramps the submission is meant
+# to show.
+#
+# Rather than re-place ~40 tiles by hand across 6 dashboards, normalise here:
+# every tile becomes full width and they stack vertically. Heights are raised
+# for the chart types that need vertical room; markdown keeps its own, since it
+# is a text header and stretching it just adds whitespace.
+#
+# This is the single place layout is decided. Do NOT reintroduce per-tile x/w —
+# the helpers still accept them so the call sites need no edit, but the values
+# are overridden here on purpose.
+FULL_W = 12
+MIN_H = {"line": 6, "table": 6, "number": 3, "markdown": None}
+
+def full_width(tiles):
+    y = 0
+    for tile in tiles:
+        disp = (tile.get("config") or {}).get("displayType", "line")
+        floor = MIN_H.get(disp, 6)
+        h = tile.get("h", 4) if floor is None else max(tile.get("h", 4), floor)
+        tile["x"], tile["w"], tile["y"], tile["h"] = 0, FULL_W, y, h
+        y += h
+    return tiles
+
+for d in dashboards:
+    full_width(d["tiles"])
 
 for i, d in enumerate(dashboards, 1):
     with open(os.path.join(E["DASH_DIR"], f"dash-{i:02d}.json"), "w") as f:
@@ -701,8 +738,8 @@ print(next((x.get("id","") for x in json.load(sys.stdin)["result"] if x.get("nam
 done
 
 echo
-echo "Open HyperDX. Dashboards 1-4 chart the July data: set the range to"
-echo "2026-07-14 -> 2026-07-26 or every tile renders EMPTY (the default"
-echo "last-15-minutes window is the single most repeated demo mistake)."
+echo "Open HyperDX. Dashboards 1-4 chart historical event time. For the"
+echo "official unseen release, start with 2026-07-31 -> 2026-08-01; the"
+echo "default last-15-minutes window renders a frozen competition file empty."
 echo "Dashboards 5-6 (pipeline health, query cost) are the opposite: they run"
 echo "on OPERATOR time — use a recent range like 'last 24 hours' there."
