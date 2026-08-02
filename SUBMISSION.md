@@ -39,9 +39,17 @@ Final-package checklist:
       `trufflehog git file://.`).
 - [ ] Rotate the ClickHouse Cloud password and any ClickStack/HyperDX API keys **after** the event
       regardless — they were pasted into local `.env` files on several machines.
-- [ ] Confirm `tools/fetch_data.sh` works from an anonymous clone (it pulls from the public
-      organiser repo; the 223 MB of data is deliberately not in this repo).
-- [ ] Confirm `demo/run.sh --offline` and `make ci` pass on a fresh clone with no `.env`.
+- [x] **Fresh-clone check — done 2026-08-02, and this is the first thing a judge will do.** Cloned
+      `main` to a clean directory and ran it with **no `.env` present**:
+      - `.env` did not travel into the clone ✓
+      - `demo/run.sh --offline` — **exit 0**, all five beats complete
+      - `make ci` — **exit 0**: lint `0 issues`, `go test -race` green across all five packages
+        (`cmd/sonyliv`, `internal/chdb`, `internal/config`, `internal/otelemit`,
+        `internal/pipelinehealth`), binary builds
+- [x] **`tools/fetch_data.sh` reaches the organiser's public repos anonymously** — verified
+      2026-08-02 with no credentials: docs base `HTTP 200`, LFS data base `HTTP 206` on a range
+      request. The 223 MB of data is deliberately not committed, so this path is what makes the
+      submission reproducible by someone who is not us.
 - [ ] Put source, final `README.md`, architecture, pitch PDF and video link in one team-named folder.
 - [ ] Add the hosted demo link and document which source column backs every dashboard filter.
 - [ ] Include the ClickStack deployment/config wiring, redacted `.env.example`, OTel config, the
