@@ -1,9 +1,9 @@
 TRUNCATION / OPEN-SESSION ABSORPTION TEST   (TODOS H4 + H8)
-generated 2026-08-02T02:10:41Z
-cut 2026-07-26 10:56:00  ·  isolated database sonyliv_trunc  ·  sonyliv read-only
+generated 2026-08-02T02:41:27Z
+cut 2026-07-26 10:56:00  ·  isolated database trunc_evsem  ·  sonyliv read-only
 --------------------------------------------------------------------------
 PHASE 0 — reset the test database (never touches sonyliv)
-  sonyliv_trunc dropped, recreated and schema reapplied from sql/70_truncation_test.sql
+  trunc_evsem dropped, recreated and schema reapplied from sql/70_truncation_test.sql
   policy view applied from sql/01_policy.sql (policy v1 (e965954b23d4) GAP_S=150 TAIL_S=60 UNCLOSED_PAUSE_TO_RUN_END=1 POINT_ACTIVITY_COUNTS=0)
 
 PHASE 1 — load the truncated slice: event_timestamp < 2026-07-26 10:56:00
