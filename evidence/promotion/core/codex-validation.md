@@ -1,276 +1,378 @@
-# CODEX check 5 — `promo/core`
-> **Summary:** **DO NOT PROMOTE.** The combined increment is not a coherent runnable state.
-> The stated copy claim **HOLDS**: exactly 64 changed files match `origin/dev`, including every changed `tools/` and `sql/` file.
-> Check 1 **DOES NOT HOLD**: promoted tools require omitted `dev` files, and the advertised unseen path necessarily calls one of them.
-> Check 2 **DOES NOT HOLD**: pinned `make ci` passes, but `sql/87_viz.sql` fails on a clean scratch database by reading `sonyliv.dict_content`.
-> Check 3 **DOES NOT HOLD**: newline forms are caught, but CRLF and block-comment-separated destructive SQL still bypass the graded scanner.
-> Check 4a and 4b **HOLD** identically at 17,028 minutes · 0 mismatched · max absolute difference 0 · peak 2,917; Check 6 **DOES NOT HOLD**.
+# CODEX check 5 — `promo/core`, second look
+> **Summary:** **DO NOT PROMOTE.** The combined increment is still not a coherent runnable state.
+> Check 1 **DOES NOT HOLD**: `promotion-deps.sh` reports COHERENT while required runtime assets are absent.
+> The copy claim **DOES NOT HOLD**: only 60 of the stated 64 copied files match the fetched `dev` state.
+> Check 2 **DOES NOT HOLD**: `make ci` passes, but clean scratch apply still fails in `sql/87_viz.sql`.
+> Check 3 **DOES NOT HOLD**: the candidate retains CRLF/block-comment bypasses; the third revision also misses `#` comments.
+> Checks 4a/4b **HOLD** identically at 17,028 · 0 · 0 · 2,917; ADR 0014 and Check 6 **DO NOT HOLD**.
 
-Validated 2026-08-02 from commit `deda6f4657d39ef767d01c36f1e0212a9b521105`, base
-`2b551b59b398da3ec82ca784c039c2520f5c7980f`. I made no product fix and wrote only this report.
-The pre-existing untracked `sqlite_mcp_server.db` was not touched. Every Cloud request in this audit was
-`SELECT` or `EXPLAIN SYNTAX`; no override named in the prohibition was set. One disposable local
-Memory table and one disposable local database were created for parser/scratch checks and removed.
+Validated 2026-08-02 from `c757be6767cf29a1dcfb240859998c88a4ec30d1`, against the Step Zero
+base `2b551b59b398da3ec82ca784c039c2520f5c7980` and fetched `dev` snapshot
+`daf1edee00c266f7e9b2f17a570519cb8df18729`. The shared refs advanced during the run to
+`origin/main=61bfa87ee14e67bab04d4ea1b369f74e41bc7543` and
+`origin/dev=c642066027cfd4deb6e19d0ca25ebb40f75433f4`; the 64-file comparison was repeated
+against that later `dev` and returned the same 60/4 split.
 
-## Step Zero and procedure
+I made no product fix and changed only this report. The pre-existing untracked
+`sqlite_mcp_server.db` was not touched. Cloud access was SELECT-only; no INSERT, TRUNCATE, ALTER,
+CREATE, DROP or OPTIMIZE was sent to Cloud. `REBUILD_GRADED`, `REPLACE_GRADED` and
+`APPLY_GRADED_DESTRUCTIVE` remained unset. One exactly named local scratch database was created,
+used for Check 2, dropped, and verified absent.
+
+Per the repository's official ClickHouse guidance, Cloud discovery and queries followed
+`agent-connect-mcp`, `agent-discovery-schema` and `agent-query-safety`: bounded result sets,
+execution timeouts and explicit scan caps. The gate needed a 100-million-row scan cap; a
+10-million cap stopped safely at 10.10 million rows before returning a verdict.
+
+## Step Zero and immutable scope
 
 Command:
 
 ```bash
+sc worktree status --json
+git status --short --branch
 git fetch origin
 git checkout promo/core
 git log --oneline -2
 ```
 
+Exact decisive output:
+
+```text
+{"kind":"worktree_status","response":{"branch":"chore/promo-core-validation","target_branch":"main","files_changed":1,"insertions":0,"deletions":0}}
+## chore/promo-core-validation
+?? sqlite_mcp_server.db
+Switched to a new branch 'promo/core'
+branch 'promo/core' set up to track 'origin/promo/core'.
+c757be6 promote: add queries/validate_source_contract.sql — the gate shipped without its SQL
+8dd6e42 docs: Codex check-5 verdict on promo/core (DO NOT PROMOTE)
+```
+
+Ancestry command:
+
+```bash
+git rev-list --left-right --count 2b551b5...HEAD
+git log --oneline 2b551b5..HEAD
+```
+
 Exact output:
 
 ```text
-Switched to branch 'promo/core'
-Your branch is ahead of 'main' by 1 commit.
-  (use "git push" to publish your local commits)
+0       3
+c757be6 promote: add queries/validate_source_contract.sql — the gate shipped without its SQL
+8dd6e42 docs: Codex check-5 verdict on promo/core (DO NOT PROMOTE)
 deda6f4 promote: the model and the tooling that runs it (core increment)
-2b551b5 docs: record what main was before any feature was promoted
 ```
+
+Verdict: **DOES NOT HOLD** — the supplied “off main, one commit” setup claim is false. The product
+increment is one commit (`deda6f4`), but the candidate ref contains that increment, the prior rejected
+report, and the latest SQL addition. This history discrepancy is not the promotion-blocking finding;
+the resulting tree fails independently below.
 
 I read the six checks with:
 
 ```bash
-git show origin/dev:docs/PROMOTION.md
+git show daf1edee00c266f7e9b2f17a570519cb8df18729:docs/PROMOTION.md
 ```
 
-Verdict: **HOLDS** — the branch is exactly one commit off the stated `main` base. I did not merge
-`dev` into any branch.
+Verdict: **HOLDS** — the required promotion procedure was read from the fetched `dev` snapshot. No
+merge from `dev` was performed.
 
-## Check 1 — isolate and coherence
+## Check 1 — isolate, copy and dependency closure
 
-### Claim 1.1 — all 64 copied files are byte-identical to `origin/dev`
+### Claim 1.1 — all 64 copied files match `dev`
 
-Command:
+The original 64-copy set is `deda6f4`'s files excluding its deliberate runbook edit and the old
+Codex report. Exact command:
 
 ```bash
-base=2b551b5
-same=0; different=0; absent=0
-while IFS= read -r file; do
-  head_blob=$(git rev-parse "HEAD:$file")
-  if git cat-file -e "origin/dev:$file" 2>/dev/null; then
-    dev_blob=$(git rev-parse "origin/dev:$file")
-    if [ "$head_blob" = "$dev_blob" ]; then
-      same=$((same+1))
-    else
-      printf 'DIFFERS %s\n' "$file"
-      different=$((different+1))
-    fi
+dev_snapshot=daf1edee00c266f7e9b2f17a570519cb8df18729
+copy_total=0; copy_same=0; copy_different=0
+while IFS= read -r copied_file; do
+  copy_total=$((copy_total+1))
+  if git cat-file -e "${dev_snapshot}:$copied_file" 2>/dev/null &&
+     [ "$(git rev-parse "HEAD:$copied_file")" =
+       "$(git rev-parse "${dev_snapshot}:$copied_file")" ]; then
+    copy_same=$((copy_same+1))
   else
-    printf 'ABSENT_ON_DEV %s\n' "$file"
-    absent=$((absent+1))
+    printf 'DIFFERS %s\n' "$copied_file"
+    copy_different=$((copy_different+1))
   fi
-done < <(git diff --name-only "$base"..HEAD)
-printf 'same=%d different=%d absent_on_dev=%d total=%d\n' \
-  "$same" "$different" "$absent" "$((same+different+absent))"
-printf 'tools_sql_diff_count='
-git diff --name-only HEAD..origin/dev -- tools sql | wc -l
+done < <(git diff-tree --no-commit-id --name-only -r deda6f4 |
+         rg -v '^(docs/RUNBOOK_UNSEEN\.md|docs/codex-validation/004\.md)$')
+printf 'same=%d different=%d total=%d\n' "$copy_same" "$copy_different" "$copy_total"
 ```
 
 Exact output:
 
 ```text
-DIFFERS docs/RUNBOOK_UNSEEN.md
-ABSENT_ON_DEV docs/codex-validation/004.md
-same=64 different=1 absent_on_dev=1 total=66
-tools_sql_diff_count=       0
+DIFFERS sql/87_viz.sql
+DIFFERS tools/README.md
+DIFFERS tools/apply-sql.sh
+DIFFERS tools/unseen-run.sh
+same=60 different=4 total=64
 ```
 
-Verdict: **HOLDS** for the stated 64-file copy claim. The two other commit files are not part of that
-copy set: this branch deliberately edits `docs/RUNBOOK_UNSEEN.md`, and carries the earlier Codex report
-which is absent on `origin/dev`. All 46 changed `tools/`/`sql/` files match `origin/dev` byte-for-byte.
+Repeated after `origin/dev` advanced to `c642066`:
 
-### Claim 1.2 — the combined increment contains every cross-file dependency it needs
+```text
+DIFFERS sql/87_viz.sql
+DIFFERS tools/README.md
+DIFFERS tools/apply-sql.sh
+DIFFERS tools/unseen-run.sh
+latest_dev_same=60 different=4 total=64
+```
 
-Command:
+The newly added query does match both trees:
 
 ```bash
-for file in \
-  queries/validate_source_contract.sql \
+git rev-parse HEAD:queries/validate_source_contract.sql
+git rev-parse daf1edee:queries/validate_source_contract.sql
+```
+
+```text
+46d3fe020baa86e87b8de64d408972df4077c6a6
+46d3fe020baa86e87b8de64d408972df4077c6a6
+```
+
+Diffstat for the four stale copies:
+
+```bash
+git diff --stat HEAD..daf1edee -- \
+  sql/87_viz.sql tools/apply-sql.sh tools/README.md tools/unseen-run.sh
+```
+
+```text
+ sql/87_viz.sql      |   9 +++-
+ tools/README.md     |   1 +
+ tools/apply-sql.sh  |  10 +++-
+ tools/unseen-run.sh | 128 ++++++++++++++++++++++++++++++++++++++++++++++------
+ 4 files changed, 131 insertions(+), 17 deletions(-)
+```
+
+Verdict: **DOES NOT HOLD** — the query addition is correct, but four of the 64 files no longer match
+the fetched `dev` state. Those are not incidental files: they contain the claimed scratch fix, the
+claimed scanner fix, the Q37 unseen-runner agreement fix, and a tooling-catalogue update.
+
+### Claim 1.2 — `promotion-deps.sh` proves the candidate coherent
+
+The checker itself is absent from the candidate:
+
+```bash
+test -f tools/promotion-deps.sh && echo PRESENT || echo 'HEAD tools/promotion-deps.sh: ABSENT'
+```
+
+```text
+HEAD tools/promotion-deps.sh: ABSENT
+```
+
+I executed the fetched `dev` version, removing only its `cd` because it was streamed rather than
+materialised under `tools/`:
+
+```bash
+git show daf1edee:tools/promotion-deps.sh |
+  sed '/^cd "$(dirname "$0")\/\.\."$/d' |
+  bash -s -- promo/core 2b551b59b398da3ec82ca784c039c2520f5c7980
+```
+
+Exact output:
+
+```text
+candidate promo/core carries 68 files
+
+
+COHERENT — every referenced file that differs from 2b551b59b398da3ec82ca784c039c2520f5c7980 is carried.
+```
+
+That green result is false. Required candidate/dev/base states:
+
+```bash
+for dependency_path in \
   evidence/liveness/vocabulary.tsv \
-  evidence/benchmark/b01_day_peak_avg_total.sql \
-  evidence/query-robustness/cases.tsv \
+  evidence/benchmark \
+  evidence/query-robustness \
   evidence/landing/identity.txt; do
-  if [ -e "$file" ]; then head_state=PRESENT; else head_state=ABSENT; fi
-  if git cat-file -e "origin/dev:$file" 2>/dev/null; then dev_state=PRESENT; else dev_state=ABSENT; fi
-  printf '%-7s %-7s %s\n' "$head_state" "$dev_state" "$file"
+  # print tree existence at HEAD, dev snapshot and base
 done
 ```
 
 Exact output:
 
 ```text
-ABSENT  PRESENT queries/validate_source_contract.sql
-ABSENT  PRESENT evidence/liveness/vocabulary.tsv
-ABSENT  PRESENT evidence/benchmark/b01_day_peak_avg_total.sql
-ABSENT  PRESENT evidence/query-robustness/cases.tsv
-ABSENT  PRESENT evidence/landing/identity.txt
+evidence/liveness/vocabulary.tsv HEAD=ABSENT DEV=PRESENT BASE=ABSENT
+evidence/benchmark               HEAD=ABSENT DEV=PRESENT BASE=ABSENT
+evidence/query-robustness        HEAD=ABSENT DEV=PRESENT BASE=ABSENT
+evidence/landing/identity.txt    HEAD=ABSENT DEV=PRESENT BASE=ABSENT
 ```
 
-These are executable dependencies, not prose-only references:
+They are real references:
 
 ```bash
-rg -n 'SQL_FILE=|VOCAB=|dies without|BENCH_DIR=|RB=evidence/query-robustness|validate-source-contract' \
-  tools/validate-source-contract.sh tools/bench.sh tools/query-robustness.sh tools/unseen-run.sh
+rg -n 'BENCH_DIR=|RB=evidence/query-robustness|VOCAB=|identity.txt' \
+  tools/bench.sh tools/query-robustness.sh tools/validate-source-contract.sh \
+  tools/landing-test.sh sql/05_landing.sql
 ```
 
 Relevant exact output:
 
 ```text
-tools/validate-source-contract.sh:16:# 2 = could not run. The vocabulary contract is evidence/liveness/vocabulary.tsv
-tools/validate-source-contract.sh:36:SQL_FILE="$ROOT/queries/validate_source_contract.sql"
-tools/validate-source-contract.sh:37:VOCAB="$ROOT/evidence/liveness/vocabulary.tsv"
 tools/bench.sh:20:BENCH_DIR=evidence/benchmark
 tools/query-robustness.sh:34:RB=evidence/query-robustness
-tools/unseen-run.sh:349:if [ -x tools/validate-source-contract.sh ]; then
-tools/unseen-run.sh:352:  if tools/validate-source-contract.sh $CONTRACT_ARGS --database "$DB" 2>&1 | tee -a "$OUT"; then
+tools/validate-source-contract.sh:37:VOCAB="$ROOT/evidence/liveness/vocabulary.tsv"
+tools/landing-test.sh:38:OUT=evidence/landing/identity.txt
+sql/05_landing.sql:258:-- That identity is proven, not asserted: evidence/landing/identity.txt.
 ```
 
-The source-contract tool proves the failure before making a request:
+The promoted source-contract tool now has its SQL, but still cannot run:
 
 ```bash
-tools/validate-source-contract.sh -c --database sonyliv
+env -u REBUILD_GRADED -u REPLACE_GRADED -u APPLY_GRADED_DESTRUCTIVE \
+  TARGET=cloud tools/validate-source-contract.sh -c --database sonyliv
 ```
 
-Exact failure:
+Exact output:
 
 ```text
-validate-source-contract: missing /Users/barun/.superconductor/worktrees/clickathon-project/sc-coherent-fluxon-70c0/queries/validate_source_contract.sql
+validate-source-contract: missing /Users/barun/.superconductor/worktrees/clickathon-project/sc-cooled-dewar-1f71/evidence/liveness/vocabulary.tsv — the vocabulary contract is half the gate (doubts/11)
+rc=2
 ```
 
-Consequences on this tree:
+Why the checker misses this, from its own lines 29–44:
 
-- `tools/validate-source-contract.sh` cannot run because both mandatory inputs are absent.
-- `tools/unseen-run.sh` sees that tool as executable, calls it after loading, and aborts unless the
-  operator sets an acknowledgement override. The one-command unseen path is therefore not runnable.
-- `tools/bench.sh` has no benchmark query set.
-- `tools/query-robustness.sh` has no cases, fixtures, shapes, truths, invariants, or comparator.
-- ADR 0030 names `evidence/landing/identity.txt` as owned proof, but the accepted ADR was promoted
-  without that proof.
+```text
+case "$f" in *.md|evidence/*|docs/*) continue ;; esac
+grep -oE '\b(sql|tools|queries|internal|cmd)/[A-Za-z0-9_./-]+'
+[ -f "$r" ] || continue
+git diff --quiet "$BASE" dev -- "$r" 2>/dev/null && continue
+```
 
-Verdict: **DOES NOT HOLD** — copying all of `tools/` and `sql/` still did not produce their runnable
-dependency closure. The omitted dependencies exist on `origin/dev`, so this is another incomplete
-file-state promotion, not an external-data limitation.
+There are three independent under-reporting mechanisms:
 
-## Check 2 — build, tests, and scratch SQL
+1. The extractor does not include the `evidence/` prefix, so it cannot see the vocabulary file,
+   benchmark directory, robustness directory, or ADR proof targets.
+2. `[ -f "$r" ]` intentionally discards directories. Here that hides two real runtime input trees,
+   `evidence/benchmark` and `evidence/query-robustness`; they are not Go import paths.
+3. It checks the working tree filesystem and mutable local `dev`, not `BR:<path>` and the fetched
+   `origin/dev` snapshot. During this run `dev` moved from `daf1edee` to `c642066`, yet the tool has
+   no parameter or output showing which `dev` it used.
 
-### Claim 2.1 — `make ci` is green from the documented pinned shell
+Verdict: **DOES NOT HOLD** — `COHERENT` is a false positive. The source-contract gate demonstrably
+exits 2 before any query, the benchmark runner lacks every benchmark SQL/params file, and the
+query-robustness runner lacks its cases, fixtures, shapes, truths, comparator and invariants.
 
-The ambient shell had golangci-lint v1 and correctly could not read the v2 config. Per `docs/GO.md`, I
-approved `.envrc` and used the pinned devbox environment:
+### Claim 1.3 — SQL cross-file closure is runnable
+
+All changed SQL plus unchanged prerequisites were applied in pipeline order to the exact local
+database `codex_promo_core_1f71`. Preflight first proved it did not exist; cleanup dropped only that
+validated name and then counted remaining databases with that name.
+
+Command shape:
+
+```bash
+scratch_db=codex_promo_core_1f71
+docker exec -i ch clickhouse-client --database default \
+  --query "SELECT count() FROM system.databases WHERE name = '$scratch_db' FORMAT TSVRaw"
+docker exec -i ch clickhouse-client --database default --query "CREATE DATABASE $scratch_db"
+for sql_file in sql/00_schema.sql sql/05_landing.sql sql/10_intervals.sql \
+  sql/12_publish.sql sql/15_normalise.sql sql/20_views.sql \
+  sql/30_build_intervals.sql sql/40_deltas.sql sql/45_user_concurrency.sql \
+  sql/50_hour_agg.sql sql/60_projection.sql sql/80_content.sql sql/85_windows.sql \
+  sql/87_viz.sql sql/90_reconcile.sql; do
+  CH_DATABASE_LOCAL="$scratch_db" TARGET=local \
+    tools/apply-sql.sh --database "$scratch_db" "$sql_file"
+done
+docker exec -i ch clickhouse-client --database default --query \
+  "DROP DATABASE codex_promo_core_1f71"
+```
+
+Exact result summary:
+
+```text
+scratch_preflight name=codex_promo_core_1f71 existing=0
+APPLY sql/00_schema.sql              PASS
+APPLY sql/05_landing.sql             PASS
+APPLY sql/10_intervals.sql           PASS
+APPLY sql/12_publish.sql             PASS
+APPLY sql/15_normalise.sql           PASS
+APPLY sql/20_views.sql               PASS
+APPLY sql/30_build_intervals.sql     PASS
+APPLY sql/40_deltas.sql              PASS
+APPLY sql/45_user_concurrency.sql    PASS
+APPLY sql/50_hour_agg.sql            PASS
+APPLY sql/60_projection.sql          PASS
+APPLY sql/80_content.sql             PASS
+APPLY sql/85_windows.sql             PASS
+APPLY sql/87_viz.sql                 FAIL rc=1
+Code: 36. DB::Exception: Dictionary (`sonyliv.dict_content`) not found
+APPLY sql/90_reconcile.sql           PASS
+scratch_apply_failures=1
+scratch_cleanup remaining=0
+```
+
+Verdict: **DOES NOT HOLD** — SQL closure still fails in the same file as the first review. The fix
+exists on `dev`; it was not copied onto this candidate.
+
+Overall Check 1 verdict: **DOES NOT HOLD**.
+
+## Check 2 — build, tests and scratch SQL
+
+### Claim 2.1 — pinned CI is green
+
+Command:
 
 ```bash
 direnv allow
 direnv exec . make ci
 ```
 
-Exact terminal portion:
+Exact terminal output:
 
 ```text
 go vet ./...
 golangci-lint run ./...
 0 issues.
 CGO_ENABLED=1 go test -race -count=1 ./...
-?   	github.com/d-cryptic/clickathon/cmd/sonyliv	[no test files]
-ok  	github.com/d-cryptic/clickathon/internal/chdb	1.560s
-ok  	github.com/d-cryptic/clickathon/internal/config	1.941s
-ok  	github.com/d-cryptic/clickathon/internal/otelemit	2.783s
-ok  	github.com/d-cryptic/clickathon/internal/pipelinehealth	2.347s
-go build  -trimpath -ldflags '-s -w -X main.version=deda6f4' -o bin/sonyliv ./cmd/sonyliv
+?    github.com/d-cryptic/clickathon/cmd/sonyliv [no test files]
+ok   github.com/d-cryptic/clickathon/internal/chdb
+ok   github.com/d-cryptic/clickathon/internal/config
+ok   github.com/d-cryptic/clickathon/internal/otelemit
+ok   github.com/d-cryptic/clickathon/internal/pipelinehealth
+go build -trimpath -ldflags '-s -w -X main.version=c757be6' -o bin/sonyliv ./cmd/sonyliv
 ```
 
-Additional read-only syntax pass:
+Auxiliary syntax pass, scoped to files present in the immutable candidate diff:
 
 ```text
-bash_syntax=PASS files=      32
-python_syntax=PASS files=2
+bash_syntax files=25 failures=0
+python_syntax files=2 failures=0
 ```
 
 Verdict: **HOLDS**.
 
-### Claim 2.2 — touched SQL applies cleanly to a scratch database
+### Claim 2.2 — touched SQL applies to a clean scratch database
 
-I created the exact local database `codex_promo_core_70c0`, applied the dependencies and changed SQL in
-pipeline order, and installed a trap that dropped only that validated name. It failed at the newly
-promoted visualization SQL:
+Command and exact output are recorded under Claim 1.3.
 
-```text
-APPLY sql/00_schema.sql ... PASS
-APPLY sql/05_landing.sql ... PASS
-APPLY sql/10_intervals.sql ... PASS
-APPLY sql/12_publish.sql ... PASS
-APPLY sql/15_normalise.sql ... PASS
-APPLY sql/20_views.sql ... PASS
-APPLY sql/30_build_intervals.sql ... PASS
-APPLY sql/40_deltas.sql ... PASS
-APPLY sql/45_user_concurrency.sql ... PASS
-APPLY sql/50_hour_agg.sql ... PASS
-APPLY sql/60_projection.sql ... PASS
-APPLY sql/80_content.sql ... PASS
-APPLY sql/85_windows.sql ... PASS
-APPLY sql/87_viz.sql ... FAIL rc=1
-Code: 36. DB::Exception: Dictionary (`sonyliv.dict_content`) not found
-```
-
-The executable reference is:
-
-```bash
-rg -n "dictGet\('sonyliv\.dict_content'" sql/87_viz.sql
-```
-
-Exact output:
-
-```text
-sql/87_viz.sql:82:    dictGet('sonyliv.dict_content', 'title', tuple(content_id)) AS title,
-```
-
-Cleanup verification:
-
-```text
-scratch_databases_remaining
-0
-```
-
-Verdict: **DOES NOT HOLD** — Check 2 requires touched SQL to apply to scratch. The hard-coded graded
-dictionary makes `sql/87_viz.sql` non-portable and the clean apply stops before the remaining files.
+Verdict: **DOES NOT HOLD** — `sql/87_viz.sql` still reads the graded database's dictionary.
 
 Overall Check 2 verdict: **DOES NOT HOLD**.
 
 ## Check 3 — live read-only claims and accident guards
 
-### Claim 3.1 — target resolution is explicit and typo-safe
+### Claim 3.1 — target resolution and ordinary graded guards refuse safely
 
-With the existing project environment exported, command:
+The project `.env` was sourced in-process without printing values. All override variables were
+explicitly removed from each environment.
 
-```bash
-TARGET=cloud tools/ch "SELECT concat(currentDatabase(), ' ', version())"
-TARGET=local tools/ch "SELECT concat(currentDatabase(), ' ', version())"
-TARGET=Cloud tools/ch "SELECT currentDatabase()"
-```
-
-Exact output:
-
-```text
-sonyliv 26.2.1.525
-default 26.7.1.1315
-tools/ch: TARGET='Cloud' is not a target. Use 'local' or 'cloud' (or the -c flag). Refusing to guess — see ADR 0018.
-```
-
-Verdict: **HOLDS** for `tools/ch`.
-
-### Claim 3.2 — ordinary graded rebuild and raw-replacement accidents refuse
-
-Commands (the three override variables were explicitly unset, never set):
+Commands:
 
 ```bash
-env -u REBUILD_GRADED -u APPLY_GRADED_DESTRUCTIVE TARGET=cloud tools/build-model.sh
-env -u REPLACE_GRADED TARGET=cloud tools/load.sh --replace \
-  /Users/barun/Developers/personal/clickathon-project/data/ch-hackathon-raw-data.csv \
-  /Users/barun/Developers/personal/clickathon-project/data/ch-hackathon-content-data.csv
+env -u REBUILD_GRADED -u REPLACE_GRADED -u APPLY_GRADED_DESTRUCTIVE \
+  TARGET=cloud tools/build-model.sh
+env -u REBUILD_GRADED -u REPLACE_GRADED -u APPLY_GRADED_DESTRUCTIVE \
+  TARGET=cloud tools/load.sh --replace <raw.csv> <content.csv>
+env -u REBUILD_GRADED -u REPLACE_GRADED -u APPLY_GRADED_DESTRUCTIVE \
+  TARGET=Cloud tools/ch "SELECT 1 LIMIT 1"
 ```
 
 Exact decisive output:
@@ -284,360 +386,423 @@ tools/load.sh: REFUSING to --replace the graded database 'sonyliv'.
   This TRUNCATEs sonyliv.ev_raw (905558 rows) and
   sonyliv.content_dim (33464 rows).
 rc=1
-```
 
-Verdict: **HOLDS**.
-
-### Claim 3.3 — flattening defeats newline formatting and benign SQL remains usable
-
-I supplied read-only `EXPLAIN SYNTAX` statements, so a missed match could not mutate Cloud. Exact
-results:
-
-```text
---- benign ---
-  /tmp/zshLPGUYo           ... 1
-ok
-done.
-rc=0
-
---- newline_drop ---
-=== apply-sql.sh FAILED ===
-/tmp/zshqUjooU contains DROP or TRUNCATE and 'sonyliv' is the GRADED database.
-rc=1
-
---- newline_delete ---
-=== apply-sql.sh FAILED ===
-/tmp/zshvnXJ1H contains DROP or TRUNCATE and 'sonyliv' is the GRADED database.
-rc=1
-
---- newline_alter_drop ---
-=== apply-sql.sh FAILED ===
-/tmp/zshIaO97v contains DROP or TRUNCATE and 'sonyliv' is the GRADED database.
+tools/ch: TARGET='Cloud' is not a target. Use 'local' or 'cloud' (or the -c flag). Refusing to guess — see ADR 0018.
 rc=1
 ```
 
-Verdict: **HOLDS** for LF/newline forms and the benign negative control.
+Verdict: **HOLDS** for these three entry points. Neither graded guard needed or received an override.
 
-### Claim 3.4 — the destructive scanner resists other ordinary formatting
-
-The implementation removes LF and tab, but not CR, and strips only `--` comments, not `/* ... */`.
-Running its exact two regular expressions against four inputs produced:
-
-```text
-crlf_drop first_regex=1 second_regex=1 normalized_hex=44524f500d205441424c452065765f7261773b
-block_comment_drop first_regex=1 second_regex=1 normalized_hex=44524f502f2a2a2f5441424c452065765f7261773b
-block_comment_delete first_regex=1 second_regex=1 normalized_hex=44454c4554452f2a2a2f46524f4d2065765f72617720574845524520303b
-newline_drop first_regex=0 second_regex=1 normalized_hex=44524f50205441424c452065765f7261773b
-```
-
-`0` means matched; both scanner expressions return `1` for CRLF and block-comment forms. Safe Cloud
-probes confirm they pass the guard and reach the server instead of producing the guard refusal:
-
-```text
---- crlf_drop ---
-  /tmp/zshENkAZo           ... Code: 62. DB::Exception: Syntax error ... TABLE ev_raw ...
-FAILED
-rc=1
-
---- block_comment_drop ---
-  /tmp/zsho5DdE9           ... Code: 62. DB::Exception: Syntax error ... TABLE ev_raw ...
-FAILED
-rc=1
-```
-
-Those server errors are expected because the safe wrapper is `EXPLAIN SYNTAX`; the important result is
-that the scanner did not stop either file. To prove the underlying comment-separated DDL is valid
-ClickHouse SQL, I used one uniquely named disposable local Memory table:
-
-```bash
-docker exec ch clickhouse-client --database default --multiquery --query \
-  $'CREATE TABLE codex_guard_probe_70c0 (x UInt8) ENGINE=Memory;\nDROP/**/TABLE codex_guard_probe_70c0;'
-```
-
-Exact output and cleanup check:
-
-```text
-block_comment_drop_parse_rc=0 remaining_tables=0
-```
-
-A CRLF-separated local `DROP` likewise returned `crlf_drop_parse_rc=0`.
-
-Verdict: **DOES NOT HOLD** — CRLF is a normal file format and block comments are valid SQL formatting.
-This is not the acknowledged exported-function attacker bypass; it is the same accidental formatting
-threat class as the LF finding. A real destructive statement in either form would be sent to Cloud.
-
-Overall Check 3 verdict: **DOES NOT HOLD**.
-
-## ADR claims on this tree
-
-### ADR 0009 — shared resume rule and deterministic attribution
+### Claim 3.2 — `sql/87_viz.sql` is unqualified; all siblings are comments
 
 Command:
 
 ```bash
-rg -n 'arrayFirst\(x -> x >= p|arrayFilter\(w -> w\.2 > w\.1' \
-  sql/30_build_intervals.sql sql/90_reconcile.sql
-for file in sql/30_build_intervals.sql sql/40_deltas.sql; do sed 's/--.*//' "$file"; done \
-  | rg -c '(^|[^A-Za-z])any\(' || true
+rg -n 'sonyliv\.' sql
 ```
 
-Exact relevant output:
+Exact candidate output:
 
 ```text
-sql/30_build_intervals.sql:195:            arrayFilter(w -> w.2 > w.1, arraySort(arrayMap(
-sql/30_build_intervals.sql:197:                        if(arrayFirst(x -> x >= p, resumes) = 0,
-sql/30_build_intervals.sql:202:                           arrayFirst(x -> x >= p, resumes)),
-sql/90_reconcile.sql:116:            arrayFilter(w -> w.2 > w.1, arraySort(arrayMap(
-sql/90_reconcile.sql:118:                        if(arrayFirst(x -> x >= p, p2.rs) = 0,
-sql/90_reconcile.sql:122:                           arrayFirst(x -> x >= p, p2.rs)),
+sql/80_content.sql:32:--     dictGet('sonyliv.dict_content', 'title', tuple(content_id))
+sql/60_projection.sql:35:-- never from the text. An earlier version hard-coded `sonyliv.`, which made the file
+sql/87_viz.sql:82:    dictGet('sonyliv.dict_content', 'title', tuple(content_id)) AS title,
+sql/70_truncation_test.sql:32:-- Mirror of sonyliv.ev_raw. Same engine, same sort key, same settings — the
 ```
 
-The executable `any()` count is zero. Read-only live measurements:
+After stripping `/*…*/` and `--` comments, exact output:
 
 ```text
-pause_events	same_second_pause_events	pct
-27340	2697	9.86
-
-ev_raw	intervals	delta_rows	hour_rows	peak	peak_minute	hours	user_peak
-905558	30323	28073	26254	2917	2026-07-26 10:56:00	1978.1	2844
+82:    dictGet('sonyliv.dict_content', 'title', tuple(content_id)) AS title,
+FILE sql/87_viz.sql
 ```
 
-Verdict: **HOLDS** for the current tree and live model. The `>=` rule and zero-length filter are in
-both shared-spec implementations, and no executable `any()` remains in interval/delta derivation.
+On the fetched `dev` snapshot, comment-stripped output is empty. Raw `dev` matches are four comments,
+in `sql/60_projection.sql`, `sql/70_truncation_test.sql`, `sql/80_content.sql` and `sql/87_viz.sql`.
 
-### ADR 0011 — query-time normalization
+Verdict: **DOES NOT HOLD** on the candidate — `sql/87_viz.sql` is still executable and qualified.
+The substantive sibling claim **HOLDS** on `dev`, but there are three sibling files, not two; all
+three are comments.
 
-Read-only live query output:
+### Claim 3.3 — the third-revision scanner catches ordinary formatting
 
-```text
-raw_hin_peak	norm_hin_peak	normalisation_functions	normalisation_views
-1774	2196	6	4
-```
-
-Verdict: **DOES NOT HOLD** as written, though the mechanism holds. The current tree has the expected
-normalization layer and the current live pair is 1,774→2,196. The ADR's first seven lines and
-Consequences still claim 1,768→2,180, so its accepted quantitative claim is stale on this combined
-tree. `sql/15_normalise.sql` also contains later preprocessing objects whose documentation is omitted.
-
-### ADR 0014 — earliest tied peak minute
-
-Read-only comparison of the stored grand-total hour tier against an independently grouped minute view:
-
-```text
-hours_compared	exact	mismatched
-98	98	0
-```
-
-`tools/unseen-run.sh` also uses `min(peak_minute)` / `min(minute)` at its two submitted-answer sites.
-But the absolute ADR rule says earliest wins “at every tier, every grain and every cube level”; this
-tree still contains:
-
-```text
-sql/90_reconcile.sql:216:            (SELECT argMax(minute, truth) FROM compared),
-```
-
-Verdict: **DOES NOT HOLD** for the absolute “everywhere” claim. The serving tier and unseen answer path
-hold at 98/98, but the gate's peak sample remains a bare, merge-order-dependent `argMax`, exactly the
-site ADR 0014 inventories.
-
-### ADR 0018 — one target, one database
-
-The `tools/ch` probes above **HOLD**. Environment capture is also present in `tools/ch`, `load.sh`,
-`apply-sql.sh`, `build-model.sh`, and `reconcile.sh`. However the ADR still states “Resolution rule,
-every layer” while its own Known residue admits `load.sh` and `apply-sql.sh` locally fall back to
-`CH_DATABASE` when `CH_DATABASE_LOCAL` is absent.
-
-Verdict: **DOES NOT HOLD** for the blanket every-layer/no-cross-target-fallback claim; **HOLDS** for
-the five promoted environment-capture paths and the tested explicit `tools/ch` target behavior.
-
-### ADR 0022 — `cube_level` is the structural rollup marker
-
-Static and read-only live output:
-
-```text
-sorting_key	cube_level_type	content_minus_one	platform_star	country_star	landing_objects
-platform, country, content_id, cube_level, hour	UInt8	0	0	0	0
-```
-
-The tree pins `cube_level` through `sql/50_hour_agg.sql`, `sql/85_windows.sql`,
-`tools/build-model.sh`, `tools/clickstack-cloud.sh`, and the unseen answer path.
-
-Verdict: **HOLDS** for schema, consumers, and the claim that graded data has zero sentinel collisions.
-The manufactured-day measurements are **UNVERIFIABLE** from this candidate because every named
-`evidence/unseen/adr-0022-*.txt` proof file is absent.
-
-### ADR 0030 — all-String landing and per-row cast failure
-
-The static tree **HOLDS** for the implementation shape: `sql/05_landing.sql` defines all-String landing
-tables, the cast ledger and disposition view; `tools/load.sh` automatically applies it after refusal
-guards, lands both files before typing, casts forward, and checks `landed = typed + rejected`.
-
-The accepted empirical proof is not in the candidate:
-
-```text
-ABSENT  evidence/landing/identity.txt
-ABSENT  docs/codex-validation/004-triage.md
-ABSENT  docs/GRADED_INVENTORY.md
-```
-
-The read-only live service has `landing_objects=0`, which is expected for data loaded before ADR 0030
-but means the Cloud behavior cannot be observed without a prohibited write.
-
-Verdict: implementation wiring **HOLDS**; its claimed 22-assertion identity/corruption/cost proof is
-**UNVERIFIABLE** from the promoted tree because the ADR's owned evidence and cited triage document are
-omitted.
-
-## Check 4 — correctness gate
-
-The branch and `origin/dev` gate blobs are identical:
-
-```bash
-git rev-parse HEAD:sql/90_reconcile.sql origin/dev:sql/90_reconcile.sql
-git diff --exit-code HEAD origin/dev -- sql/90_reconcile.sql
-```
+I ran the exact candidate normalizer and the exact `dev` normalizer against in-memory fixtures. No
+fixture was written to a file or sent to Cloud.
 
 Exact output:
 
 ```text
-a353b00f89ec896bee082fc0fcf2d0d806dd7a1c
-a353b00f89ec896bee082fc0fcf2d0d806dd7a1c
-diff_rc=0
+current crlf_drop                BYPASS norm=<DROP\r TABLE ev_raw;>
+dev     crlf_drop                BLOCK  norm=<DROP TABLE ev_raw;>
+current block_delete             BYPASS norm=<DELETE/* ordinary */FROM ev_raw WHERE 1;>
+dev     block_delete             BLOCK  norm=<DELETE FROM ev_raw WHERE 1;>
+current hash_comment_delete      BYPASS norm=<DELETE # ordinary comment FROM ev_raw WHERE 1;>
+dev     hash_comment_delete      BYPASS norm=<DELETE # ordinary comment FROM ev_raw WHERE 1;>
+current quoted_hyphen_then_drop  BYPASS norm=<SELECT '>
+dev     quoted_hyphen_then_drop  BYPASS norm=<SELECT '>
+current benign                   BYPASS norm=<SELECT 'DROP TABLE is text';>
+dev     benign                   BYPASS norm=<SELECT 'DROP TABLE is text';>
 ```
 
-I nevertheless ran both blobs independently against Cloud with `readonly=2`.
-
-### Check 4a — `origin/dev` gate
-
-```text
-DEV_GATE origin/dev:sql/90_reconcile.sql
-   ┌─ord─┬─scope───┬─c1─────────────────────┬─c2───────────┬─c3─────────────┬─c4────────┬─verdict─┐
-1. │   0 │ SUMMARY │ minutes_compared=17028 │ mismatched=0 │ max_abs_diff=0 │ peak=2917 │ PASS    │
-2. │   2 │ sample  │ 2026-07-14 15:43:00    │ 1            │ 1              │ 0         │ PASS    │
-3. │   2 │ sample  │ 2026-07-16 12:35:00    │ 0            │ 0              │ 0         │ PASS    │
-4. │   2 │ sample  │ 2026-07-17 08:56:00    │ 0            │ 0              │ 0         │ PASS    │
-5. │   2 │ sample  │ 2026-07-26 10:56:00    │ 2917         │ 2917           │ 0         │ PASS    │
-6. │   2 │ sample  │ 2026-07-26 11:30:00    │ 197          │ 197            │ 0         │ PASS    │
-   └─────┴─────────┴────────────────────────┴──────────────┴────────────────┴───────────┴─────────┘
-```
-
-Verdict: **HOLDS**.
-
-### Check 4b — promoting branch's gate
-
-```text
-BRANCH_GATE promo/core sql/90_reconcile.sql
-   ┌─ord─┬─scope───┬─c1─────────────────────┬─c2───────────┬─c3─────────────┬─c4────────┬─verdict─┐
-1. │   0 │ SUMMARY │ minutes_compared=17028 │ mismatched=0 │ max_abs_diff=0 │ peak=2917 │ PASS    │
-2. │   2 │ sample  │ 2026-07-14 15:43:00    │ 1            │ 1              │ 0         │ PASS    │
-3. │   2 │ sample  │ 2026-07-16 12:35:00    │ 0            │ 0              │ 0         │ PASS    │
-4. │   2 │ sample  │ 2026-07-17 08:56:00    │ 0            │ 0              │ 0         │ PASS    │
-5. │   2 │ sample  │ 2026-07-26 10:56:00    │ 2917         │ 2917           │ 0         │ PASS    │
-6. │   2 │ sample  │ 2026-07-26 11:30:00    │ 197          │ 197            │ 0         │ PASS    │
-   └─────┴─────────┴────────────────────────┴──────────────┴────────────────┴───────────┴─────────┘
-```
-
-Verdict: **HOLDS**, identically. There is no spec-skew explanation involved.
-
-## Check 5 — independent Codex validation
-
-This file is the independent Codex check. I attacked the copy, closure, scratch, live claims, guards,
-ADRs, both gates, and documentation without fixing the candidate.
-
-Verdict: **DOES NOT HOLD** as an approval; this independent review rejects the promotion on multiple
-reproduced failures.
-
-## Check 6 — docs current and non-contradictory
-
-### Claim 6.1 — the A5 correction is complete and no equivalent contradiction remains
-
-The corrected A5 itself matches the five promoted capture paths. The same file remains stale around it:
+Local read-only parser proof that ClickHouse treats `#` as a line comment:
 
 ```bash
-rg -n 'A1|A2|A5|A6|A8|does not apply `sql/15_normalise|hard-codes|five minutes|never compares' \
-  docs/RUNBOOK_UNSEEN.md
+docker exec -i ch clickhouse-client --database default --query \
+  $'EXPLAIN SYNTAX SELECT 1 # ordinary comment\n + 1 SETTINGS max_execution_time=5'
+```
+
+```text
+SELECT plus(1, 1)
+FROM system.one
+SETTINGS max_execution_time = 5
+```
+
+The third ordinary bypass is therefore:
+
+```sql
+DELETE # ordinary explanation
+FROM ev_raw WHERE ...;
+```
+
+ClickHouse removes the `#` line comment and parses `DELETE FROM`; the scanner preserves the comment,
+flattens the newline, and misses `DELETE FROM`. The scanner is also not quote-aware:
+`SELECT '--'; DROP TABLE ev_raw;` is valid multi-statement SQL, but its line-comment stripping leaves
+only `SELECT '`, hiding the later DROP.
+
+Verdict: **DOES NOT HOLD**. On this candidate, the previous CRLF and block-comment bypasses remain
+because the revision was not copied. Even `dev`'s third revision has the `#` and quoted-literal
+bypasses. These are ordinary parser forms, not exported-function shadowing.
+
+Overall Check 3 verdict: **DOES NOT HOLD**.
+
+## ADR claims against this tree
+
+### ADR 0009 — inclusive resume and deterministic attribution
+
+Command:
+
+```bash
+rg -n 'arrayFirst\(x -> x (>|>=) p|w\.2 > w\.1' \
+  sql/30_build_intervals.sql sql/90_reconcile.sql
+rg -n '(^|[^A-Za-z])any\(' sql/30_build_intervals.sql sql/40_deltas.sql
 ```
 
 Relevant exact output:
 
 ```text
-105:### A1 — the gate's target minutes are 2026-07-26 literals · **breaks silently, reports success**
-107:`sql/90_reconcile.sql:24-30` hard-codes five minutes.
-114:### A2 — the gate never compares a minute in which nobody was watching
-162:### A5 — ~~`CH_DATABASE` in the environment is silently ignored~~ · **FIXED, and inverted**
-182:### A6 — `sql/80_content.sql` hard-codes the `sonyliv` database
-203:### A8 — "the peak minute" is ambiguous under ties, and the tiers disagree
-247:1. **Re-target the gate** (A1).
+sql/30_build_intervals.sql:195:arrayFilter(w -> w.2 > w.1, ...
+sql/30_build_intervals.sql:197:arrayFirst(x -> x >= p, resumes)
+sql/30_build_intervals.sql:202:arrayFirst(x -> x >= p, resumes)
+sql/90_reconcile.sql:116:arrayFilter(w -> w.2 > w.1, ...
+sql/90_reconcile.sql:118:arrayFirst(x -> x >= p, p2.rs)
+sql/90_reconcile.sql:122:arrayFirst(x -> x >= p, p2.rs)
 ```
 
-Current tree facts contradict those claims:
+The `any()` search returns comments only; no executable `any()` remains in either file. Live
+read-only state:
 
-```text
-sql/90_reconcile.sql:168:    bounds AS
-sql/90_reconcile.sql:174:    spine AS
-sql/90_reconcile.sql:208:        LEFT JOIN truth_min AS t ON t.minute = sv.minute
-tools/build-model.sh:182:... tools/apply-sql.sh sql/15_normalise.sql ...
-sql/80_content.sql:332:                dictGet('dict_content', 'title', tuple(content_id)) AS title_raw
+```bash
+tools/ch -c "SELECT count(), round(sum(dateDiff('second', interval_start, interval_end))/3600,1)
+             FROM session_intervals FINAL"
 ```
 
-`sql/90_reconcile.sql` is self-targeting and compares the dense minute spine, `sql/80_content.sql` is
-database-relative, the unseen answer path now resolves earliest ties, and `build-model.sh` does apply
-normalization. A hard-coded dictionary still exists, but in `sql/87_viz.sql`, not the file the runbook
-warns about.
-
-`tools/README.md` also says:
-
 ```text
-82:does not find it locally, and says so instead of quietly writing to `default`. **`.env.example` does
-83:not carry this line yet** (that file is owned elsewhere); add it by hand when you copy it.
-85:Not every tool is fixed: `tools/ch`, `reconcile.sh`, `build-model.sh` and `truncation-test.sh` still
-86:`cd` to the repo root and let `.env` win, and `tools/ch`'s local branch still has no database
+30323   1978.1
 ```
 
-But `.env.example:19` is exactly `CH_DATABASE_LOCAL=default`, and the tested `tools/ch`, build, and
-reconcile scripts capture the caller's environment before sourcing `.env`.
+Verdict: **HOLDS** — `>=` and the zero-length filter are in both shared-spec files, and the last
+pipeline `any()` is gone.
 
-Verdict: **DOES NOT HOLD**.
+### ADR 0011 — normalization artifact and wiring
 
-### Claim 6.2 — promoted docs resolve to the files/evidence they cite
+Commands:
 
-Command and exact output:
+```bash
+sed -n '1,379p' sql/15_normalise.sql | rg -c '^CREATE (OR REPLACE )?FUNCTION'
+sed -n '1,379p' sql/15_normalise.sql | rg -c '^CREATE (OR REPLACE )?VIEW'
+rg -n 'apply sql/15_normalise\.sql' tools/build-model.sh
+```
+
+Exact output:
 
 ```text
-ABSENT  docs/adr/0012-rebuild-owns-every-tier-and-the-last-any-leaves.md
-ABSENT  docs/adr/0016-publisher-owns-the-user-and-hour-tiers.md
-ABSENT  docs/adr/0025-fail-open-preprocessing-and-row-quality.md
-ABSENT  queries/validate_source_contract.sql
-ABSENT  evidence/target-resolution.txt
+normalisation_lane_functions=6
+normalisation_lane_views=4
+tools/build-model.sh:182:apply sql/15_normalise.sql >/dev/null
+```
+
+The whole file, after later preprocessing additions, contains 9 functions and 8 views. Live
+read-only peaks are:
+
+```text
+raw Hindi peak        1774
+normalized Hindi peak 2196
+```
+
+Verdict: **DOES NOT HOLD** as a current-tree ADR. It says “five UDFs”, says both three and four
+views, and labels build wiring “NOT APPLIED”; this tree has six normalization functions, four
+normalization views, and `build-model.sh` applies the file. The behavior itself is deployed and the
+current 1,774 → 2,196 result holds; the ADR's current-state inventory does not.
+
+### ADR 0014 — earliest peak minute everywhere
+
+The hour/day path agrees with earliest-wins live:
+
+```bash
+tools/ch -c "SELECT count() AS days,
+  countIf(d.peak != m.peak OR d.peak_minute != m.peak_minute) AS mismatched
+FROM v_concurrency_day_total AS d
+INNER JOIN
+(
+  SELECT toDate(minute) AS day, max(concurrent) AS peak,
+         argMax(minute, (concurrent, -toInt64(toUInt32(minute)))) AS peak_minute
+  FROM v_concurrency_minute_delta_total GROUP BY day
+) AS m USING (day)"
+```
+
+```text
+7       0
+```
+
+But the ADR explicitly owns the gate sample and says it changed from bare `argMax`. Current tree:
+
+```bash
+sed -n '210,219p' sql/90_reconcile.sql
+```
+
+```text
+samples AS
+(
+    SELECT arrayJoin([
+        (SELECT argMax(minute, truth) FROM compared),
+        (SELECT min(minute) FROM compared),
+        (SELECT max(minute) FROM compared),
+```
+
+Verdict: **DOES NOT HOLD** — the serving day view is correct, but ADR 0014's “earliest everywhere”
+and reproducible gate-evidence claims are false. The bare gate sample is verdict-neutral on today's
+unique global peak, but becomes arbitrary on a tied unseen day.
+
+### ADR 0018 — one target, one database, every layer
+
+Shell typo refusal is verified under Claim 3.1. Go's environment resolver is different:
+
+```go
+func TargetFromEnv() Target {
+    if strings.EqualFold(os.Getenv("TARGET"), string(TargetCloud)) {
+        return TargetCloud
+    }
+    return TargetLocal
+}
+```
+
+`cmdVerify` and `cmdObserve` use this as the flag default. Therefore `TARGET=Cloud` becomes Cloud in
+Go while shell rejects it, and any other non-empty typo silently becomes local before
+`config.Load` can reject an unknown value. The tests cover only unset and exact lowercase `cloud`.
+
+Verdict: **DOES NOT HOLD** — the exact host/database resolution code and CI tests hold, but the ADR's
+“TARGET is read on every layer and an unrecognised value dies” claim is false in the Go entry point.
+The ADR also still states blanket “every layer” language while RUNBOOK A5 says that language was
+withdrawn in favor of a measured per-layer table.
+
+### ADR 0022 — `cube_level` is structural
+
+Static command:
+
+```bash
+rg -n 'cube_level' sql/50_hour_agg.sql sql/85_windows.sql \
+  tools/build-model.sh tools/unseen-run.sh tools/unseen-verify.sh
+```
+
+Relevant exact output:
+
+```text
+sql/50_hour_agg.sql:129:    cube_level  UInt8,
+sql/50_hour_agg.sql:143:ORDER BY (platform, country, content_id, cube_level, hour)
+sql/50_hour_agg.sql:168:INSERT INTO cc_hour_agg (... cube_level ...)
+sql/50_hour_agg.sql:226:PARTITION BY lv_platform, lv_country, lv_content_id, cube_level, hour
+sql/85_windows.sql:513:argMax(peak_minute, ...) AS pk_min,
+tools/build-model.sh:160:HOUR_HAS_CUBE_LEVEL=...
+tools/unseen-run.sh:418:... content_id=-1 AND cube_level=0
+```
+
+Cloud discovery and sentinel audit:
+
+```text
+cc_hour_agg cube_level UInt8
+sorting_key = platform, country, content_id, cube_level, hour
+content_minus_one=0 platform_star=0 country_star=0
+```
+
+Verdict: **HOLDS** for the structural implementation and live no-collision claim. The ADR's named
+proof `evidence/unseen/adr-0022-sentinel-collision.txt` is absent from this candidate, so its
+historical rehearsal measurements are **UNVERIFIABLE from the promoted tree**.
+
+### ADR 0030 — all-String landing boundary
+
+Static implementation evidence:
+
+```text
+sql/05_landing.sql:68:CREATE TABLE IF NOT EXISTS ev_landing
+sql/05_landing.sql:108:CREATE TABLE IF NOT EXISTS content_landing
+sql/05_landing.sql:146:CREATE TABLE IF NOT EXISTS ev_cast_quarantine
+tools/load.sh:629:# PHASE A — LAND. Both files, as text, before either typed table is touched.
+tools/load.sh:745:# THE DISPOSITION PROOF. Every landed row reached exactly one terminal state
+tools/load.sh:767:rollback_and_die "the disposition check ..."
+```
+
+`sql/05_landing.sql` and the full load/build dependency chain applied successfully to the clean
+scratch database before `sql/87_viz.sql` failed.
+
+Verdict: **HOLDS** for the tree's landing, cast-ledger, ordering, rollback and disposition structure.
+The 22-assertion proof and historical cost/fingerprint claims are **UNVERIFIABLE from the promoted
+tree** because `evidence/landing/identity.txt` is absent.
+
+Promoted ADR proof-target inventory:
+
+```text
 ABSENT  evidence/tie-break-determinism.txt
-ABSENT  evidence/landing/identity.txt
+ABSENT  evidence/target-resolution.txt
 ABSENT  evidence/unseen/adr-0022-sentinel-collision.txt
-ABSENT  docs/codex-validation/004-triage.md
-ABSENT  docs/GRADED_INVENTORY.md
-ABSENT  docs/PREPROCESSING.md
+ABSENT  evidence/landing/identity.txt
 ```
 
-Each path is referenced by an ADR, promoted SQL, or a promoted tool. Most exist on `origin/dev`; they
-were simply left out of this increment.
+Overall ADR verdict: **DOES NOT HOLD** — ADR 0009 and the structural halves of 0022/0030 hold, but
+0011's current inventory/wiring, 0014's gate claim, and 0018's every-layer target claim contradict
+this tree. Four named proof artifacts are also omitted.
 
-`docs/GO.md` has another current-tree contradiction: it states `make lint` refuses anything but
-golangci-lint 2.12.2, while this branch's `Makefile` invokes `golangci-lint run` directly. The actual
-version guard exists in `origin/dev:Makefile`, not here. The ambient v1 run reached the tool's own
-schema error rather than the documented repo refusal.
+## Check 4 — two live correctness measurements
 
-Verdict: **DOES NOT HOLD**.
+Cloud discovery was SELECT-only and found the expected deployed shape:
 
-Overall Check 6 verdict: **DOES NOT HOLD**.
+```text
+sonyliv  26.2.1.525
+cc_hour_agg       SharedReplacingMergeTree    26254
+cc_minute_delta   SharedAggregatingMergeTree  28073
+cc_user_minute    SharedReplacingMergeTree    91692
+ev_raw            SharedMergeTree             905558
+session_intervals SharedReplacingMergeTree    30323
+```
 
-## Closure audit
+The branch and fetched-dev gate blobs are identical:
 
-| Check | Verdict | Decisive result |
+```bash
+git rev-parse HEAD:sql/90_reconcile.sql
+git rev-parse daf1edee:sql/90_reconcile.sql
+```
+
+```text
+a353b00f89ec896bee082fc0fcf2d0d806dd7a1c
+a353b00f89ec896bee082fc0fcf2d0d806dd7a1c
+```
+
+Both were nevertheless executed separately. Exact command shape, with the file's terminal semicolon
+removed only so safety settings remain part of the same HTTP statement:
+
+```bash
+gate_sql="$(git show <ref>:sql/90_reconcile.sql | sed '$s/;[[:space:]]*$//')"
+env -u REBUILD_GRADED -u REPLACE_GRADED -u APPLY_GRADED_DESTRUCTIVE \
+  TARGET=cloud tools/ch "$gate_sql SETTINGS max_execution_time=30,
+    max_rows_to_read=100000000, max_result_rows=100,
+    timeout_before_checking_execution_speed=0"
+```
+
+Check 4a exact output (`daf1edee` gate):
+
+```text
+0 SUMMARY minutes_compared=17028 mismatched=0 max_abs_diff=0 peak=2917 PASS
+2 sample 2026-07-14 15:43:00 1 1 0 PASS
+2 sample 2026-07-16 12:35:00 0 0 0 PASS
+2 sample 2026-07-17 08:56:00 0 0 0 PASS
+2 sample 2026-07-26 10:56:00 2917 2917 0 PASS
+2 sample 2026-07-26 11:30:00 197 197 0 PASS
+```
+
+Check 4b exact output (`c757be6` gate):
+
+```text
+0 SUMMARY minutes_compared=17028 mismatched=0 max_abs_diff=0 peak=2917 PASS
+2 sample 2026-07-14 15:43:00 1 1 0 PASS
+2 sample 2026-07-16 12:35:00 0 0 0 PASS
+2 sample 2026-07-17 08:56:00 0 0 0 PASS
+2 sample 2026-07-26 10:56:00 2917 2917 0 PASS
+2 sample 2026-07-26 11:30:00 197 197 0 PASS
+```
+
+Verdict 4a: **HOLDS**.
+
+Verdict 4b: **HOLDS** — identical, with no skew to explain.
+
+Overall Check 4 verdict: **HOLDS**.
+
+## Check 5 — independent cross-lineage validation
+
+This file is Check 5. It records commands, outputs, safety boundaries and per-claim verdicts without
+changing product code.
+
+Verdict: **HOLDS** as an executed review; its promotion verdict is negative.
+
+## Check 6 — documentation is current and non-contradictory
+
+RUNBOOK A5 itself is corrected:
+
+```text
+### A5 — ~~`CH_DATABASE` in the environment is silently ignored~~ · **FIXED, and inverted**
+**The environment now WINS.**
+```
+
+Verdict for the narrow A5 correction: **HOLDS**.
+
+The same contradiction remains elsewhere. `tools/README.md` first says:
+
+```text
+`load.sh` and `apply-sql.sh` obey `--database`, then the environment, then `.env`,
+and refuse rather than guess.
+```
+
+but later says:
+
+```text
+Not every tool is fixed: `tools/ch`, `reconcile.sh`, `build-model.sh` and
+`truncation-test.sh` still `cd` to the repo root and let `.env` win, and
+`tools/ch`'s local branch still has no database parameter at all ...
+```
+
+That later statement is false for promoted `tools/ch`, `reconcile.sh` and `build-model.sh` and makes
+the file contradict its own summary. Additional current-status contradictions:
+
+```text
+WALKTHROUGH.md:181:| `CH_DATABASE` env var silently ignored | — | **BROKEN** — a retarget appears to work and writes to production |
+docs/EXPLAINER.md:577:| 13 | A CSV reload **doubles** the data · `CH_DATABASE` silently ignored | ... | open |
+docs/EXPLAINER.md:825:**`CH_DATABASE` is silently ignored**
+```
+
+`docs/SESSION-2026-08-01.md` also names the old defect, but it is a historical session record and is
+not counted as a contradiction. WALKTHROUGH and EXPLAINER are current-state documents and are.
+
+The RUNBOOK also says ADR 0018's “every layer” claim was withdrawn and replaced by a measured
+per-layer table, while the promoted ADR still says:
+
+```text
+Decision: ... both always sent explicitly ... missing config dies at startup.
+Resolution rule, every layer:
+```
+
+The ADR 0011/0014 contradictions and four absent proof targets are documented above.
+
+Verdict: **DOES NOT HOLD** — A5 is corrected locally, but the same current-state contradiction
+survives in tools/README, WALKTHROUGH and EXPLAINER, and two promoted ADRs contradict executable code.
+
+## Closure
+
+| Check | Verdict | Decisive evidence |
 |---|---|---|
-| 1 · isolate/coherence | **DOES NOT HOLD** | Mandatory source-contract, benchmark, robustness, and accepted-proof files are absent; unseen path is broken. |
-| 2 · build/test/scratch | **DOES NOT HOLD** | Pinned CI passes; clean scratch SQL fails at hard-coded `sonyliv.dict_content`. |
-| 3 · real/read-only claims | **DOES NOT HOLD** | Live figures reproduce, but CRLF and block-comment destructive SQL bypass the graded scanner. |
-| 4a · deployed gate | **HOLDS** | 17,028 · 0 · 0 · 2,917. |
-| 4b · branch gate | **HOLDS** | Byte-identical gate; identical 17,028 · 0 · 0 · 2,917. |
-| 5 · independent validation | **DOES NOT HOLD** | This review rejects the candidate. |
-| 6 · docs current | **DOES NOT HOLD** | Runbook, tools README, Go docs, ADR numbers, and cited paths contradict or exceed this tree. |
+| 1 · isolate/coherence | **DOES NOT HOLD** | false-green dependency checker; required assets absent; copy is 60/64 |
+| 2 · build/test/scratch | **DOES NOT HOLD** | CI green; `sql/87_viz.sql` still fails scratch apply |
+| 3 · live/guards | **DOES NOT HOLD** | ordinary guards hold; scanner and source-contract path fail |
+| 4a · deployed gate | **HOLDS** | 17,028 · 0 · 0 · 2,917 |
+| 4b · candidate gate | **HOLDS** | identical 17,028 · 0 · 0 · 2,917 |
+| 5 · Codex validation | **HOLDS** | this evidence file |
+| 6 · docs current | **DOES NOT HOLD** | current docs and ADRs contradict the promoted tree |
 
-**DO NOT PROMOTE** — the combined increment is still not a runnable coherent state: required source-contract/benchmark/robustness files are absent, and its promoted visualization SQL cannot apply to scratch because it hard-codes the graded dictionary.
+**DO NOT PROMOTE — `promo/core` is not runnable: `promotion-deps.sh` reports COHERENT while the source-contract vocabulary and benchmark/robustness runtime input trees are absent.**
