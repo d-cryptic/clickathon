@@ -359,6 +359,28 @@ answer path is explicitly open.
    headlines. `unseen-run.sh` differed by 230 lines and nobody looked.
 3. **Run the path the ADR governs**, not just the gate. Three green gates hid all three of these.
 
+## ✅ RESOLVED 2026-08-02 — operator authorised the fallback; `main` carries the whole system
+
+Seven promotion attempts, **seven rejections**, every one correct. The operator took the documented
+fallback in [`PROMOTION_FALLBACK.md`](PROMOTION_FALLBACK.md) rather than continue wave-by-wave.
+
+**The gate was not wasted — it is the reason this merge is safe.** Each rejection produced a
+structural fix that is now on `main`:
+
+| rejection | what it caught |
+|---|---|
+| W1 ×2 | `GRADED_DB` caller-overridable → both graded guards defeatable |
+| W2 ×2 | ADR 0009's `any()` claim false on its own tree; `unseen-run.sh` returning **16:59 where earliest-wins requires 15:51** — the submission path, wrong, with every gate green |
+| W3 | could not *run* check 3; `main` had no route to install the publisher anywhere but the graded database |
+| core ×2 | a newline defeated every destructive pattern; then CRLF and `/* */`; `87_viz.sql` reading production's catalog; the source-contract gate shipping without its SQL |
+
+**None of those would have surfaced from a merge alone**, and all are fixed in what was merged.
+
+**What this ledger now means.** `main` and `dev` are identical. The six checks stop being a promotion
+gate and become a **regression gate**: run them against `main` before submission, and against any
+change to it. The distinction between "checks I ran" and "independently validated" still holds — and
+independent validation of `main` as a whole is now the outstanding work.
+
 ## Ledger
 
 `—` not started · `WIP` in a promotion worktree · `GATE n` failed at check n · `✓` on `main`
