@@ -10,6 +10,7 @@
 | Test | Proves | Run by |
 |---|---|---|
 | `/verify-env` | the stack is actually configured — schema present, users real, constraints active | after any env change |
+| **policy check** | the one declaration ([ADR 0032](adr/0032-one-versioned-policy-declaration-read-by-every-consumer.md)) and everything derived from it are in step: `sql/01_policy.sql` is a current rendering of `policy/model.policy` (a hand-edit fails), every publisher cover is `>= TAIL_S + 60` (the latent break DYNAMIC_PARAMS §A2 found and nothing enforced), the queue TTLs in `sql/12_publish.sql` equal `QUEUE_TTL_DAYS`, and **no consumer has grown its own literal back** — the model, the gate, the oracle and both generators are grepped for the pattern the constants used to be written in. Add `--database DB` to also assert the deployed view matches the tree | `tools/policy.sh check` — in `tools/test-all.sh` and at stage 0/6 of `tools/build-model.sh`, which refuses to build on a stale rendering. Evidence: `evidence/policy/` |
 | `/reconcile` | the serving layer equals the truth recomputed from raw | after **every** model change |
 | `/bench` | benchmark latency and, more importantly, **bytes read** | before demo / unseen run |
 | **truncation / absorption test** | the model absorbs mid-stream truncation and a late arrival **incrementally**, converging on the from-scratch answer. Covers the open-session and late-arrival probes below in one run | `tools/truncation-test.sh` — after any change to `session_intervals`, its engine, or the delta emission |

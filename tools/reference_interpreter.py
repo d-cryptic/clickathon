@@ -65,12 +65,30 @@
 
 from __future__ import annotations
 
+import os
+import sys
 from collections import Counter
 from dataclasses import dataclass
 from typing import Iterable, NamedTuple
 
-GAP_S = 150   # C3 — ADR 0007
-TAIL_S = 60   # C6 — ADR 0007; doubts/01 questions the size, not the mechanism
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import policy_reader  # noqa: E402  — tools/ is not a package
+
+# ---------------------------------------------------------------------------
+# THE POLICY (ADR 0032). These were literals here until 2026-08-02, which made
+# this file an independent IMPLEMENTATION of the spec but not an independent
+# CHOICE of parameter — it agreed with the model on GAP_S/TAIL_S by
+# construction, so it could never have caught a mis-fit
+# (docs/DYNAMIC_PARAMS.md §D3). They now come from policy/model.policy, the one
+# declaration the model, the gate and the fixtures also read.
+#
+# Read from the FILE, not from ClickHouse: this interpreter's whole value is
+# that it runs on a list of events with no database, no SQL and no shared code
+# with the pipeline. Values are unchanged — GAP_S=150, TAIL_S=60.
+# ---------------------------------------------------------------------------
+GAP_S = policy_reader.get_int("GAP_S")    # C3 — ADR 0007
+TAIL_S = policy_reader.get_int("TAIL_S")  # C6 — ADR 0007; doubts/01 questions the size, not the mechanism
+POLICY_STAMP = policy_reader.stamp()
 
 # The seven raw dimensions, in the order they appear everywhere downstream.
 DIM_COLS = ("app_version", "audio_language", "subtitle_language",

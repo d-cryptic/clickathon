@@ -156,6 +156,22 @@ trap on_exit EXIT
 
 echo "== target: $TARGET"
 
+# ── 0. THE POLICY (ADR 0032) ────────────────────────────────────────────────
+# sql/30 and sql/90 read GAP_S / TAIL_S / UNCLOSED_PAUSE_TO_RUN_END /
+# POINT_ACTIVITY_COUNTS from `v_model_policy`, which this file creates. Apply it
+# FIRST and unconditionally, so a build can never run against a policy view left
+# behind by an older tree — the build stamps its own policy rather than
+# inheriting whatever the database happened to hold.
+#
+# `check` runs before the apply because a stale sql/01_policy.sql (edited
+# policy/model.policy, forgot `tools/policy.sh gen`) would otherwise be written
+# into the database and every tier below would be built under the OLD values
+# while the declaration claimed the new ones.
+echo "== 0/6  policy ($(tools/policy.sh stamp))"
+tools/policy.sh check >/dev/null || { tools/policy.sh check; echo "== BUILD REFUSED — the policy declaration and sql/01_policy.sql disagree." >&2; exit 1; }
+TARGET="$TARGET" APPLY_GRADED_DESTRUCTIVE="${REBUILD_GRADED:-}" tools/apply-sql.sh sql/01_policy.sql >/dev/null
+q "SELECT concat('   policy v', policy_version, ' (', policy_hash, ') applied') FROM v_model_policy FORMAT TSVRaw"
+
 echo "== 1/6  session_intervals (gap + pause, ADR 0001/0007)"
 q "TRUNCATE TABLE session_intervals" >/dev/null
 TARGET="$TARGET" APPLY_GRADED_DESTRUCTIVE="${REBUILD_GRADED:-}" tools/apply-sql.sh sql/30_build_intervals.sql >/dev/null

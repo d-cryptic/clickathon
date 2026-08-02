@@ -57,6 +57,7 @@ db() {  # db <suffix> — a fresh scratch database with the ingest schema applie
   sys "DROP DATABASE IF EXISTS $d" > /dev/null
   sys "CREATE DATABASE $d" > /dev/null
   docker exec -i ch clickhouse-client --database "$d" --multiquery < sql/00_schema.sql   > /dev/null
+  docker exec -i ch clickhouse-client --database "$d" --multiquery < sql/01_policy.sql   > /dev/null
   docker exec -i ch clickhouse-client --database "$d" --multiquery < sql/10_intervals.sql > /dev/null
   echo "$d"
 }

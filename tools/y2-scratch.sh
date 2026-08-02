@@ -64,6 +64,7 @@ echo "== y2-scratch: $DB"
 q "CREATE DATABASE IF NOT EXISTS $DB" >/dev/null
 
 apply sql/00_schema.sql
+apply sql/01_policy.sql
 # ev_raw is re-copied every run: a variant that differs in its INPUT proves
 # nothing about the expression that was changed.
 qdb "TRUNCATE TABLE IF EXISTS ev_raw" >/dev/null

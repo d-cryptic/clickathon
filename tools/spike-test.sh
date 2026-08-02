@@ -276,7 +276,7 @@ for N in "${MAGS[@]}"; do
 
   qd default "DROP DATABASE IF EXISTS $DBN" >/dev/null
   qd default "CREATE DATABASE $DBN" >/dev/null
-  for f in sql/00_schema.sql sql/10_intervals.sql sql/20_views.sql; do
+  for f in sql/00_schema.sql sql/01_policy.sql sql/10_intervals.sql sql/20_views.sql; do
     docker exec -i ch clickhouse-client --database "$DBN" --multiquery < "$f" >/dev/null 2>&1
   done
 

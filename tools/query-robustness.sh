@@ -130,6 +130,7 @@ setup() {
            || die "apply failed: $1"; echo "   applied $1"; }
 
   ap sql/00_schema.sql
+  ap sql/01_policy.sql
   ap sql/10_intervals.sql
   ap "$RB/fixture/10_fixture_data.sql"
   # serving tiers are re-derived from scratch on every setup: cc_minute_delta
