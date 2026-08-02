@@ -1,747 +1,756 @@
-<meta name="cc-type"    content="explainer">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="cc-type"    content="exploration">
 <meta name="cc-project" content="clickathon-sonyliv">
 <meta name="cc-date"    content="2026-08-02">
 <meta name="cc-title"   content="Foreground-only concurrency — the solution atlas">
-<meta name="cc-summary" content="Data lineage, algorithm, model and query path for counting who is actually watching, with animated diagrams.">
-<meta name="cc-tags"    content="clickhouse,concurrency,streaming,sonyliv,clickstack,data-lineage">
+<meta name="cc-summary" content="Data lineage, algorithm, model, query path, scale and evidence for counting who is actually watching — animated.">
+<meta name="cc-tags"    content="clickhouse,concurrency,streaming,sonyliv,clickstack,data-lineage,algorithm">
 <title>Foreground-only concurrency — the solution atlas</title>
-
 <style>
-  :root{
-    --void:#000000;      /* the ground */
-    --ink:#EDEAE3;       /* primary text */
-    --dim:#8E8B84;       /* secondary text — warm grey, biased to the tan */
-    --rule:#232320;      /* hairlines */
-    --panel:#0B0B0A;     /* barely-lifted surface */
-    --sage:#8FA37C;      /* the model / correct path */
-    --maroon:#8C4A50;    /* the wrong path, the excluded */
-    --tan:#C7A87C;       /* data, dimensions */
-    --steel:#6E8CA0;     /* users tier */
-    --live:#7CFF4F;      /* the one bright accent — reserved for truth */
-    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-    --sans:"Helvetica Neue",Inter,Arial,sans-serif;
-  }
-  *{box-sizing:border-box}
-  body{
-    margin:0;background:var(--void);color:var(--ink);
-    font-family:var(--sans);font-size:16px;line-height:1.6;
-    -webkit-font-smoothing:antialiased;
-  }
-  .wrap{max-width:1080px;margin:0 auto;padding:0 28px}
-  section{border-top:1px solid var(--rule);padding:72px 0}
-  section:first-of-type{border-top:none}
+:root{
+  color-scheme: dark;
+  --bg:#000; --panel:#0c0c0d; --panel2:#141416;
+  --border:#262628; --rule-strong:#3a3a3d;
+  --fg:#f2f2f2; --muted:#8a8a8a; --faint:#646467;
+  --sage:#a8c8a4; --green:#6f9d7f; --green-bright:#7ec699;
+  --maroon:#b06a6a; --tan:#c9b07e; --blue:#8aa9c9;
+  --ok:#7ec699; --warn:#c9b07e; --risk:#b06a6a;
+  --code-bg:#0c0c0d; --code-ink:#e8e2d4;
+  --font-display:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",Roboto,sans-serif;
+  --font-body:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",Roboto,sans-serif;
+  --font-mono:ui-monospace,SFMono-Regular,Menlo,"SF Mono",monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font-body);
+  font-size:16px;line-height:1.7;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1060px;margin:0 auto;padding:0 26px}
+section{border-top:1px solid var(--rule-strong);padding:64px 0}
 
-  h1,h2,h3{font-weight:800;letter-spacing:-.022em;text-wrap:balance;margin:0}
-  h1{font-size:clamp(38px,6.4vw,76px);line-height:1.02}
-  h2{font-size:clamp(26px,3.4vw,40px);line-height:1.1;margin-bottom:10px}
-  h3{font-size:17px;letter-spacing:.02em;text-transform:uppercase;color:var(--dim);
-     font-weight:700;margin:36px 0 12px}
-  p{margin:0 0 16px;max-width:68ch}
-  .lede{font-size:clamp(17px,2vw,21px);color:var(--dim);max-width:62ch}
-  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.24em;
-     text-transform:uppercase;color:var(--sage);margin-bottom:18px}
-  code,.m{font-family:var(--mono);font-size:.9em}
-  .m{color:var(--tan)}
-  strong{color:#fff;font-weight:700}
-  a{color:var(--live);text-decoration:none;border-bottom:1px solid #7CFF4F44}
+h1,h2,h3,h4{font-family:var(--font-display);font-weight:800;letter-spacing:-.02em;
+  text-wrap:balance;margin:0}
+h1{font-size:clamp(30px,5vw,44px);line-height:1.05}
+h2{font-size:clamp(22px,3vw,32px);margin-bottom:12px}
+h3{font-family:var(--font-mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--muted);font-weight:600;margin:34px 0 10px}
+p{margin:0 0 15px;max-width:76ch;color:var(--fg)}
+.sub{color:var(--muted);font-family:var(--font-mono);font-size:13px;max-width:74ch}
+.kicker{font-family:var(--font-mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--green-bright);margin-bottom:14px}
+.m,code{font-family:var(--font-mono);font-size:.9em;color:var(--code-ink)}
+code{background:var(--panel2);padding:1px 5px;border:1px solid var(--border);border-radius:2px}
+strong{font-weight:700;color:#fff}
+em{color:var(--sage);font-style:normal}
 
-  /* ---- hero ---- */
-  .hero{padding:104px 0 76px}
-  .hero h1 span{color:var(--live)}
-  .statline{display:flex;flex-wrap:wrap;gap:0;margin-top:48px;
-     border:1px solid var(--rule);border-radius:2px;overflow:hidden}
-  .statline div{flex:1 1 160px;padding:18px 20px;border-right:1px solid var(--rule)}
-  .statline div:last-child{border-right:none}
-  .statline b{display:block;font-family:var(--mono);font-size:26px;color:var(--live);
-     font-weight:600;font-variant-numeric:tabular-nums}
-  .statline i{font-style:normal;font-family:var(--mono);font-size:11px;
-     letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+/* ---------- ANIMATION LIBRARY (all CSS, no JS) ---------- */
+@keyframes flow{to{stroke-dashoffset:-1200}}
+@keyframes draw{to{stroke-dashoffset:0}}
+@keyframes barIn{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes breathe{0%,100%{opacity:.25}50%{opacity:.9}}
+@keyframes blip{0%,100%{r:3}50%{r:5.5}}
+@keyframes scan{0%{transform:translateX(-40px)}100%{transform:translateX(1040px)}}
+@keyframes tick{0%,49%{opacity:1}50%,100%{opacity:.15}}
+@keyframes slideRule{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes countUp{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0 0 0)}}
+@keyframes wob{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
 
-  /* ---- generic figure ---- */
-  figure{margin:28px 0;border:1px solid var(--rule);background:var(--panel);
-     border-radius:3px;overflow:hidden}
-  figure svg{display:block;width:100%;height:auto}
-  figcaption{font-family:var(--mono);font-size:12px;color:var(--dim);
-     padding:12px 16px;border-top:1px solid var(--rule);line-height:1.5}
-  .scroll{overflow-x:auto}
+.flow{stroke-dasharray:6 8;animation:flow 16s linear infinite}
+.flow-f{stroke-dasharray:4 6;animation:flow 7s linear infinite}
+.breathe{animation:breathe 3.6s ease-in-out infinite}
+.blip{animation:blip 2s ease-in-out infinite}
+.scanline{animation:scan 11s cubic-bezier(.4,0,.6,1) infinite}
+.rise{animation:rise .6s both}
+.d1{animation-delay:.08s}.d2{animation-delay:.16s}.d3{animation-delay:.24s}
+.d4{animation-delay:.32s}.d5{animation-delay:.40s}.d6{animation-delay:.48s}
+.d7{animation-delay:.56s}.d8{animation-delay:.64s}
 
-  /* ---- svg text ---- */
-  text{font-family:var(--mono);fill:var(--ink)}
-  .lbl{font-size:11px;fill:var(--dim)}
-  .lbl-s{font-size:9.5px;fill:var(--dim)}
-  .num{font-size:12px;fill:var(--live)}
-  .ttl{font-size:12.5px;fill:var(--ink);font-weight:600}
+/* staged algorithm reveal, looping so it can be watched twice */
+.st{opacity:0;animation:rise .55s forwards}
+.s1{animation-delay:.2s}.s2{animation-delay:1.0s}.s3{animation-delay:1.8s}
+.s4{animation-delay:2.6s}.s5{animation-delay:3.4s}.s6{animation-delay:4.2s}
 
-  /* ---- animation primitives ---- */
-  @keyframes flow{to{stroke-dashoffset:-1000}}
-  @keyframes pulse{0%,100%{opacity:.28}50%{opacity:1}}
-  @keyframes grow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
-  @keyframes riseIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-  @keyframes sweep{0%{transform:translateX(0)}100%{transform:translateX(760px)}}
-  @keyframes blink{0%,45%{opacity:0}50%,95%{opacity:1}100%{opacity:0}}
+/* ---------- CSS BAR CHARTS — the signature figure ---------- */
+.chart{border:1px solid var(--border);background:var(--panel);border-radius:6px;
+  padding:20px 22px;margin:24px 0}
+.chart h4{font-family:var(--font-mono);font-size:11px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--muted);font-weight:600;margin:0 0 16px}
+.bars{display:grid;grid-template-columns:auto 1fr;gap:9px 14px;align-items:center;
+  position:relative}
+.bars .lab{font-family:var(--font-mono);font-size:12px;color:var(--muted);
+  text-align:right;white-space:nowrap}
+.track{position:relative;height:20px;background:#0f0f11;border-radius:2px}
+.bar{height:20px;border-radius:2px;transform-origin:left center;
+  animation:barIn 1.1s cubic-bezier(.2,.7,.3,1) both}
+.bar .v{position:absolute;left:100%;margin-left:9px;top:0;line-height:20px;
+  font-family:var(--font-mono);font-size:12px;color:var(--fg);white-space:nowrap}
+.bar.inside .v{left:auto;right:9px;margin:0;color:#0a0a0a;font-weight:700}
+.refline{position:absolute;top:-6px;bottom:-6px;width:0;
+  border-left:1.5px dashed var(--green-bright);opacity:.85;
+  animation:fadeIn 1.4s .8s both}
+.refline span{position:absolute;top:-19px;left:6px;font-family:var(--font-mono);
+  font-size:10px;letter-spacing:.08em;color:var(--green-bright);white-space:nowrap}
+.cap{font-family:var(--font-mono);font-size:11.5px;color:var(--faint);
+  margin-top:16px;line-height:1.6}
 
-  .flow{stroke-dasharray:5 7;animation:flow 14s linear infinite}
-  .flow-slow{stroke-dasharray:3 9;animation:flow 26s linear infinite}
-  .node{animation:riseIn .6s both}
-  .beam{animation:sweep 9s cubic-bezier(.5,0,.5,1) infinite}
-  .pulse{animation:pulse 3.4s ease-in-out infinite}
+figure{margin:24px 0;border:1px solid var(--border);background:var(--panel);
+  border-radius:6px;overflow:hidden}
+figure svg{display:block;width:100%;height:auto}
+figcaption{font-family:var(--font-mono);font-size:11.5px;color:var(--faint);
+  padding:12px 16px;border-top:1px solid var(--border);line-height:1.6}
+.scroll{overflow-x:auto}
 
-  /* staged reveal for the algorithm strip */
-  .st{opacity:0;animation:riseIn .5s forwards}
-  .st1{animation-delay:.1s}.st2{animation-delay:.9s}.st3{animation-delay:1.7s}
-  .st4{animation-delay:2.5s}.st5{animation-delay:3.3s}.st6{animation-delay:4.1s}
+text{font-family:var(--font-mono);fill:var(--fg)}
+.lbl{font-size:11px;fill:var(--muted)}
+.lbl-s{font-size:9.5px;fill:var(--faint)}
+.ttl{font-size:12px;fill:var(--fg);font-weight:600}
+.num{font-size:12px;fill:var(--green-bright)}
 
-  /* ---- tables ---- */
-  table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:13px;
-     font-variant-numeric:tabular-nums;margin:22px 0}
-  th{text-align:left;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;
-     color:var(--dim);font-weight:600;padding:0 12px 10px 0;border-bottom:1px solid var(--rule)}
-  td{padding:11px 12px 11px 0;border-bottom:1px solid var(--rule);vertical-align:top}
-  td.n{text-align:right;color:var(--ink)}
-  .good{color:var(--live)}.bad{color:var(--maroon)}.mid{color:var(--tan)}
+/* hero stat strip */
+.stats{display:flex;flex-wrap:wrap;border:1px solid var(--border);border-radius:6px;
+  overflow:hidden;margin-top:34px}
+.stats div{flex:1 1 150px;padding:16px 18px;border-right:1px solid var(--border);
+  animation:rise .6s both}
+.stats div:last-child{border-right:none}
+.stats b{display:block;font-family:var(--font-mono);font-size:24px;font-weight:600;
+  color:var(--green-bright);font-variant-numeric:tabular-nums;
+  animation:countUp 1.2s .3s both}
+.stats i{font-style:normal;font-family:var(--font-mono);font-size:10px;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
 
-  /* ---- callouts ---- */
-  .note{border-left:2px solid var(--sage);padding:2px 0 2px 20px;margin:26px 0;
-     color:var(--dim)}
-  .note b{color:var(--ink)}
-  .warn{border-left-color:var(--maroon)}
-  .key{border:1px solid var(--rule);border-left:2px solid var(--live);
-     background:var(--panel);padding:20px 24px;margin:28px 0;border-radius:2px}
-  .key p:last-child{margin-bottom:0}
+table{width:100%;border-collapse:collapse;font-family:var(--font-mono);font-size:12.5px;
+  font-variant-numeric:tabular-nums;margin:20px 0}
+th{text-align:left;font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--faint);font-weight:600;padding:0 12px 9px 0;border-bottom:1px solid var(--border)}
+td{padding:10px 12px 10px 0;border-bottom:1px solid var(--border);color:var(--muted)}
+td.n{text-align:right}
+tr:hover td{color:var(--fg);background:#0a0a0b;transition:color .18s,background .18s}
+.ok{color:var(--ok)}.warn{color:var(--warn)}.risk{color:var(--risk)}
 
-  .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:0;
-     border:1px solid var(--rule);border-radius:2px;overflow:hidden;margin:26px 0}
-  .grid2>div{padding:22px 24px;border-right:1px solid var(--rule);
-     border-bottom:1px solid var(--rule)}
-  .grid2>div h4{margin:0 0 8px;font-size:13px;font-family:var(--mono);
-     letter-spacing:.08em;text-transform:uppercase;color:var(--tan);font-weight:600}
-  .grid2>div p{font-size:14.5px;color:var(--dim);margin:0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));
+  border:1px solid var(--border);border-radius:6px;overflow:hidden;margin:24px 0}
+.grid>div{padding:20px 22px;border-right:1px solid var(--border);
+  border-bottom:1px solid var(--border);animation:rise .6s both;transition:background .2s}
+.grid>div:hover{background:#0a0a0b}
+.grid h4{font-family:var(--font-mono);font-size:11px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--tan);font-weight:600;margin:0 0 7px}
+.grid p{font-size:14px;color:var(--muted);margin:0;max-width:none}
 
-  footer{border-top:1px solid var(--rule);padding:48px 0 80px;color:var(--dim);
-     font-family:var(--mono);font-size:12px}
+.key{border:1px solid var(--border);border-left:2px solid var(--green-bright);
+  background:var(--panel);padding:18px 22px;margin:26px 0;border-radius:6px}
+.key p:last-child{margin-bottom:0}
+.note{border-left:2px solid var(--tan);padding:2px 0 2px 18px;margin:24px 0;color:var(--muted)}
+.note.risk-n{border-left-color:var(--risk)}
+.note b{color:var(--fg)}
 
-  @media (prefers-reduced-motion:reduce){
-    *{animation:none!important;transition:none!important}
-    .st{opacity:1}
-  }
-  /* the page commits to one dark world deliberately — it is an instrument panel,
-     not a document that should invert. Light-theme viewers still get correct
-     contrast because the ground is declared, not inherited. */
+footer{border-top:1px solid var(--rule-strong);padding:40px 0 72px;color:var(--faint);
+  font-family:var(--font-mono);font-size:11.5px}
+
+@media (prefers-reduced-motion:reduce){
+  *{animation:none!important;transition:none!important}
+  .st,.rise,.stats div,.grid>div{opacity:1!important}
+  .bar{transform:none!important}
+  .stats b{clip-path:none!important}
+}
 </style>
-
+</head>
+<body>
 <div class="wrap">
 
-<header class="hero">
-  <div class="eyebrow">Click-a-thon India 2026 · SonyLIV · ClickHouse + ClickStack</div>
-  <h1>Count the people who are<br><span>actually watching.</span></h1>
-  <p class="lede" style="margin-top:26px">
-    Not the sessions that are open. Not the apps that are running. The viewers whose
-    screen is lit, in the foreground, right now — reconstructed from start/end events
-    and one-minute heartbeats, over 7 million events, and checked minute by minute
-    against the raw stream.
+<header style="padding:88px 0 60px">
+  <div class="kicker">ATLAS · SONYLIV FOREGROUND-ONLY CONCURRENCY · 2026-08-02</div>
+  <h1>Count the people who are actually watching.</h1>
+  <p class="sub" style="margin-top:18px">
+    Not sessions that are open. Not apps that are running. Viewers whose screen is lit —
+    reconstructed from start/end events and one-minute heartbeats across 7,000,000 events,
+    then checked minute by minute against the raw stream.
   </p>
-  <div class="statline">
-    <div><b>23,324</b><i>peak concurrent</i></div>
-    <div><b>3,201,716</b><i>minutes reconciled</i></div>
-    <div><b>0</b><i>mismatched</i></div>
-    <div><b>10–210<span style="font-size:14px">ms</span></b><i>served</i></div>
+  <div class="stats">
+    <div class="rise d1"><b>23,324</b><i>peak concurrent</i></div>
+    <div class="rise d2"><b>944.70</b><i>time-weighted avg</i></div>
+    <div class="rise d3"><b>3,201,716</b><i>minutes reconciled</i></div>
+    <div class="rise d4"><b>0</b><i>mismatched</i></div>
+    <div class="rise d5"><b>10–210ms</b><i>served</i></div>
   </div>
 </header>
 
-<!-- ============================ THE PROBLEM ============================ -->
+<!-- ═══════════════ 01 THE PROBLEM ═══════════════ -->
 <section>
-  <div class="eyebrow">01 — the problem</div>
+  <div class="kicker">01 — the problem</div>
   <h2>A session being open is not a person watching</h2>
   <p>
-    The data gives you when a session started, when it ended, and a heartbeat roughly
-    every minute in between. The tempting reading is that a session is "on" from its
-    first event to its last. That reading is wrong, and it is wrong in one direction:
-    it always over-counts.
+    The data gives you when a session started, when it ended, and a heartbeat roughly every
+    minute between. The tempting reading — a session is "on" from first event to last — is
+    wrong in one direction: it always over-counts.
   </p>
   <p>
-    Someone backgrounds the app to answer a message. Someone pauses and walks away.
-    Someone loses signal in a lift. The session object survives all three. The viewer
-    does not.
+    Someone backgrounds the app to answer a message. Someone pauses and walks away. Someone
+    loses signal in a lift. The session object survives all three. The viewer does not.
   </p>
 
   <figure>
-    <svg viewBox="0 0 900 300" role="img" aria-label="One session read two ways: the naive span counts backgrounded and paused time, the model does not.">
-      <defs>
-        <linearGradient id="fadeM" x1="0" x2="1">
-          <stop offset="0" stop-color="#8C4A50" stop-opacity=".85"/>
-          <stop offset="1" stop-color="#8C4A50" stop-opacity=".35"/>
-        </linearGradient>
-      </defs>
+    <svg viewBox="0 0 900 310" role="img" aria-label="One session read two ways: the naive span counts backgrounded and paused time; the model excludes both.">
+      <text class="ttl" x="24" y="30">ONE SESSION · 40 MINUTES OF WALL CLOCK</text>
 
-      <text class="ttl" x="24" y="34">ONE SESSION, 40 MINUTES OF WALL CLOCK</text>
-
-      <!-- event ticks -->
-      <text class="lbl-s" x="24" y="66">events</text>
-      <g>
-        <!-- dense heartbeats 0-10 -->
-        <g fill="#C7A87C">
-          <rect x="120" y="56" width="2" height="14"/><rect x="140" y="56" width="2" height="14"/>
-          <rect x="160" y="56" width="2" height="14"/><rect x="180" y="56" width="2" height="14"/>
-          <rect x="200" y="56" width="2" height="14"/><rect x="220" y="56" width="2" height="14"/>
-          <rect x="240" y="56" width="2" height="14"/><rect x="260" y="56" width="2" height="14"/>
-          <!-- gap 10-19: backgrounded, heartbeats stop -->
-          <rect x="460" y="56" width="2" height="14"/><rect x="480" y="56" width="2" height="14"/>
-          <rect x="500" y="56" width="2" height="14"/><rect x="520" y="56" width="2" height="14"/>
-          <!-- paused 24-33: heartbeats CONTINUE -->
-          <rect x="560" y="56" width="2" height="14" opacity=".45"/>
-          <rect x="600" y="56" width="2" height="14" opacity=".45"/>
-          <rect x="640" y="56" width="2" height="14" opacity=".45"/>
-          <rect x="680" y="56" width="2" height="14" opacity=".45"/>
-          <rect x="720" y="56" width="2" height="14"/><rect x="740" y="56" width="2" height="14"/>
-          <rect x="760" y="56" width="2" height="14"/><rect x="780" y="56" width="2" height="14"/>
-        </g>
-        <text class="lbl-s" x="300" y="68" fill="#8C4A50">— no heartbeats (backgrounded) —</text>
-        <text class="lbl-s" x="556" y="48" fill="#8C4A50">heartbeats CONTINUE while paused</text>
+      <text class="lbl-s" x="24" y="64">events</text>
+      <g fill="#c9b07e">
+        <rect x="120" y="54" width="2" height="14" style="animation:tick 2.1s infinite"/>
+        <rect x="140" y="54" width="2" height="14" style="animation:tick 2.1s .1s infinite"/>
+        <rect x="160" y="54" width="2" height="14" style="animation:tick 2.1s .2s infinite"/>
+        <rect x="180" y="54" width="2" height="14" style="animation:tick 2.1s .3s infinite"/>
+        <rect x="200" y="54" width="2" height="14" style="animation:tick 2.1s .4s infinite"/>
+        <rect x="220" y="54" width="2" height="14" style="animation:tick 2.1s .5s infinite"/>
+        <rect x="240" y="54" width="2" height="14" style="animation:tick 2.1s .6s infinite"/>
+        <rect x="260" y="54" width="2" height="14" style="animation:tick 2.1s .7s infinite"/>
+        <rect x="460" y="54" width="2" height="14" style="animation:tick 2.1s .2s infinite"/>
+        <rect x="480" y="54" width="2" height="14" style="animation:tick 2.1s .3s infinite"/>
+        <rect x="500" y="54" width="2" height="14" style="animation:tick 2.1s .4s infinite"/>
+        <rect x="520" y="54" width="2" height="14" style="animation:tick 2.1s .5s infinite"/>
+        <rect x="560" y="54" width="2" height="14" opacity=".5"/>
+        <rect x="600" y="54" width="2" height="14" opacity=".5"/>
+        <rect x="640" y="54" width="2" height="14" opacity=".5"/>
+        <rect x="680" y="54" width="2" height="14" opacity=".5"/>
+        <rect x="720" y="54" width="2" height="14" style="animation:tick 2.1s .1s infinite"/>
+        <rect x="740" y="54" width="2" height="14" style="animation:tick 2.1s .2s infinite"/>
+        <rect x="760" y="54" width="2" height="14" style="animation:tick 2.1s .3s infinite"/>
+        <rect x="780" y="54" width="2" height="14" style="animation:tick 2.1s .4s infinite"/>
       </g>
+      <text class="lbl-s" x="296" y="66" fill="#b06a6a">— heartbeats STOP (backgrounded) —</text>
+      <text class="lbl-s" x="556" y="46" fill="#b06a6a">heartbeats CONTINUE while paused</text>
 
-      <!-- naive -->
-      <text class="lbl" x="24" y="120">NAIVE</text>
-      <text class="lbl-s" x="24" y="136">first → last</text>
-      <rect x="120" y="106" width="670" height="26" fill="url(#fadeM)"/>
-      <text class="lbl-s" x="130" y="123" fill="#EDEAE3">counted continuously — including every minute nobody was looking</text>
+      <text class="lbl" x="24" y="118">NAIVE</text>
+      <text class="lbl-s" x="24" y="133">first → last</text>
+      <rect x="120" y="104" width="670" height="24" fill="#b06a6a" opacity=".5"
+            style="transform-origin:120px 0;animation:barIn 1.6s ease-out both"/>
+      <text class="lbl-s" x="130" y="120" fill="#f2f2f2">counted continuously — including every minute nobody was looking</text>
 
-      <!-- model -->
       <text class="lbl" x="24" y="188">MODEL</text>
-      <text class="lbl-s" x="24" y="204">foreground only</text>
+      <text class="lbl-s" x="24" y="203">foreground only</text>
       <g>
-        <rect x="120" y="174" width="160" height="26" fill="#8FA37C"/>
-        <rect x="460" y="174" width="90"  height="26" fill="#8FA37C"/>
-        <rect x="710" y="174" width="80"  height="26" fill="#8FA37C"/>
-        <!-- excluded regions, hatched -->
-        <rect x="280" y="174" width="180" height="26" fill="#8C4A50" opacity=".18"/>
-        <rect x="550" y="174" width="160" height="26" fill="#8C4A50" opacity=".18"/>
-        <text class="lbl-s" x="300" y="191" fill="#8C4A50">excluded: gap</text>
-        <text class="lbl-s" x="572" y="191" fill="#8C4A50">excluded: explicit pause</text>
+        <rect x="120" y="174" width="160" height="24" fill="#6f9d7f" style="transform-origin:120px 0;animation:barIn .7s .2s both"/>
+        <rect x="460" y="174" width="90"  height="24" fill="#6f9d7f" style="transform-origin:460px 0;animation:barIn .7s .7s both"/>
+        <rect x="710" y="174" width="80"  height="24" fill="#6f9d7f" style="transform-origin:710px 0;animation:barIn .7s 1.2s both"/>
+        <rect x="280" y="174" width="180" height="24" fill="#b06a6a" opacity=".16"/>
+        <rect x="550" y="174" width="160" height="24" fill="#b06a6a" opacity=".16"/>
+        <text class="lbl-s" x="300" y="190" fill="#b06a6a">excluded: gap</text>
+        <text class="lbl-s" x="568" y="190" fill="#b06a6a">excluded: explicit pause</text>
       </g>
 
-      <!-- the two signals -->
-      <line x1="120" y1="236" x2="790" y2="236" stroke="#232320"/>
-      <text class="lbl-s" x="120" y="258">TWO SIGNALS ARE REQUIRED — neither finds the other's case</text>
-      <g class="pulse">
-        <circle cx="370" cy="278" r="3" fill="#8FA37C"/>
-        <text class="lbl-s" x="382" y="282" fill="#8FA37C">gap in heartbeats → backgrounded</text>
+      <line x1="120" y1="234" x2="790" y2="234" stroke="#262628"/>
+      <text class="lbl-s" x="120" y="256">TWO SIGNALS REQUIRED — neither finds the other's case</text>
+      <g class="breathe">
+        <circle class="blip" cx="330" cy="278" r="3" fill="#6f9d7f"/>
+        <text class="lbl-s" x="344" y="282" fill="#a8c8a4">gap in heartbeats → backgrounded</text>
       </g>
-      <g class="pulse" style="animation-delay:1.7s">
-        <circle cx="630" cy="278" r="3" fill="#C7A87C"/>
-        <text class="lbl-s" x="642" y="282" fill="#C7A87C">explicit pause event → paused</text>
+      <g class="breathe" style="animation-delay:1.8s">
+        <circle class="blip" cx="600" cy="278" r="3" fill="#c9b07e"/>
+        <text class="lbl-s" x="614" y="282" fill="#c9b07e">explicit pause event → paused</text>
       </g>
     </svg>
-    <figcaption>
-      Heartbeat rate while active <span class="m">4.72/min</span> · while backgrounded
-      <span class="m">0.047/min</span> · <b style="color:#EDEAE3">while paused
-      <span class="m">0.756/min</span></b> — a paused session keeps beating, which is
-      why gap detection alone cannot find it.
-    </figcaption>
+    <figcaption>The asymmetry is the whole argument — and it is measured, not assumed.</figcaption>
   </figure>
 
-  <div class="key">
-    <p><strong>This is the whole insight, and it is why one signal is not enough.</strong>
-    Heartbeat gaps catch backgrounding, because heartbeats effectively stop — 0.047/min
-    against 4.72/min. But heartbeats <em>survive</em> a pause at 0.756/min. A model built
-    on gaps alone counts every paused viewer as watching, silently, and looks perfectly
-    healthy while doing it. Pause must be excluded explicitly.</p>
+  <div class="chart">
+    <h4>Heartbeat rate by state — events per minute</h4>
+    <div class="bars">
+      <div class="lab">active</div>
+      <div class="track"><div class="bar" style="width:100%;background:var(--green)">
+        <span class="v">4.72 / min</span></div></div>
+      <div class="lab">paused</div>
+      <div class="track"><div class="bar" style="width:16%;background:var(--tan);animation-delay:.2s">
+        <span class="v">0.756 / min — still beating</span></div></div>
+      <div class="lab">backgrounded</div>
+      <div class="track"><div class="bar" style="width:1%;background:var(--maroon);animation-delay:.4s">
+        <span class="v">0.047 / min — effectively silent</span></div></div>
+    </div>
+    <p class="cap">
+      Gap detection separates <em>backgrounded</em> from <em>active</em> cleanly — a hundredfold
+      difference. It cannot separate <em>paused</em>, which still beats at 16% of the active rate.
+      A model built on gaps alone counts every paused viewer as watching, silently, and looks
+      perfectly healthy doing it.
+    </p>
   </div>
 </section>
 
-<!-- ============================ DATA LINEAGE ============================ -->
+<!-- ═══════════════ 02 DATA LINEAGE ═══════════════ -->
 <section>
-  <div class="eyebrow">02 — data lineage</div>
+  <div class="kicker">02 — data lineage</div>
   <h2>Where every number comes from</h2>
   <p>
-    Nothing is hand-computed. Each figure in this document traces back through this path
-    to a raw event, and the gate at the bottom re-derives the answer from raw and refuses
-    to agree with itself.
+    Nothing is hand-computed. Every figure traces back through this path to a raw event, and
+    the gate at the right re-derives the answer from raw — refusing to agree with itself.
   </p>
 
   <figure class="scroll">
-    <svg viewBox="0 0 980 560" role="img" aria-label="Data lineage from raw CSV through landing, typed events, intervals, deltas and serving tiers, with the reconciliation gate reading raw independently.">
+    <svg viewBox="0 0 980 570" role="img" aria-label="Lineage from raw CSV through landing, typed events, intervals, deltas and serving tiers, with an independent reconciliation gate reading raw.">
       <defs>
-        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-          <path d="M0,0 L10,5 L0,10 z" fill="#3A3A36"/>
-        </marker>
-        <marker id="arL" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-          <path d="M0,0 L10,5 L0,10 z" fill="#7CFF4F"/>
-        </marker>
+        <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#3a3a3d"/></marker>
+        <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#7ec699"/></marker>
       </defs>
 
-      <!-- ROW 1: source -->
-      <g class="node">
-        <rect x="30" y="24" width="200" height="58" fill="#0B0B0A" stroke="#232320"/>
-        <text class="ttl" x="44" y="48">raw CSV</text>
-        <text class="lbl-s" x="44" y="66">7,000,000 rows · 1.9 GB</text>
-      </g>
-      <g class="node" style="animation-delay:.1s">
-        <rect x="250" y="24" width="200" height="58" fill="#0B0B0A" stroke="#232320"/>
-        <text class="ttl" x="264" y="48">content CSV</text>
-        <text class="lbl-s" x="264" y="66">33,326 titles</text>
-      </g>
+      <rect class="scanline" x="0" y="10" width="1.5" height="540" fill="#7ec699" opacity=".08"/>
 
-      <!-- landing -->
-      <path class="flow" d="M130,82 L130,124" stroke="#C7A87C" stroke-width="1.4" fill="none" marker-end="url(#ar)"/>
-      <path class="flow" d="M350,82 L350,124" stroke="#C7A87C" stroke-width="1.4" fill="none" marker-end="url(#ar)"/>
+      <g class="rise d1"><rect x="26" y="20" width="196" height="54" fill="#0c0c0d" stroke="#262628" rx="4"/>
+        <text class="ttl" x="40" y="43">raw CSV</text><text class="lbl-s" x="40" y="61">7,000,000 rows · 1.9 GB</text></g>
+      <g class="rise d2"><rect x="242" y="20" width="196" height="54" fill="#0c0c0d" stroke="#262628" rx="4"/>
+        <text class="ttl" x="256" y="43">content CSV</text><text class="lbl-s" x="256" y="61">33,326 titles</text></g>
 
-      <g class="node" style="animation-delay:.2s">
-        <rect x="30" y="124" width="420" height="62" fill="#0B0B0A" stroke="#232320"/>
-        <text class="ttl" x="44" y="148">ev_landing — all-String, header-aware</text>
-        <text class="lbl-s" x="44" y="166">a malformed row costs a row, not the file · unknown columns survive</text>
-      </g>
+      <path class="flow" d="M124,74 L124,116" stroke="#c9b07e" stroke-width="1.4" fill="none" marker-end="url(#a1)"/>
+      <path class="flow" d="M340,74 L340,116" stroke="#c9b07e" stroke-width="1.4" fill="none" marker-end="url(#a1)"/>
 
-      <!-- typed + quarantine -->
-      <path class="flow" d="M180,186 L180,228" stroke="#C7A87C" stroke-width="1.4" fill="none" marker-end="url(#ar)"/>
-      <path class="flow" d="M370,186 L430,228" stroke="#8C4A50" stroke-width="1.2" fill="none" marker-end="url(#ar)"/>
+      <g class="rise d3"><rect x="26" y="116" width="412" height="58" fill="#0c0c0d" stroke="#262628" rx="4"/>
+        <text class="ttl" x="40" y="139">ev_landing — all-String, header-aware</text>
+        <text class="lbl-s" x="40" y="157">a malformed row costs a row, not the file · unknown columns survive</text></g>
 
-      <g class="node" style="animation-delay:.3s">
-        <rect x="30" y="228" width="300" height="62" fill="#0B0B0A" stroke="#232320"/>
-        <text class="ttl" x="44" y="252">ev_raw — typed</text>
-        <text class="lbl-s" x="44" y="270">6,999,997 accepted · <tspan fill="#C7A87C">extra Map</tspan> carries new columns</text>
-      </g>
-      <g class="node" style="animation-delay:.35s">
-        <rect x="350" y="228" width="160" height="62" fill="#0B0B0A" stroke="#2A2224"/>
-        <text class="ttl" x="364" y="252" fill="#8C4A50">quarantine</text>
-        <text class="lbl-s" x="364" y="270">3 · out of range</text>
-      </g>
+      <path class="flow" d="M170,174 L170,216" stroke="#c9b07e" stroke-width="1.4" fill="none" marker-end="url(#a1)"/>
+      <path class="flow" d="M360,174 L424,216" stroke="#b06a6a" stroke-width="1.2" fill="none" marker-end="url(#a1)"/>
 
-      <!-- intervals -->
-      <path class="flow" d="M180,290 L180,332" stroke="#8FA37C" stroke-width="1.6" fill="none" marker-end="url(#ar)"/>
-      <text class="lbl-s" x="192" y="316" fill="#8FA37C">gap 150s · tail 60s · pause/resume</text>
+      <g class="rise d4"><rect x="26" y="216" width="296" height="58" fill="#0c0c0d" stroke="#262628" rx="4"/>
+        <text class="ttl" x="40" y="239">ev_raw — typed</text>
+        <text class="lbl-s" x="40" y="257">6,999,997 accepted · <tspan fill="#c9b07e">extra Map</tspan> carries new columns</text></g>
+      <g class="rise d5"><rect x="342" y="216" width="150" height="58" fill="#0c0c0d" stroke="#2a2224" rx="4"/>
+        <text class="ttl" x="356" y="239" fill="#b06a6a">quarantine</text>
+        <text class="lbl-s" x="356" y="257">3 · out of range</text></g>
 
-      <g class="node" style="animation-delay:.45s">
-        <rect x="30" y="332" width="300" height="62" fill="#0B0B0A" stroke="#232320"/>
-        <text class="ttl" x="44" y="356">session_intervals</text>
-        <text class="lbl-s" x="44" y="374">active, foreground-only spans</text>
-      </g>
+      <path class="flow" d="M170,274 L170,318" stroke="#6f9d7f" stroke-width="1.6" fill="none" marker-end="url(#a1)"/>
+      <text class="lbl-s" x="182" y="302" fill="#a8c8a4">gap 150 s · tail 60 s · pause/resume</text>
 
-      <!-- deltas -->
-      <path class="flow" d="M180,394 L180,436" stroke="#8FA37C" stroke-width="1.6" fill="none" marker-end="url(#ar)"/>
-      <g class="node" style="animation-delay:.55s">
-        <rect x="30" y="436" width="300" height="62" fill="#0B0B0A" stroke="#232320"/>
-        <text class="ttl" x="44" y="460">cc_minute_delta</text>
-        <text class="lbl-s" x="44" y="478">139,925 signed rows · hour-clipped</text>
-      </g>
+      <g class="rise d6"><rect x="26" y="318" width="296" height="54" fill="#0c0c0d" stroke="#262628" rx="4"/>
+        <text class="ttl" x="40" y="341">session_intervals</text>
+        <text class="lbl-s" x="40" y="359">active, foreground-only spans</text></g>
 
-      <!-- serving tiers -->
-      <path class="flow" d="M330,467 L400,467" stroke="#8FA37C" stroke-width="1.4" fill="none" marker-end="url(#ar)"/>
-      <g class="node" style="animation-delay:.65s">
-        <rect x="400" y="404" width="240" height="42" fill="#0B0B0A" stroke="#232320"/>
-        <text class="ttl" x="414" y="430">minute · hour · day</text>
-      </g>
-      <g class="node" style="animation-delay:.7s">
-        <rect x="400" y="452" width="240" height="42" fill="#0B0B0A" stroke="#232320"/>
-        <text class="ttl" x="414" y="478" fill="#6E8CA0">user tier — uniqExact</text>
-      </g>
-      <path d="M330,455 L400,425" stroke="#3A3A36" stroke-width="1" fill="none" marker-end="url(#ar)"/>
-      <path class="flow" d="M180,394 C 380,394 380,470 400,473" stroke="#6E8CA0" stroke-width="1.2" fill="none" marker-end="url(#ar)"/>
+      <path class="flow" d="M170,372 L170,414" stroke="#6f9d7f" stroke-width="1.6" fill="none" marker-end="url(#a1)"/>
+      <g class="rise d7"><rect x="26" y="414" width="296" height="54" fill="#0c0c0d" stroke="#262628" rx="4"/>
+        <text class="ttl" x="40" y="437">cc_minute_delta</text>
+        <text class="lbl-s" x="40" y="455">139,925 signed rows · hour-clipped</text></g>
 
-      <!-- content join -->
-      <path class="flow-slow" d="M450,82 C 620,140 660,300 640,404" stroke="#C7A87C" stroke-width="1.1" fill="none" marker-end="url(#ar)"/>
-      <text class="lbl-s" x="654" y="240" fill="#C7A87C">LEFT ANY JOIN</text>
-      <text class="lbl-s" x="654" y="254" fill="#C7A87C">0 orphans</text>
+      <path class="flow-f" d="M322,441 L392,441" stroke="#6f9d7f" stroke-width="1.4" fill="none" marker-end="url(#a1)"/>
+      <g class="rise d8"><rect x="392" y="392" width="234" height="40" fill="#0c0c0d" stroke="#262628" rx="4"/>
+        <text class="ttl" x="406" y="417">minute · hour · day cube</text></g>
+      <g class="rise d8"><rect x="392" y="440" width="234" height="40" fill="#0c0c0d" stroke="#262628" rx="4"/>
+        <text class="ttl" x="406" y="465" fill="#8aa9c9">user tier — uniqExact</text></g>
+      <path class="flow-f" d="M170,372 C 360,372 360,458 392,460" stroke="#8aa9c9" stroke-width="1.2" fill="none" marker-end="url(#a1)"/>
 
-      <!-- dashboards -->
-      <path class="flow" d="M640,450 L720,450" stroke="#8FA37C" stroke-width="1.4" fill="none" marker-end="url(#ar)"/>
-      <g class="node" style="animation-delay:.8s">
-        <rect x="720" y="404" width="230" height="90" fill="#0B0B0A" stroke="#232320"/>
-        <text class="ttl" x="734" y="428">ClickStack dashboards</text>
-        <text class="lbl-s" x="734" y="448">12 filters · 11 move the curve</text>
-        <text class="lbl-s" x="734" y="464">full-width panels</text>
-        <text class="num" x="734" y="484">10–210 ms</text>
-      </g>
+      <path class="flow-slow flow" d="M438,74 C 620,140 664,300 632,392" stroke="#c9b07e" stroke-width="1.1" fill="none" marker-end="url(#a1)"/>
+      <text class="lbl-s" x="646" y="236" fill="#c9b07e">LEFT ANY JOIN · 0 orphans</text>
 
-      <!-- THE GATE — reads raw independently -->
-      <g class="node" style="animation-delay:.9s">
-        <rect x="660" y="120" width="290" height="120" fill="#0B0B0A" stroke="#7CFF4F" stroke-opacity=".5"/>
-        <text class="ttl" x="674" y="146" fill="#7CFF4F">THE GATE — reconcile</text>
-        <text class="lbl-s" x="674" y="168">recomputes concurrency from ev_raw ONLY</text>
-        <text class="lbl-s" x="674" y="184">different implementation of the same spec</text>
-        <text class="lbl-s" x="674" y="200">never reads the serving tables</text>
-        <text class="num" x="674" y="224">3,201,716 minutes · 0 mismatched</text>
-      </g>
-      <path class="flow" d="M330,252 C 500,252 560,200 660,182" stroke="#7CFF4F" stroke-width="1.5" fill="none" marker-end="url(#arL)" opacity=".85"/>
-      <path d="M660,214 C 520,300 420,420 340,462" stroke="#7CFF4F" stroke-width="1" stroke-dasharray="2 6" fill="none" opacity=".55" marker-end="url(#arL)"/>
-      <text class="lbl-s" x="470" y="360" fill="#7CFF4F">compares — and fails loudly on any disagreement</text>
+      <path class="flow-f" d="M626,436 L706,436" stroke="#6f9d7f" stroke-width="1.4" fill="none" marker-end="url(#a1)"/>
+      <g class="rise d8"><rect x="706" y="392" width="248" height="88" fill="#0c0c0d" stroke="#262628" rx="4"/>
+        <text class="ttl" x="720" y="415">ClickStack dashboards</text>
+        <text class="lbl-s" x="720" y="434">12 filters · 11 move the curve</text>
+        <text class="lbl-s" x="720" y="450">full-width panels · live</text>
+        <text class="num" x="720" y="470">10–210 ms</text></g>
 
-      <!-- sweep beam suggesting continuous verification -->
-      <rect class="beam" x="30" y="16" width="2" height="500" fill="#7CFF4F" opacity=".07"/>
+      <g class="rise d8"><rect x="654" y="110" width="300" height="122" fill="#0c0c0d" stroke="#7ec699" stroke-opacity=".45" rx="4"/>
+        <text class="ttl" x="668" y="134" fill="#7ec699">THE GATE — reconcile</text>
+        <text class="lbl-s" x="668" y="156">recomputes concurrency from ev_raw ONLY</text>
+        <text class="lbl-s" x="668" y="172">different implementation, same spec</text>
+        <text class="lbl-s" x="668" y="188">never reads the serving tables</text>
+        <text class="num" x="668" y="214">3,201,716 min · 0 mismatched</text></g>
+      <path class="flow-f" d="M322,240 C 500,240 560,190 654,172" stroke="#7ec699" stroke-width="1.5" fill="none" marker-end="url(#a2)"/>
+      <path d="M654,206 C 520,290 420,400 336,436" stroke="#7ec699" stroke-width="1" stroke-dasharray="2 6" fill="none" opacity=".5" marker-end="url(#a2)"/>
+      <text class="lbl-s" x="452" y="348" fill="#7ec699">compares — and fails loudly on any disagreement</text>
     </svg>
     <figcaption>
-      Green is the verification path. It starts at <span class="m">ev_raw</span> — not at
-      the model's output — so a bug in the derivation cannot hide inside a gate that shares
-      its code. The two paths use different implementations of the same spec: window
-      functions on one side, array splitting on the other.
+      Green is the verification path. It begins at <span class="m">ev_raw</span>, not at the
+      model's output, so a bug in the derivation cannot hide inside a gate that shares its code.
     </figcaption>
   </figure>
 </section>
 
-<!-- ============================ THE ALGORITHM ============================ -->
+<!-- ═══════════════ 03 ALGORITHM ═══════════════ -->
 <section>
-  <div class="eyebrow">03 — the algorithm</div>
+  <div class="kicker">03 — the algorithm</div>
   <h2>From a pile of events to an active interval</h2>
-  <p>
-    Per session, ordered by time. Six steps, each of which exists because some real
-    session breaks without it.
-  </p>
+  <p>Per session, ordered by time. Six steps, each present because some real session breaks without it.</p>
 
   <figure class="scroll">
-    <svg viewBox="0 0 960 420" role="img" aria-label="Six-step algorithm turning ordered session events into active intervals.">
-      <!-- rail -->
-      <line x1="40" y1="60" x2="920" y2="60" stroke="#232320"/>
+    <svg viewBox="0 0 960 400" role="img" aria-label="Six-step algorithm turning ordered session events into active intervals.">
+      <line x1="40" y1="54" x2="920" y2="54" stroke="#262628"/>
+      <line x1="40" y1="54" x2="920" y2="54" stroke="#6f9d7f" stroke-width="1.5"
+            style="transform-origin:40px 0;animation:slideRule 5s linear both"/>
 
-      <!-- step 1 -->
-      <g class="st st1">
-        <circle cx="80" cy="60" r="5" fill="#8FA37C"/>
-        <text class="ttl" x="40" y="96">1 · ORDER</text>
-        <text class="lbl-s" x="40" y="116">sort by timestamp,</text>
-        <text class="lbl-s" x="40" y="130">tie-break deterministically</text>
-        <text class="lbl-s" x="40" y="152" fill="#8C4A50">2,027,071 same-second</text>
-        <text class="lbl-s" x="40" y="166" fill="#8C4A50">pairs — order is not</text>
-        <text class="lbl-s" x="40" y="180" fill="#8C4A50">given by arrival</text>
-      </g>
+      <g class="st s1"><circle cx="76" cy="54" r="5" fill="#6f9d7f"/>
+        <text class="ttl" x="40" y="88">1 · ORDER</text>
+        <text class="lbl-s" x="40" y="107">sort by timestamp, tie-break</text>
+        <text class="lbl-s" x="40" y="121">deterministically</text>
+        <text class="lbl-s" x="40" y="143" fill="#b06a6a">2,027,071 same-second pairs —</text>
+        <text class="lbl-s" x="40" y="157" fill="#b06a6a">arrival ≠ event order</text></g>
 
-      <!-- step 2 -->
-      <g class="st st2">
-        <circle cx="220" cy="60" r="5" fill="#8FA37C"/>
-        <text class="ttl" x="180" y="96">2 · SPLIT</text>
-        <text class="lbl-s" x="180" y="116">break the run wherever</text>
-        <text class="lbl-s" x="180" y="130">the gap exceeds</text>
-        <text class="num"  x="180" y="150">GAP_S = 150 s</text>
-        <text class="lbl-s" x="180" y="172">the backgrounding</text>
-        <text class="lbl-s" x="180" y="186">signal</text>
-      </g>
+      <g class="st s2"><circle cx="216" cy="54" r="5" fill="#6f9d7f"/>
+        <text class="ttl" x="180" y="88">2 · SPLIT</text>
+        <text class="lbl-s" x="180" y="107">break the run where the</text>
+        <text class="lbl-s" x="180" y="121">gap exceeds</text>
+        <text class="num"  x="180" y="141">GAP_S = 150 s</text>
+        <text class="lbl-s" x="180" y="161">the backgrounding signal</text></g>
 
-      <!-- step 3 -->
-      <g class="st st3">
-        <circle cx="380" cy="60" r="5" fill="#C7A87C"/>
-        <text class="ttl" x="340" y="96">3 · EXCLUDE PAUSE</text>
-        <text class="lbl-s" x="340" y="116">cut pause→resume out</text>
-        <text class="lbl-s" x="340" y="130">explicitly — heartbeats</text>
-        <text class="lbl-s" x="340" y="144">survive a pause, so no</text>
-        <text class="lbl-s" x="340" y="158">gap appears here</text>
-        <text class="lbl-s" x="340" y="180" fill="#C7A87C">the step gaps cannot do</text>
-      </g>
+      <g class="st s3"><circle cx="376" cy="54" r="5" fill="#c9b07e"/>
+        <text class="ttl" x="340" y="88">3 · EXCLUDE PAUSE</text>
+        <text class="lbl-s" x="340" y="107">cut pause→resume out</text>
+        <text class="lbl-s" x="340" y="121">explicitly — heartbeats</text>
+        <text class="lbl-s" x="340" y="135">survive, so no gap appears</text>
+        <text class="lbl-s" x="340" y="157" fill="#c9b07e">the step gaps cannot do</text></g>
 
-      <!-- step 4 -->
-      <g class="st st4">
-        <circle cx="540" cy="60" r="5" fill="#8FA37C"/>
-        <text class="ttl" x="500" y="96">4 · TAIL</text>
-        <text class="lbl-s" x="500" y="116">credit one cadence past</text>
-        <text class="lbl-s" x="500" y="130">the last event</text>
-        <text class="num"  x="500" y="150">TAIL_S = 60 s</text>
-        <text class="lbl-s" x="500" y="172">a heartbeat means the</text>
-        <text class="lbl-s" x="500" y="186">minute was watched</text>
-      </g>
+      <g class="st s4"><circle cx="536" cy="54" r="5" fill="#6f9d7f"/>
+        <text class="ttl" x="500" y="88">4 · TAIL</text>
+        <text class="lbl-s" x="500" y="107">credit one cadence past</text>
+        <text class="lbl-s" x="500" y="121">the last event</text>
+        <text class="num"  x="500" y="141">TAIL_S = 60 s</text>
+        <text class="lbl-s" x="500" y="161">a beat means the minute</text>
+        <text class="lbl-s" x="500" y="175">was watched</text></g>
 
-      <!-- step 5 -->
-      <g class="st st5">
-        <circle cx="700" cy="60" r="5" fill="#8FA37C"/>
-        <text class="ttl" x="660" y="96">5 · MERGE</text>
-        <text class="lbl-s" x="660" y="116">fold minute-adjacent</text>
-        <text class="lbl-s" x="660" y="130">runs per session</text>
-        <text class="lbl-s" x="660" y="152">so one viewer is never</text>
-        <text class="lbl-s" x="660" y="166">counted twice in one</text>
-        <text class="lbl-s" x="660" y="180">minute</text>
-      </g>
+      <g class="st s5"><circle cx="696" cy="54" r="5" fill="#6f9d7f"/>
+        <text class="ttl" x="660" y="88">5 · MERGE</text>
+        <text class="lbl-s" x="660" y="107">fold minute-adjacent runs</text>
+        <text class="lbl-s" x="660" y="121">per session, so one viewer</text>
+        <text class="lbl-s" x="660" y="135">is never counted twice in</text>
+        <text class="lbl-s" x="660" y="149">one minute</text></g>
 
-      <!-- step 6 -->
-      <g class="st st6">
-        <circle cx="880" cy="60" r="5" fill="#7CFF4F"/>
-        <text class="ttl" x="820" y="96" fill="#7CFF4F">6 · EMIT</text>
-        <text class="lbl-s" x="820" y="116">an interval with all</text>
-        <text class="lbl-s" x="820" y="130">dimensions attached,</text>
-        <text class="lbl-s" x="820" y="144">first-wins</text>
-        <text class="lbl-s" x="820" y="166" fill="#8C4A50">303 sessions carry</text>
-        <text class="lbl-s" x="820" y="180" fill="#8C4A50">&gt;1 user — any() is</text>
-        <text class="lbl-s" x="820" y="194" fill="#8C4A50">not safe</text>
-      </g>
+      <g class="st s6"><circle class="blip" cx="880" cy="54" r="5" fill="#7ec699"/>
+        <text class="ttl" x="820" y="88" fill="#7ec699">6 · EMIT</text>
+        <text class="lbl-s" x="820" y="107">interval + all dimensions,</text>
+        <text class="lbl-s" x="820" y="121">first-wins</text>
+        <text class="lbl-s" x="820" y="143" fill="#b06a6a">303 sessions carry &gt;1 user</text>
+        <text class="lbl-s" x="820" y="157" fill="#b06a6a">— any() is not safe</text></g>
 
-      <!-- worked strip -->
-      <text class="lbl" x="40" y="248">WORKED</text>
-      <line x1="40" y1="262" x2="920" y2="262" stroke="#232320"/>
+      <text class="lbl" x="40" y="238">WORKED</text>
+      <line x1="40" y1="252" x2="920" y2="252" stroke="#262628"/>
 
-      <g class="st st1"><rect x="40" y="286" width="880" height="18" fill="#C7A87C" opacity=".22"/>
-        <text class="lbl-s" x="48" y="299">raw events, one session</text></g>
-
-      <g class="st st2">
-        <rect x="40"  y="316" width="220" height="18" fill="#8FA37C" opacity=".8"/>
-        <rect x="330" y="316" width="180" height="18" fill="#8FA37C" opacity=".8"/>
-        <rect x="620" y="316" width="300" height="18" fill="#8FA37C" opacity=".8"/>
-        <text class="lbl-s" x="270" y="329" fill="#8C4A50">gap</text>
-        <text class="lbl-s" x="524" y="329" fill="#8C4A50">gap</text>
-      </g>
-
-      <g class="st st3">
-        <rect x="700" y="316" width="90" height="18" fill="#000"/>
-        <rect x="700" y="316" width="90" height="18" fill="#8C4A50" opacity=".35"/>
-        <text class="lbl-s" x="704" y="352" fill="#C7A87C">pause cut out</text>
-      </g>
-
-      <g class="st st4">
-        <rect x="260" y="316" width="14" height="18" fill="#8FA37C" opacity=".45"/>
-        <rect x="510" y="316" width="14" height="18" fill="#8FA37C" opacity=".45"/>
-        <rect x="920" y="316" width="14" height="18" fill="#8FA37C" opacity=".45"/>
-        <text class="lbl-s" x="40" y="376">tail credit shown lighter at each run end</text>
-      </g>
-
-      <g class="st st6">
-        <text class="num" x="620" y="376">→ 4 active intervals emitted</text>
-      </g>
+      <g class="st s1"><rect x="40" y="274" width="880" height="16" fill="#c9b07e" opacity=".2"/>
+        <text class="lbl-s" x="48" y="286">raw events, one session</text></g>
+      <g class="st s2">
+        <rect x="40"  y="304" width="220" height="16" fill="#6f9d7f" style="transform-origin:40px 0;animation:barIn .6s .9s both"/>
+        <rect x="330" y="304" width="180" height="16" fill="#6f9d7f" style="transform-origin:330px 0;animation:barIn .6s 1.1s both"/>
+        <rect x="620" y="304" width="300" height="16" fill="#6f9d7f" style="transform-origin:620px 0;animation:barIn .6s 1.3s both"/>
+        <text class="lbl-s" x="272" y="316" fill="#b06a6a">gap</text>
+        <text class="lbl-s" x="524" y="316" fill="#b06a6a">gap</text></g>
+      <g class="st s3"><rect x="700" y="304" width="90" height="16" fill="#000"/>
+        <rect x="700" y="304" width="90" height="16" fill="#b06a6a" opacity=".32"/>
+        <text class="lbl-s" x="700" y="338" fill="#c9b07e">pause cut out</text></g>
+      <g class="st s4">
+        <rect x="260" y="304" width="12" height="16" fill="#6f9d7f" opacity=".45"/>
+        <rect x="510" y="304" width="12" height="16" fill="#6f9d7f" opacity=".45"/>
+        <text class="lbl-s" x="40" y="362">tail credit shown lighter at each run end</text></g>
+      <g class="st s6"><text class="num" x="620" y="362">→ 4 active intervals emitted</text></g>
     </svg>
     <figcaption>
-      Every constant here is declared once, in <span class="m">policy/model.policy</span>,
-      and read by every consumer — so an answer can always name the policy that produced it,
-      and no query can quietly carry a different 150.
+      Every constant is declared once in <span class="m">policy/model.policy</span> and read by
+      every consumer — so an answer can always name the policy that produced it.
     </figcaption>
   </figure>
 
-  <div class="note warn">
+  <div class="note risk-n">
     <b>Where this model is deliberately not clever.</b> It does not treat explicit
-    <span class="m">AppBackgrounded</span> as a hard state transition. We measured the
-    alternative rather than assuming: it moves the peak by <b>17 out of 23,324</b>, and the
-    gate turns out to be <b>92.4% redundant</b> with the gap rule — it removes 17 and adds
-    2 back. The same measurement found something larger we had not been looking for: tail
-    credit past a <em>terminal</em> background is worth <b>−202</b>. Both are disclosed,
-    neither is silently applied.
+    <span class="m">AppBackgrounded</span> as a hard state transition. Measured rather than
+    assumed: that alternative moves the peak by <b>17 of 23,324</b>, and the gate proves
+    <b>92.4% redundant</b> with the gap rule — removing 17 and adding 2 back. The same
+    measurement surfaced something larger nobody was looking for: tail credit past a
+    <em>terminal</em> background is worth <b>−202</b>. Both disclosed; neither silently applied.
   </div>
 </section>
 
-<!-- ============================ THE MODEL ============================ -->
+<!-- ═══════════════ 04 THE MODEL ═══════════════ -->
 <section>
-  <div class="eyebrow">04 — the model</div>
+  <div class="kicker">04 — the model</div>
   <h2>Hour-clipped signed deltas</h2>
   <p>
-    An interval does not become a row per minute. It becomes exactly two numbers:
-    <span class="m">+1</span> when it opens, <span class="m">−1</span> when it closes.
-    Concurrency at any minute is the running sum. That is small, exact, and filterable —
-    but a naive running sum has a fatal property: it depends on every row before it,
-    forever.
+    An interval does not become a row per minute. It becomes two numbers: <span class="m">+1</span>
+    at open, <span class="m">−1</span> at close. Concurrency is the running sum — small, exact,
+    filterable. But a naive running sum depends on every row before it, forever.
   </p>
   <p>
-    So each interval is <strong>clipped to every hour it touches</strong>. Each hour's
-    running sum starts from zero and is absolute. A query for 14:00 reads one hour of
-    deltas, not the history of the dataset.
+    So each interval is <strong>clipped to every hour it touches</strong>. Each hour's running sum
+    starts at zero and is absolute. A query for 14:00 reads one hour of deltas, not the history
+    of the dataset.
   </p>
 
   <figure>
-    <svg viewBox="0 0 900 340" role="img" aria-label="An interval spanning three hours is clipped into per-hour segments so each hour's running sum is self-contained.">
-      <!-- hour columns -->
-      <g stroke="#232320">
-        <line x1="150" y1="40" x2="150" y2="300"/>
-        <line x1="400" y1="40" x2="400" y2="300"/>
-        <line x1="650" y1="40" x2="650" y2="300"/>
-        <line x1="880" y1="40" x2="880" y2="300"/>
+    <svg viewBox="0 0 900 320" role="img" aria-label="An interval spanning three hours clipped into per-hour segments so each hour's running sum is self-contained.">
+      <g stroke="#262628">
+        <line x1="150" y1="36" x2="150" y2="292"/><line x1="400" y1="36" x2="400" y2="292"/>
+        <line x1="650" y1="36" x2="650" y2="292"/><line x1="880" y1="36" x2="880" y2="292"/>
       </g>
-      <text class="lbl" x="240" y="34">HOUR 10</text>
-      <text class="lbl" x="490" y="34">HOUR 11</text>
-      <text class="lbl" x="730" y="34">HOUR 12</text>
+      <text class="lbl" x="248" y="30">HOUR 10</text><text class="lbl" x="498" y="30">HOUR 11</text><text class="lbl" x="736" y="30">HOUR 12</text>
 
-      <!-- raw interval -->
-      <text class="lbl-s" x="24" y="80">one interval</text>
-      <rect x="240" y="66" width="500" height="20" fill="#8FA37C" opacity=".28"/>
-      <text class="lbl-s" x="248" y="106" fill="#8FA37C">spans three hours</text>
+      <text class="lbl-s" x="24" y="76">one interval</text>
+      <rect x="240" y="62" width="500" height="18" fill="#6f9d7f" opacity=".26"
+            style="transform-origin:240px 0;animation:barIn 1.3s both"/>
+      <text class="lbl-s" x="248" y="102" fill="#a8c8a4">spans three hours</text>
 
-      <!-- clipped -->
-      <text class="lbl-s" x="24" y="160">clipped</text>
+      <text class="lbl-s" x="24" y="154">clipped</text>
+      <rect x="240" y="140" width="160" height="18" fill="#6f9d7f" style="transform-origin:240px 0;animation:barIn .5s 1.2s both"/>
+      <rect x="400" y="140" width="250" height="18" fill="#6f9d7f" style="transform-origin:400px 0;animation:barIn .5s 1.45s both"/>
+      <rect x="650" y="140" width="90"  height="18" fill="#6f9d7f" style="transform-origin:650px 0;animation:barIn .5s 1.7s both"/>
+      <g style="animation:fadeIn .6s 1.9s both">
+        <text class="num" x="244" y="134">+1</text><text class="num" x="372" y="134">−1</text>
+        <text class="num" x="404" y="134">+1</text><text class="num" x="622" y="134">−1</text>
+        <text class="num" x="654" y="134">+1</text><text class="num" x="716" y="134">−1</text>
+      </g>
+
+      <text class="lbl-s" x="24" y="234">running sum</text>
       <g>
-        <rect x="240" y="146" width="160" height="20" fill="#8FA37C"/>
-        <rect x="400" y="146" width="250" height="20" fill="#8FA37C"/>
-        <rect x="650" y="146" width="90"  height="20" fill="#8FA37C"/>
-        <text class="num" x="246" y="140">+1</text><text class="num" x="368" y="140">−1</text>
-        <text class="num" x="406" y="140">+1</text><text class="num" x="618" y="140">−1</text>
-        <text class="num" x="656" y="140">+1</text><text class="num" x="712" y="140">−1</text>
+        <rect x="150" y="220" width="250" height="18" fill="#0c0c0d" stroke="#262628"/>
+        <rect x="150" y="220" width="250" height="18" fill="#7ec699" opacity=".16" style="transform-origin:150px 0;animation:barIn 2.2s 2.1s both"/>
+        <rect x="400" y="220" width="250" height="18" fill="#0c0c0d" stroke="#262628"/>
+        <rect x="400" y="220" width="250" height="18" fill="#7ec699" opacity=".16" style="transform-origin:400px 0;animation:barIn 2.2s 2.4s both"/>
+        <rect x="650" y="220" width="230" height="18" fill="#0c0c0d" stroke="#262628"/>
+        <rect x="650" y="220" width="230" height="18" fill="#7ec699" opacity=".16" style="transform-origin:650px 0;animation:barIn 2.2s 2.7s both"/>
+        <text class="lbl-s" x="158" y="233">starts at 0 — absolute</text>
+        <text class="lbl-s" x="408" y="233">starts at 0 — absolute</text>
+        <text class="lbl-s" x="658" y="233">starts at 0 — absolute</text>
       </g>
-
-      <!-- running sums, animated grow -->
-      <text class="lbl-s" x="24" y="240">running sum</text>
-      <g>
-        <rect x="150" y="226" width="250" height="18" fill="#0B0B0A" stroke="#232320"/>
-        <rect x="150" y="226" width="250" height="18" fill="#7CFF4F" opacity=".18"
-              style="transform-origin:150px 0;animation:grow 2.4s ease-out both"/>
-        <rect x="400" y="226" width="250" height="18" fill="#0B0B0A" stroke="#232320"/>
-        <rect x="400" y="226" width="250" height="18" fill="#7CFF4F" opacity=".18"
-              style="transform-origin:400px 0;animation:grow 2.4s ease-out .4s both"/>
-        <rect x="650" y="226" width="230" height="18" fill="#0B0B0A" stroke="#232320"/>
-        <rect x="650" y="226" width="230" height="18" fill="#7CFF4F" opacity=".18"
-              style="transform-origin:650px 0;animation:grow 2.4s ease-out .8s both"/>
-        <text class="lbl-s" x="158" y="239">starts at 0 — absolute</text>
-        <text class="lbl-s" x="408" y="239">starts at 0 — absolute</text>
-        <text class="lbl-s" x="658" y="239">starts at 0 — absolute</text>
-      </g>
-
-      <text class="lbl-s" x="150" y="290">a query for one hour reads ONE hour of deltas — never the history before it</text>
+      <text class="lbl-s" x="150" y="280">a query for one hour reads ONE hour of deltas — never the history before it</text>
     </svg>
     <figcaption>
-      139,925 delta rows describe 3.2 million minutes. The compression is the point:
-      <span class="m">starts</span> and <span class="m">ends</span> are unsigned sums,
-      <span class="m">delta</span> is signed, so a correction can be posted as a negative
-      row rather than a rebuild.
+      139,925 delta rows describe 3.2 million minutes. <span class="m">starts</span> and
+      <span class="m">ends</span> are unsigned sums; <span class="m">delta</span> is signed, so a
+      correction posts as a negative row rather than a rebuild.
     </figcaption>
   </figure>
 
-  <h3>Two things about these numbers that are easy to get wrong</h3>
-  <div class="grid2">
-    <div>
-      <h4>Peak is not summable</h4>
-      <p>Per-platform peaks occur at different minutes. Summing the 19 of them gives
-      <b class="bad">24,025 (+3.01%)</b>; taking the maximum gives
-      <b class="bad">7,163 (−69.29%)</b>. Both wrong, opposite directions. The true peak
-      is <b class="good">23,324</b> and must be computed on the union.</p>
+  <div class="chart">
+    <h4>Peak is not summable across dimensions — three ways to get 23,324 wrong</h4>
+    <div class="bars">
+      <div class="lab">sum of 19 platform peaks</div>
+      <div class="track"><div class="bar" style="width:97%;background:var(--maroon)">
+        <span class="v inside">24,025 &nbsp;+3.01%</span></div></div>
+      <div class="lab">true union peak</div>
+      <div class="track"><div class="bar" style="width:94%;background:var(--green-bright);animation-delay:.15s">
+        <span class="v inside">23,324 &nbsp;correct</span></div></div>
+      <div class="lab">max of platform peaks</div>
+      <div class="track"><div class="bar" style="width:29%;background:var(--maroon);animation-delay:.3s">
+        <span class="v">7,163 &nbsp;−69.29%</span></div></div>
+      <div class="refline" style="left:94%"><span>TRUE PEAK</span></div>
     </div>
-    <div>
-      <h4>Average is time-weighted</h4>
-      <p>Not a mean of per-minute values. The integral is
-      <span class="m">81,621,960</span> concurrency-seconds over
-      <span class="m">86,400</span> s → <b class="good">944.6986</b>. Averaging only the
-      795 active minutes gives 1,711.15 — a different question, printed separately rather
-      than blended.</p>
-    </div>
-    <div>
-      <h4>Users are a separate exact tier</h4>
-      <p><span class="m">uniqExact</span>, never <span class="m">uniq</span> — an HLL
-      sketch carries 1–2% error against an exact key, unacceptable for a headline. Peak
-      users <b style="color:#6E8CA0">22,279</b>, and it lands <em>one minute before</em>
-      the session peak.</p>
-    </div>
-    <div>
-      <h4>The peak minute is softer than the peak</h4>
-      <p>11:17 leads 11:16 by six viewers. Every alternative semantic reading we tested
-      reverses that ordering. The <em>value</em> is robust; the <em>minute</em> is worth
-      quoting with care.</p>
-    </div>
+    <p class="cap">
+      Per-platform peaks occur at <em>different minutes</em>, so summing double-counts and maxing
+      discards. Both are wrong, in opposite directions. The peak must be computed on the union —
+      which is why the serving layer never sums a peak across a dimension.
+    </p>
+  </div>
+
+  <div class="grid">
+    <div class="rise d1"><h4>Average is time-weighted</h4>
+      <p>The integral is <span class="m">81,621,960</span> concurrency-seconds over
+      <span class="m">86,400</span> s → <b class="ok">944.6986</b>. Averaging only the 795 active
+      minutes gives 1,711.15 — a different question, printed separately rather than blended.</p></div>
+    <div class="rise d2"><h4>Users are a separate exact tier</h4>
+      <p><span class="m">uniqExact</span>, never <span class="m">uniq</span> — an HLL sketch carries
+      1–2% error against an exact key. Peak users <b style="color:var(--blue)">22,279</b>, landing
+      <em>one minute before</em> the session peak.</p></div>
+    <div class="rise d3"><h4>The peak minute is softer than the peak</h4>
+      <p>11:17 leads 11:16 by six viewers. Every alternative semantic reading we tested reverses
+      that ordering. The <em>value</em> is robust; the <em>minute</em> deserves care.</p></div>
+    <div class="rise d4"><h4>One policy declaration</h4>
+      <p><span class="m">policy/model.policy</span> holds every tuned constant. Generated into SQL,
+      checked by a linter that fails if any consumer re-introduces a literal. Every answer names
+      its policy version and hash.</p></div>
   </div>
 </section>
 
-<!-- ============================ THE DATA PATH ============================ -->
+<!-- ═══════════════ 05 DATA PATH ═══════════════ -->
 <section>
-  <div class="eyebrow">05 — the data path</div>
+  <div class="kicker">05 — the data path</div>
   <h2>What a query actually touches</h2>
-  <p>
-    Three tiers, chosen by what the question needs. The cost difference is not incidental —
-    it is the honest price of answering on a dimension nobody pre-aggregated.
-  </p>
+  <p>Three tiers, chosen by what the question needs. The cost difference is the honest price of
+    answering on a dimension nobody pre-aggregated.</p>
 
-  <figure class="scroll">
-    <svg viewBox="0 0 940 300" role="img" aria-label="Query paths: promoted tier, user tier, and generic fallback, with measured latencies.">
-      <g class="node">
-        <rect x="30" y="30" width="150" height="54" fill="#0B0B0A" stroke="#232320"/>
-        <text class="ttl" x="44" y="54">a question</text>
-        <text class="lbl-s" x="44" y="72">grain + filters</text>
-      </g>
-
-      <!-- path A -->
-      <path class="flow" d="M180,48 C 300,48 320,60 420,60" stroke="#8FA37C" stroke-width="1.6" fill="none" marker-end="url(#ar)"/>
-      <g class="node" style="animation-delay:.15s">
-        <rect x="420" y="36" width="300" height="48" fill="#0B0B0A" stroke="#232320"/>
-        <text class="ttl" x="434" y="58">promoted cube — minute/hour/day</text>
-        <text class="lbl-s" x="434" y="76">pre-aggregated on the named dimensions</text>
-      </g>
-      <text class="num" x="740" y="62">10–210 ms</text>
-      <rect x="740" y="70" width="20" height="4" fill="#7CFF4F" opacity=".8"/>
-
-      <!-- path B -->
-      <path class="flow" d="M180,60 C 300,60 320,140 420,140" stroke="#6E8CA0" stroke-width="1.4" fill="none" marker-end="url(#ar)"/>
-      <g class="node" style="animation-delay:.3s">
-        <rect x="420" y="116" width="300" height="48" fill="#0B0B0A" stroke="#232320"/>
-        <text class="ttl" x="434" y="138" fill="#6E8CA0">user tier — uniqExact state merge</text>
-        <text class="lbl-s" x="434" y="156">exact distinct users, never a sketch</text>
-      </g>
-      <text class="num" x="740" y="142" fill="#6E8CA0">252–323 ms</text>
-      <rect x="740" y="150" width="46" height="4" fill="#6E8CA0" opacity=".8"/>
-
-      <!-- path C -->
-      <path class="flow" d="M180,72 C 300,72 320,224 420,224" stroke="#8C4A50" stroke-width="1.4" fill="none" marker-end="url(#ar)"/>
-      <g class="node" style="animation-delay:.45s">
-        <rect x="420" y="200" width="300" height="48" fill="#0B0B0A" stroke="#2A2224"/>
-        <text class="ttl" x="434" y="222" fill="#8C4A50">generic fallback — arbitrary dimension</text>
-        <text class="lbl-s" x="434" y="240">a column that arrived with the unseen file</text>
-      </g>
-      <text class="num" x="740" y="226" fill="#8C4A50">6,949 ms</text>
-      <rect x="740" y="234" width="180" height="4" fill="#8C4A50" opacity=".8"/>
-
-      <text class="lbl-s" x="30" y="284">bar length is proportional to measured latency — the fallback is ~600× the promoted path, and we say so rather than average it away</text>
-    </svg>
-    <figcaption>
-      All figures from ClickHouse Cloud (3 vCPU / 12 GiB, SharedMergeTree on object
-      storage), median of three runs, query cache off, each with a
-      <span class="m">query_id</span> joinable to <span class="m">system.query_log</span>.
-    </figcaption>
-  </figure>
-
-  <div class="note">
-    <b>Why the slow path is in the submission at all.</b> The judges said the solution
-    must work as dimensions increase. <span class="m">video_resolution</span> and
-    <span class="m">show_name</span> arrived with the unseen file, were carried into an
-    <span class="m">extra</span> map with no migration, and became filterable the same day
-    — via that fallback. Hiding its cost would misrepresent what "handles new dimensions"
-    currently means.
+  <div class="chart">
+    <h4>Measured latency on ClickHouse Cloud — median of three, cache off</h4>
+    <div class="bars">
+      <div class="lab">day grain</div>
+      <div class="track"><div class="bar" style="width:0.7%;background:var(--green)"><span class="v">49 ms</span></div></div>
+      <div class="lab">hour grain</div>
+      <div class="track"><div class="bar" style="width:0.3%;background:var(--green);animation-delay:.06s"><span class="v">19 ms</span></div></div>
+      <div class="lab">full-day minute curve</div>
+      <div class="track"><div class="bar" style="width:0.4%;background:var(--green);animation-delay:.12s"><span class="v">28 ms — 1,440 buckets</span></div></div>
+      <div class="lab">promoted + filter</div>
+      <div class="track"><div class="bar" style="width:3%;background:var(--sage);animation-delay:.18s"><span class="v">up to 210 ms</span></div></div>
+      <div class="lab">user tier · uniqExact</div>
+      <div class="track"><div class="bar" style="width:4.6%;background:var(--blue);animation-delay:.24s"><span class="v">252–323 ms</span></div></div>
+      <div class="lab">generic fallback</div>
+      <div class="track"><div class="bar" style="width:100%;background:var(--maroon);animation-delay:.3s"><span class="v inside">6,949 ms · 753 MiB</span></div></div>
+    </div>
+    <p class="cap">
+      Bars are proportional. The fallback is ~<b>350×</b> the promoted path and it is in the
+      submission on purpose: <span class="m">video_resolution</span> and
+      <span class="m">show_name</span> arrived <em>with the unseen file</em>, were carried into an
+      <span class="m">extra</span> map with no migration, and became filterable the same day — via
+      that path. Hiding its cost would misrepresent what "handles new dimensions" means today.
+    </p>
   </div>
 </section>
 
-<!-- ============================ THE NUMBERS ============================ -->
+<!-- ═══════════════ 06 UPDATES ═══════════════ -->
 <section>
-  <div class="eyebrow">06 — the result</div>
-  <h2>The unseen day</h2>
+  <div class="kicker">06 — updates</div>
+  <h2>Late data is absorbed, not rebuilt</h2>
   <p>
-    The file is described as one day and carries events on 189 calendar dates. That is not
-    a contradiction — one date holds essentially all of it, and the peak is not a close call.
+    Sessions stay open. Heartbeats arrive after their minute has been served. The naive answer is
+    to rebuild the day; the model's answer is to post a correction.
   </p>
+
+  <figure>
+    <svg viewBox="0 0 900 210" role="img" aria-label="Correction by diff: the old derivation is negated and the new one appended, so no tier is ever rebuilt.">
+      <text class="ttl" x="24" y="30">CORRECTION BY DIFF — cc_minute_delta is append-only</text>
+
+      <g class="rise d1"><rect x="26" y="56" width="180" height="46" fill="#0c0c0d" stroke="#262628" rx="4"/>
+        <text class="lbl" x="40" y="76">late event lands</text><text class="lbl-s" x="40" y="92">for a served minute</text></g>
+      <path class="flow-f" d="M206,79 L262,79" stroke="#c9b07e" stroke-width="1.4" fill="none" marker-end="url(#a1)"/>
+      <g class="rise d2"><rect x="262" y="56" width="180" height="46" fill="#0c0c0d" stroke="#262628" rx="4"/>
+        <text class="lbl" x="276" y="76">re-derive that</text><text class="lbl-s" x="276" y="92">session only</text></g>
+      <path class="flow-f" d="M442,79 L498,79" stroke="#c9b07e" stroke-width="1.4" fill="none" marker-end="url(#a1)"/>
+      <g class="rise d3"><rect x="498" y="56" width="180" height="46" fill="#0c0c0d" stroke="#2a2224" rx="4"/>
+        <text class="lbl" x="512" y="76" fill="#b06a6a">post the NEGATION</text><text class="lbl-s" x="512" y="92">of the old rows</text></g>
+      <path class="flow-f" d="M678,79 L734,79" stroke="#6f9d7f" stroke-width="1.4" fill="none" marker-end="url(#a1)"/>
+      <g class="rise d4"><rect x="734" y="56" width="150" height="46" fill="#0c0c0d" stroke="#262628" rx="4"/>
+        <text class="lbl" x="748" y="76" fill="#7ec699">append the new</text><text class="lbl-s" x="748" y="92">running sum self-heals</text></g>
+
+      <line x1="26" y1="132" x2="884" y2="132" stroke="#262628"/>
+      <text class="lbl-s" x="26" y="156">No tier is ever truncated, mutated or rebuilt — which is precisely why a half-finished build is dangerous:</text>
+      <text class="lbl-s" x="26" y="172" fill="#b06a6a">an AggregatingMergeTree of sums that is re-run without its truncate DOUBLES every number, and looks entirely plausible.</text>
+      <text class="lbl-s" x="26" y="192" fill="#7ec699">A guard now refuses to serve a half-built model. It fired for real, on a real failure, during this project.</text>
+    </svg>
+    <figcaption>
+      Proven byte-identical to a full rebuild across four tiers. The signed
+      <span class="m">delta</span> column is what makes a negative correction expressible at all.
+    </figcaption>
+  </figure>
+</section>
+
+<!-- ═══════════════ 07 SCALE ═══════════════ -->
+<section>
+  <div class="kicker">07 — scale &amp; operations</div>
+  <h2>What broke on the way here</h2>
+  <p>The unseen file did not go through cleanly. Two real limits had to be respected, and both are
+    load-bearing facts about ClickHouse Cloud rather than anything about the model.</p>
 
   <table>
-    <thead><tr><th>Date</th><th style="text-align:right">Events</th><th style="text-align:right">Share</th><th style="text-align:right">Peak</th></tr></thead>
+    <thead><tr><th>Limit hit</th><th>Where</th><th>Why the obvious fix fails</th><th style="text-align:right">Resolution</th></tr></thead>
     <tbody>
-      <tr><td class="good">2026-07-31</td><td class="n good">6,936,152</td><td class="n good">99.088%</td><td class="n good">23,324</td></tr>
-      <tr><td>2026-07-30</td><td class="n">42,913</td><td class="n">0.613%</td><td class="n">23</td></tr>
-      <tr><td>2026-07-29</td><td class="n">10,952</td><td class="n">0.156%</td><td class="n">7</td></tr>
-      <tr><td>2026-07-28</td><td class="n">4,692</td><td class="n">0.067%</td><td class="n">4</td></tr>
-      <tr><td class="mid">98 further dates</td><td class="n mid">&lt; 3,100 ea.</td><td class="n mid">0.076%</td><td class="n mid">≤ 3</td></tr>
+      <tr><td class="risk">100 partitions / insert block</td><td>102 output dates</td>
+        <td>Cloud pins the setting <span class="m">read-only</span>; raising it returns
+          <span class="m">Code&nbsp;452</span> unconditionally — a second failure, not a fix</td>
+        <td class="n ok">chunks of 64 + 38</td></tr>
+      <tr><td class="risk">100 partitions / insert block</td><td>189 event dates on transfer</td>
+        <td>same — the load path hits it before the model does</td>
+        <td class="n ok">4 chunks of 60</td></tr>
+      <tr><td class="warn">half-built model</td><td>build died mid-run</td>
+        <td>a re-run without truncate doubles an AggregatingMergeTree and looks plausible</td>
+        <td class="n ok">guard refuses to serve</td></tr>
     </tbody>
   </table>
 
-  <p>
-    <strong>23,324 against a next-best of 23</strong> — a factor of a thousand. The day runs
-    <span class="m">00:00:02.815 → 23:59:53.831</span>, a clean UTC calendar day. We model
-    all 102 derived dates rather than filtering to the one: the tail is real data, and
-    dropping it would be choosing the convenient number over the correct one.
-  </p>
-
-  <h3>Determinism, across two very different machines</h3>
-  <p>
-    The full result matrix was executed twice — once on a local container, once on
-    ClickHouse Cloud. <strong>26 of 27 queries returned byte-identical output</strong>
-    across two ClickHouse versions, two engine families, and 3 versus 10 threads. Cloud is
-    ~7× slower and reads the same rows, so the difference is host, not model.
-  </p>
+  <div class="chart">
+    <h4>Determinism across two very different machines — 27 queries, executed twice</h4>
+    <div class="bars">
+      <div class="lab">byte-identical output</div>
+      <div class="track"><div class="bar" style="width:96.3%;background:var(--green-bright)">
+        <span class="v inside">26 of 27</span></div></div>
+      <div class="lab">blocked on a missing view</div>
+      <div class="track"><div class="bar" style="width:3.7%;background:var(--warn);animation-delay:.2s">
+        <span class="v">1 — since fixed</span></div></div>
+    </div>
+    <p class="cap">
+      Two ClickHouse versions (26.2.1 vs 26.7.1), two engine families (SharedMergeTree on object
+      storage vs local MergeTree), 3 versus 10 threads. Cloud is ~<b>7× slower</b> and reads the
+      same rows — so the difference is host, not model. Determinism now has evidence behind it
+      rather than assertion.
+    </p>
+  </div>
 </section>
 
-<!-- ============================ HONESTY ============================ -->
+<!-- ═══════════════ 08 EVIDENCE ═══════════════ -->
 <section>
-  <div class="eyebrow">07 — the limits</div>
-  <h2>What we would tell a judge before they found it</h2>
-  <div class="grid2">
-    <div><h4>Country is a dead filter</h4>
-      <p><span class="m">country</span> is the constant <span class="m">'india'</span> in
-      all 7,000,000 rows. The requirement that filters alter the curve is met by
-      <b>11 of 12</b>. We kept the control visible and said so.</p></div>
-    <div><h4>Backgrounded-state exposure</h4>
-      <p>Bounded at <b>0.72%</b> of counted hours and <b>0.91%</b> at peak, measured both
-      ways. Shipped as the reconciled reading, not the flattering one.</p></div>
-    <div><h4>Session identity</h4>
-      <p>159 session IDs carry more than one start epoch; 303 carry more than one user.
-      Grouping on the session alone can merge incarnations.</p></div>
-    <div><h4>Landing tier on Cloud</h4>
-      <p>The hosted build was transferred already-typed, so the lossless-landing proof
-      (7,000,000 = 7,000,000 + 0 rejects) stands on the local build, not this one.</p></div>
+  <div class="kicker">08 — how it is checked</div>
+  <h2>Eleven suites, and a gate that will not agree with itself</h2>
+
+  <div class="grid">
+    <div class="rise d1"><h4>the gate · reconcile</h4><p>Recomputes concurrency from raw events with an
+      independent implementation. <b class="ok">3,201,716 minutes · 0 mismatched.</b> Fails on zero
+      rows too, so a gate that cannot see its data cannot pass by silence.</p></div>
+    <div class="rise d2"><h4>golden</h4><p>11 cohorts whose answers are computed <em>outside</em> the
+      pipeline — closed-form, statistical and degenerate.</p></div>
+    <div class="rise d3"><h4>property</h4><p>Random sessions against an independent reference
+      interpreter; batch-invariance checked.</p></div>
+    <div class="rise d4"><h4>edge</h4><p>32 hand-derived boundary fixtures, each sabotage-checked so a
+      passing fixture proves something.</p></div>
+    <div class="rise d5"><h4>truncation</h4><p>Cuts the stream at the peak and absorbs the remainder
+      incrementally. Two-sided: a sabotage variant <em>must</em> diverge, or the test has lost its
+      power.</p></div>
+    <div class="rise d6"><h4>landing · contract · load-guard</h4><p>One bad row costs a row. The gate and
+      the runner agree. The loader refuses to double a day.</p></div>
+    <div class="rise d7"><h4>chunked backfill</h4><p>130 sparse dates stay under the Cloud partition cap
+      with exact output.</p></div>
+    <div class="rise d8"><h4>policy</h4><p>No consumer kept a literal. Covers exceed the tail. The
+      declaration and the generated SQL agree.</p></div>
   </div>
 
   <div class="key">
-    <p><strong>The reason any of this is checkable.</strong> The gate recomputes
-    concurrency from raw events with an independent implementation and refuses to pass on
-    any disagreement — 3,201,716 minutes compared, 0 mismatched. It fails on zero rows too,
-    so a gate that cannot see its data cannot pass by silence. Every number in this document
-    survives that check, or is labelled as not having been through it.</p>
+    <p><strong>The reason any of this is checkable by a stranger.</strong> Every number carries a
+    <span class="m">query_id</span> joinable to <span class="m">system.query_log</span>. The gate
+    reads raw, not the model's output. Where a claim has <em>not</em> been through the gate — the
+    Cloud landing tier, for instance — this document says so rather than letting the reader assume
+    the coverage is uniform.</p>
+  </div>
+</section>
+
+<!-- ═══════════════ 09 THE RESULT ═══════════════ -->
+<section>
+  <div class="kicker">09 — the result</div>
+  <h2>The unseen day</h2>
+  <p>The file is described as one day and carries events on 189 calendar dates. Not a
+    contradiction — one date holds essentially all of it, and the peak is not a close call.</p>
+
+  <div class="chart">
+    <h4>Share of events by date — log-free, proportional</h4>
+    <div class="bars">
+      <div class="lab">2026-07-31</div>
+      <div class="track"><div class="bar" style="width:99.1%;background:var(--green-bright)">
+        <span class="v inside">6,936,152 &nbsp;·&nbsp; 99.088% &nbsp;·&nbsp; peak 23,324</span></div></div>
+      <div class="lab">2026-07-30</div>
+      <div class="track"><div class="bar" style="width:0.61%;background:var(--sage);animation-delay:.1s">
+        <span class="v">42,913 · peak 23</span></div></div>
+      <div class="lab">2026-07-29</div>
+      <div class="track"><div class="bar" style="width:0.16%;background:var(--sage);animation-delay:.2s">
+        <span class="v">10,952 · peak 7</span></div></div>
+      <div class="lab">98 further dates</div>
+      <div class="track"><div class="bar" style="width:0.08%;background:var(--tan);animation-delay:.3s">
+        <span class="v">0.076% total · peak ≤ 3</span></div></div>
+    </div>
+    <p class="cap">
+      <b>23,324 against a next-best of 23</b> — a factor of a thousand. The day runs
+      <span class="m">00:00:02.815 → 23:59:53.831</span>, a clean UTC calendar day. We model all 102
+      derived dates rather than filtering to the one: the tail is real data, and dropping it would
+      be choosing the convenient number over the correct one.
+    </p>
+  </div>
+</section>
+
+<!-- ═══════════════ 10 LIMITS ═══════════════ -->
+<section>
+  <div class="kicker">10 — the limits</div>
+  <h2>What we would tell a judge before they found it</h2>
+  <div class="grid">
+    <div class="rise d1"><h4>Country is a dead filter</h4>
+      <p><span class="m">country</span> is the constant <span class="m">'india'</span> in all
+      7,000,000 rows. The requirement that filters alter the curve is met by <b>11 of 12</b>. We
+      kept the control visible and said so.</p></div>
+    <div class="rise d2"><h4>Backgrounded-state exposure</h4>
+      <p>Bounded at <b>0.72%</b> of counted hours and <b>0.91%</b> at peak, measured both ways.
+      Shipped as the reconciled reading, not the flattering one.</p></div>
+    <div class="rise d3"><h4>Session identity</h4>
+      <p>159 session IDs carry more than one start epoch; 303 carry more than one user. Grouping on
+      the session alone can merge separate incarnations.</p></div>
+    <div class="rise d4"><h4>Landing tier on Cloud</h4>
+      <p>The hosted build was transferred already-typed, so the lossless-landing proof
+      (7,000,000 = 7,000,000 + 0 rejects) stands on the local build, not this one.</p></div>
   </div>
 </section>
 
@@ -754,3 +763,5 @@
 </footer>
 
 </div>
+</body>
+</html>
