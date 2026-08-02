@@ -7,6 +7,11 @@
 -- ============================================================================
 
 INSERT INTO session_intervals
+(
+    video_session_id, user_id, content_id, platform, country,
+    app_version, audio_language, subtitle_language, player_version,
+    interval_start, interval_end, is_open, build_version
+)
 WITH
     150 AS heartbeat_gap_s,
     60 AS tail_grace_s,
@@ -98,6 +103,30 @@ WITH
                 ORDER BY event_order
                 ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
             ) AS previous_content_id
+            , lagInFrame(app_version, 1, '') OVER
+            (
+                PARTITION BY video_session_id, stop_epoch
+                ORDER BY event_order
+                ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+            ) AS previous_app_version
+            , lagInFrame(audio_language, 1, '') OVER
+            (
+                PARTITION BY video_session_id, stop_epoch
+                ORDER BY event_order
+                ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+            ) AS previous_audio_language
+            , lagInFrame(subtitle_language, 1, '') OVER
+            (
+                PARTITION BY video_session_id, stop_epoch
+                ORDER BY event_order
+                ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+            ) AS previous_subtitle_language
+            , lagInFrame(player_version, 1, '') OVER
+            (
+                PARTITION BY video_session_id, stop_epoch
+                ORDER BY event_order
+                ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+            ) AS previous_player_version
             , leadInFrame(event_timestamp, 1, epoch) OVER
             (
                 PARTITION BY video_session_id, stop_epoch
@@ -122,6 +151,30 @@ WITH
                 ORDER BY event_order
                 ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
             ) AS next_content_id
+            , leadInFrame(app_version, 1, '') OVER
+            (
+                PARTITION BY video_session_id, stop_epoch
+                ORDER BY event_order
+                ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+            ) AS next_app_version
+            , leadInFrame(audio_language, 1, '') OVER
+            (
+                PARTITION BY video_session_id, stop_epoch
+                ORDER BY event_order
+                ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+            ) AS next_audio_language
+            , leadInFrame(subtitle_language, 1, '') OVER
+            (
+                PARTITION BY video_session_id, stop_epoch
+                ORDER BY event_order
+                ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+            ) AS next_subtitle_language
+            , leadInFrame(player_version, 1, '') OVER
+            (
+                PARTITION BY video_session_id, stop_epoch
+                ORDER BY event_order
+                ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+            ) AS next_player_version
         FROM stateful
         WHERE
             event_type = 'VideoHeartbeat'
@@ -140,6 +193,10 @@ WITH
                 OR platform != previous_platform
                 OR country != previous_country
                 OR content_id != previous_content_id
+                OR app_version != previous_app_version
+                OR audio_language != previous_audio_language
+                OR subtitle_language != previous_subtitle_language
+                OR player_version != previous_player_version
             )
                 OVER
                 (
@@ -157,13 +214,26 @@ WITH
             any(content_id) AS interval_content_id,
             any(platform) AS interval_platform,
             any(country) AS interval_country,
+            any(app_version) AS interval_app_version,
+            any(audio_language) AS interval_audio_language,
+            any(subtitle_language) AS interval_subtitle_language,
+            any(player_version) AS interval_player_version,
             min(event_timestamp) AS interval_start,
             max(event_timestamp) AS last_signal_at,
             minIf(next_stop_at, next_stop_at != epoch) AS first_stop_at,
             minIf(
                 next_signal_at,
                 next_signal_at != epoch
-                AND (platform != next_platform OR country != next_country OR content_id != next_content_id)
+                AND
+                (
+                    platform != next_platform
+                    OR country != next_country
+                    OR content_id != next_content_id
+                    OR app_version != next_app_version
+                    OR audio_language != next_audio_language
+                    OR subtitle_language != next_subtitle_language
+                    OR player_version != next_player_version
+                )
             ) AS next_dimension_change_at,
             max(session_ended) AS session_ended
         FROM grouped
@@ -175,6 +245,10 @@ SELECT
     interval_content_id AS content_id,
     interval_platform AS platform,
     interval_country AS country,
+    interval_app_version AS app_version,
+    interval_audio_language AS audio_language,
+    interval_subtitle_language AS subtitle_language,
+    interval_player_version AS player_version,
     interval_start,
     least(
         last_signal_at + toIntervalSecond(tail_grace_s),
@@ -182,7 +256,7 @@ SELECT
         if(next_dimension_change_at = epoch, last_signal_at + toIntervalSecond(tail_grace_s), next_dimension_change_at)
     ) AS interval_end,
     1 - session_ended AS is_open,
-    now64(3) AS generated_at
+    toUInt64(toUnixTimestamp64Milli(now64(3))) AS build_version
 FROM intervals
 WHERE interval_start < interval_end;
 
@@ -193,6 +267,10 @@ WITH clipped AS
         platform,
         country,
         content_id,
+        app_version,
+        audio_language,
+        subtitle_language,
+        player_version,
         interval_start,
         interval_end,
         toStartOfHour(interval_start) + toIntervalHour(hour_offset) AS hour
@@ -206,9 +284,13 @@ WITH clipped AS
         platform,
         country,
         content_id,
+        app_version,
+        audio_language,
+        subtitle_language,
+        player_version,
         toInt64(1) AS delta,
-        toUInt64(1) AS starts,
-        toUInt64(0) AS ends
+        toInt64(1) AS starts,
+        toInt64(0) AS ends
     FROM clipped
     WHERE interval_start < hour + toIntervalHour(1) AND interval_end > hour
 
@@ -225,9 +307,13 @@ WITH clipped AS
         platform,
         country,
         content_id,
+        app_version,
+        audio_language,
+        subtitle_language,
+        player_version,
         toInt64(-1) AS delta,
-        toUInt64(0) AS starts,
-        toUInt64(1) AS ends
+        toInt64(0) AS starts,
+        toInt64(1) AS ends
     FROM clipped
     WHERE
         interval_start < hour + toIntervalHour(1)
@@ -239,6 +325,11 @@ WITH clipped AS
             toStartOfMinute(interval_end) + toIntervalMinute(1)
         ) < hour + toIntervalHour(1)
 )
-SELECT minute, platform, country, content_id, sum(delta), sum(starts), sum(ends)
+SELECT
+    minute, platform, country, content_id,
+    subtitle_language, player_version, audio_language, app_version,
+    sum(delta), sum(starts), sum(ends)
 FROM boundaries
-GROUP BY minute, platform, country, content_id;
+GROUP BY
+    minute, platform, country, content_id,
+    subtitle_language, player_version, audio_language, app_version;

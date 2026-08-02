@@ -60,6 +60,14 @@ ALTER TABLE ev_raw ADD PROJECTION IF NOT EXISTS by_session
     SELECT * ORDER BY (video_session_id, event_timestamp)
 );
 
+-- Existing Cloud services may predate the bitemporal raw-landing columns above.
+-- This is additive and does not rewrite historical raw facts. Those pre-existing
+-- CSV rows are a bulk-load baseline, not arrival-lag evidence; new durable
+-- inserts receive their landing time through the DEFAULT expression.
+ALTER TABLE ev_raw
+    ADD COLUMN IF NOT EXISTS ingested_at DateTime64(3) DEFAULT now64(3)
+    AFTER session_start_epoch;
+
 -- ---------------------------------------------------------------------------
 -- Content dimension. Small and static -> also exposed as a DICTIONARY (20_dicts.sql)
 -- because dictGet measured 34x faster than a JOIN on 5M rows.

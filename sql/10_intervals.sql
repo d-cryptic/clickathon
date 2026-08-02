@@ -13,14 +13,17 @@ CREATE TABLE IF NOT EXISTS session_intervals
     content_id       Int64,
     platform         LowCardinality(String),
     country          LowCardinality(String),
+    app_version      LowCardinality(String),
+    audio_language   LowCardinality(String),
+    subtitle_language LowCardinality(String),
+    player_version   LowCardinality(String),
     interval_start   DateTime64(3),
     interval_end     DateTime64(3),
     is_open          UInt8,
-    generated_at     DateTime64(3)
+    build_version    UInt64
 )
-ENGINE = MergeTree
-PARTITION BY toYYYYMMDD(interval_start)
-ORDER BY (platform, country, content_id, interval_start, video_session_id)
+ENGINE = ReplacingMergeTree(build_version)
+ORDER BY (video_session_id, interval_start)
 SETTINGS min_bytes_for_wide_part = 0;
 
 -- One signed boundary per active interval per hour.  An hour-local running sum
@@ -32,13 +35,18 @@ CREATE TABLE IF NOT EXISTS cc_minute_delta
     platform    LowCardinality(String),
     country     LowCardinality(String),
     content_id  Int64,
+    subtitle_language LowCardinality(String),
+    player_version    LowCardinality(String),
+    audio_language    LowCardinality(String),
+    app_version       LowCardinality(String),
     delta       SimpleAggregateFunction(sum, Int64),
-    starts      SimpleAggregateFunction(sum, UInt64),
-    ends        SimpleAggregateFunction(sum, UInt64)
+    starts      SimpleAggregateFunction(sum, Int64),
+    ends        SimpleAggregateFunction(sum, Int64)
 )
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMMDD(minute)
-ORDER BY (platform, country, content_id, minute)
+ORDER BY (platform, country, content_id, minute,
+          subtitle_language, player_version, audio_language, app_version)
 SETTINGS
     min_bytes_for_wide_part = 0,
     -- A finalizer retry must not append a second copy of an identical run.
@@ -55,12 +63,17 @@ CREATE TABLE IF NOT EXISTS session_delta_base
     platform         LowCardinality(String),
     country          LowCardinality(String),
     content_id       Int64,
+    app_version      LowCardinality(String),
+    audio_language   LowCardinality(String),
+    subtitle_language LowCardinality(String),
+    player_version   LowCardinality(String),
     minute           DateTime,
     delta            Int64
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMMDD(minute)
-ORDER BY (video_session_id, platform, country, content_id, minute)
+ORDER BY (video_session_id, platform, country, content_id,
+          app_version, audio_language, subtitle_language, player_version, minute)
 SETTINGS
     min_bytes_for_wide_part = 0,
     non_replicated_deduplication_window = 1000;
@@ -100,12 +113,17 @@ CREATE TABLE IF NOT EXISTS session_delta_correction_stage
     platform           LowCardinality(String),
     country            LowCardinality(String),
     content_id         Int64,
+    app_version        LowCardinality(String),
+    audio_language     LowCardinality(String),
+    subtitle_language  LowCardinality(String),
+    player_version     LowCardinality(String),
     minute             DateTime,
     correction_delta   Int64
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMMDD(minute)
-ORDER BY (video_session_id, platform, country, content_id, minute, run_sequence)
+ORDER BY (video_session_id, platform, country, content_id,
+          app_version, audio_language, subtitle_language, player_version, minute, run_sequence)
 SETTINGS
     min_bytes_for_wide_part = 0,
     non_replicated_deduplication_window = 1000;
@@ -142,12 +160,17 @@ CREATE TABLE IF NOT EXISTS exact_tail_minute_stage
     platform      LowCardinality(String),
     country       LowCardinality(String),
     content_id    Int64,
+    app_version   LowCardinality(String),
+    audio_language LowCardinality(String),
+    subtitle_language LowCardinality(String),
+    player_version LowCardinality(String),
     minute        DateTime,
     concurrency   UInt64
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMMDD(minute)
-ORDER BY (run_id, platform, country, content_id, minute)
+ORDER BY (run_id, platform, country, content_id,
+          app_version, audio_language, subtitle_language, player_version, minute)
 SETTINGS
     min_bytes_for_wide_part = 0,
     non_replicated_deduplication_window = 1000;
@@ -174,7 +197,9 @@ WITH
             argMax(correction_delta, run_sequence) AS delta
         FROM session_delta_correction_stage
         WHERE run_id IN published_runs
-        GROUP BY video_session_id, platform, country, content_id, minute
+        GROUP BY
+            video_session_id, platform, country, content_id,
+            app_version, audio_language, subtitle_language, player_version, minute
     )
 SELECT
     minute,

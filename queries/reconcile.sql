@@ -74,10 +74,18 @@ WITH
             lagInFrame(platform, 1, '') OVER signal_window AS previous_platform,
             lagInFrame(country, 1, '') OVER signal_window AS previous_country,
             lagInFrame(content_id, 1, toInt64(0)) OVER signal_window AS previous_content_id,
+            lagInFrame(app_version, 1, '') OVER signal_window AS previous_app_version,
+            lagInFrame(audio_language, 1, '') OVER signal_window AS previous_audio_language,
+            lagInFrame(subtitle_language, 1, '') OVER signal_window AS previous_subtitle_language,
+            lagInFrame(player_version, 1, '') OVER signal_window AS previous_player_version,
             leadInFrame(event_timestamp, 1, epoch) OVER signal_window AS next_signal_at,
             leadInFrame(platform, 1, '') OVER signal_window AS next_platform,
             leadInFrame(country, 1, '') OVER signal_window AS next_country,
-            leadInFrame(content_id, 1, toInt64(0)) OVER signal_window AS next_content_id
+            leadInFrame(content_id, 1, toInt64(0)) OVER signal_window AS next_content_id,
+            leadInFrame(app_version, 1, '') OVER signal_window AS next_app_version,
+            leadInFrame(audio_language, 1, '') OVER signal_window AS next_audio_language,
+            leadInFrame(subtitle_language, 1, '') OVER signal_window AS next_subtitle_language,
+            leadInFrame(player_version, 1, '') OVER signal_window AS next_player_version
         FROM stateful
         WHERE
             event_type = 'VideoHeartbeat'
@@ -98,6 +106,10 @@ WITH
                 OR platform != previous_platform
                 OR country != previous_country
                 OR content_id != previous_content_id
+                OR app_version != previous_app_version
+                OR audio_language != previous_audio_language
+                OR subtitle_language != previous_subtitle_language
+                OR player_version != previous_player_version
             ) OVER
             (
                 PARTITION BY video_session_id, stop_epoch
@@ -116,7 +128,16 @@ WITH
             minIf(
                 next_signal_at,
                 next_signal_at != epoch
-                AND (platform != next_platform OR country != next_country OR content_id != next_content_id)
+                AND
+                (
+                    platform != next_platform
+                    OR country != next_country
+                    OR content_id != next_content_id
+                    OR app_version != next_app_version
+                    OR audio_language != next_audio_language
+                    OR subtitle_language != next_subtitle_language
+                    OR player_version != next_player_version
+                )
             ) AS next_dimension_change_at
         FROM grouped
         GROUP BY video_session_id, stop_epoch, interval_number
