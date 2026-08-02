@@ -1,0 +1,146 @@
+EXPLICIT AppBackgrounded AS A STATE GATE — MEASURED BOTH WAYS
+generated: 2026-08-02 Asia/Kolkata
+source database: codex_official_green_20260802_075132   (the official unseen build; READ ONLY)
+scratch database: bg_state_gate                          (probe output only)
+graded `sonyliv` was NOT read and NOT written
+policy in force: v1 / e965954b23d4 — GAP_S=150 TAIL_S=60
+                 UNCLOSED_PAUSE_TO_RUN_END=1 POINT_ACTIVITY_COUNTS=0
+probe: evidence/backgrounded/probe_state_gate.sql   (measurement only; the model is unchanged)
+
+-----------------------------------------------------------------------------
+0 · PROBE CALIBRATION — the probe reproduces the shipped build exactly
+-----------------------------------------------------------------------------
+                              deployed session_intervals   probe bg_mode=0
+  intervals                             159,426               159,426
+  sessions                              103,022               103,022
+  counted watch time                 20,815.28 h           20,815.28 h
+  PEAK                                   23,324                23,324
+  peak minute                2026-07-31 11:17      2026-07-31 11:17
+Every delta below is therefore attributable to the state gate alone.
+
+-----------------------------------------------------------------------------
+1 · THE AUDIT'S NUMBER, REPRODUCED FROM RAW
+-----------------------------------------------------------------------------
+  heartbeats whose last explicit App* state is AppBackgrounded : 4,656
+  sessions carrying at least one of them                       : 2,422
+Matches docs/codex-validation/009 exactly.
+
+  AppBackgrounded events                     19,981   in 14,724 sessions
+  AppForegrounded events                     11,932   in  8,016 sessions
+
+-----------------------------------------------------------------------------
+2 · COUNTED WATCH TIME SITTING INSIDE AN EXPLICIT BACKGROUND WINDOW
+-----------------------------------------------------------------------------
+Windows merged per session, intersected with the shipped intervals.
+
+  closer = AppForegrounded only            147.89 h   (0.711% of 20,815.28 h)
+  closer = AppForegrounded | resume | Play 144.80 h   (0.696%)
+  sessions with any such counted time         8,369
+
+  DECOMPOSITION of the 147.89 h:
+    TAIL_S grace credited past a TERMINAL AppBackgrounded  132.87 h  (89.8%)
+      intervals                                              7,972
+      sessions                                               7,507
+      of which the session never foregrounds again           6,727
+    counted time inside a background the run outlives        ~15.02 h (10.2%)
+      ^ this is the part the audit's 4,656 heartbeats generate
+
+-----------------------------------------------------------------------------
+3 · BOTH READINGS, END TO END (full re-derivation, not an estimate)
+-----------------------------------------------------------------------------
+mode  what it does                                    intervals   hours      d hours     PEAK    peak minute        d PEAK
+0     SHIPPED. gap-only; bg is not a state             159,426   20,815.28        --    23,324   2026-07-31 11:17       --
+1     gate; closes at fg | resume | Play               160,187   20,800.21   -15.07 h   23,309   2026-07-31 11:16      -15
+2     gate; closes at fg ONLY  (hard transition)       160,115   20,797.89   -17.39 h   23,307   2026-07-31 11:16      -17
+3     mode 2 + no TAIL_S past a terminal background    160,115   20,665.61  -149.67 h   23,111   2026-07-31 11:16     -213
+4     no TAIL_S past a terminal background ONLY        159,426   20,682.41  -132.87 h   23,122   2026-07-31 11:16     -202
+
+  as percentages of the shipped reading
+    mode 1   hours -0.072%   peak -0.064%
+    mode 2   hours -0.084%   peak -0.073%
+    mode 3   hours -0.719%   peak -0.913%
+    mode 4   hours -0.638%   peak -0.866%
+
+  EVERY alternative moves the peak MINUTE 11:17 -> 11:16. Under the shipped
+  reading 11:17 leads 11:16 by 6 viewers; the gate reverses that ordering.
+
+  average concurrency over the active-minute spine is inert, and moves UP
+  because the spine shrinks faster than the sum:
+    mode 0   4,334 active minutes   avg 316.189
+    mode 2   4,329                  avg 316.383
+    mode 3   4,304                  avg 316.376
+    mode 4   4,309                  avg 316.173
+
+-----------------------------------------------------------------------------
+4 · THE ASYMMETRY — the failure mode a hard transition is supposed to create
+-----------------------------------------------------------------------------
+  sessions with a background and NO foreground at all       7,662  (52.0% of 14,724)
+  background events with no later explicit foreground       9,360  (46.8% of 19,981)
+  background events with no later fg | resume | Play        9,302  (46.6%)
+
+  Of the 9,360 that would be "suppressed until the next event or forever":
+    the run already ends there anyway (no event within GAP_S=150 s)   8,647  (92.4%)
+    the run genuinely continues past the background                    713   ( 7.6%)
+
+  MEASURED COST of the strict closer over the permissive one
+  (mode 2 minus mode 1) — this is the whole price of the asymmetry:
+    counted watch time   -2.32 h   (-0.011% of the shipped total)
+    PEAK                 -2 viewers (-0.009%)
+
+  VERDICT: the asymmetry is real in POPULATION (46.8% of background events
+  never see a foreground) and negligible in EFFECT (2.32 h, 2 viewers),
+  because GAP_S=150 already ends the run at 92.4% of them. The feared
+  failure mode does not materialise on this file. It also means the state
+  gate is very largely REDUNDANT with the gap rule.
+
+-----------------------------------------------------------------------------
+5 · THE JUDGE-VISIBLE NUMBER
+-----------------------------------------------------------------------------
+  at the shipped peak minute 2026-07-31 11:17:
+    sessions counted as watching                                23,324
+    of which the last explicit App* state is AppBackgrounded       604   (2.59%)
+  mode 3 removes 243 of that minute (23,324 -> 23,081), and the peak
+  relocates to 11:16 at 23,111.
+
+-----------------------------------------------------------------------------
+6 · WORKED EXAMPLE — a row a judge can open by hand
+-----------------------------------------------------------------------------
+session 5BE513F38E5B453C594F57B19A930D465443B3F3BB39517F55D99C3AB24F3ED8
+raw timeline (v_ev_model_input):
+  11:06:38.670  VideoHeartbeat  pause
+  11:06:38.671  AppBackgrounded AppBackgrounded     <- declares itself backgrounded
+  11:06:39.373  VideoHeartbeat  downshift
+  11:06:46.498  VideoHeartbeat  upshift
+  11:06:47.150  VideoHeartbeat  resume
+  11:06:55.651  VideoHeartbeat  x5
+  11:06:55.690  VideoSessionEnd VideoSessionEnd
+  11:07:01.427  AppBackgrounded AppBackgrounded     <- last event of the session
+  (no AppForegrounded anywhere in this session)
+
+intervals produced:
+  mode 0 SHIPPED  [11:00:40,11:00:48] [11:01:18,11:06:38] [11:06:47,11:08:01]
+  mode 1 gate/perm same as shipped -- the `resume` at 11:06:47 closes the window
+  mode 2 gate/strict [11:00:40,11:00:48] [11:01:18,11:06:38]
+  mode 3 gate+tail   [11:00:40,11:00:48] [11:01:18,11:06:38]
+  mode 4 tail only   [11:00:40,11:00:48] [11:01:18,11:06:38] [11:06:47,11:07:01]
+
+The shipped model counts this session as watching until 11:08:01 -- 60 s past
+the last thing it ever said, which was "I am in the background", and 74 s of
+which begins 9 s after a declared background it never revoked.
+
+-----------------------------------------------------------------------------
+7 · REPRODUCTION
+-----------------------------------------------------------------------------
+  clickhouse-client --query "CREATE DATABASE IF NOT EXISTS bg_state_gate"
+  clickhouse-client --query "CREATE TABLE bg_state_gate.si_M (video_session_id String,
+      interval_start DateTime64(3), interval_end DateTime64(3), is_open UInt8)
+      ENGINE=MergeTree ORDER BY (video_session_id, interval_start)"
+  sed 's/bg_state_gate.si$/bg_state_gate.si_M/' evidence/backgrounded/probe_state_gate.sql \
+    | clickhouse-client --param_bg_mode=M --max_memory_usage=0
+  -- peak
+  SELECT toDateTime(m) AS minute, uniqExact(video_session_id) c
+  FROM (SELECT video_session_id,
+          arrayJoin(range(toUInt32(toStartOfMinute(interval_start)),
+                          toUInt32(toStartOfMinute(interval_end))+1, 60)) AS m
+        FROM bg_state_gate.si_M)
+  GROUP BY minute ORDER BY c DESC, minute ASC LIMIT 1;
