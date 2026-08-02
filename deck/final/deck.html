@@ -133,8 +133,12 @@ footer{padding:60px 7vw;color:var(--faint);font-family:var(--mono);font-size:12p
 }
 @media print{
   html{scroll-snap-type:none}
-  .slide{min-height:auto;page-break-after:always;border:none}
-  .rail{display:none}
+  /* exactly one page per slide: the footer is screen furniture and would
+     otherwise spill a 13th page out of 12 slides. */
+  .slide{min-height:auto;page-break-after:always;break-after:page;border:none}
+  .slide:last-of-type{page-break-after:auto;break-after:auto}
+  .rail,footer{display:none}
+  .time{color:#646467}
 }
 </style>
 </head>
