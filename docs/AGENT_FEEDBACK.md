@@ -153,3 +153,34 @@
   the already-known point-activity drop. A harness finding nothing is a weak signal on its own — the
   value here is that the cohorts are *characterised*, so the next failure names which property broke
   instead of just saying the headline moved.
+
+## 2026-08-02 · An agent's branch was deleted mid-run with unpushed commits
+
+**What happened.** `/Users/barun/Developers/personal/clickathon-wt-evsem` was removed while the
+event-semantics agent was running `test-all`, and the branch ref `feat/event-semantics-contract` went
+with it. The agent recovered by walking dangling commits for the one whose parents were
+`(ef666a9, b5d3eba)`, recreated the branch at `f34ba0b`, and pushed immediately. Nothing was lost,
+because the objects had not been garbage-collected yet. That is luck, not a safety property.
+
+**The tell was a test tally, not an error.** The suite reported `3 passed · 2 failed · 8 skipped` with
+five suites simply ABSENT. That is what a suite prints when its own scripts vanish from under it. A
+tally with missing rows is not a result — it needs reading as an incident, the same way two
+`CONVERGES` rows in a two-sided test needs reading as a disarmed test rather than a good one.
+
+**It was not `tools/close-worktree.sh`.** That script refuses on uncommitted work, and refuses again
+when a branch is neither merged into `dev`/`main` nor present on `origin` — this branch was the second
+case, so it would have died rather than deleted. It also only ever deletes through
+`sc worktree delete`, and this worktree was a plain path outside the `sc` root, so it could not have
+targeted it at all. **The cause is undetermined.** Candidates are the harness's own worktree cleanup
+and the Codex session running out of the main checkout; neither is confirmed, and it is worth knowing
+which, because something removed another agent's work without checking whether it was pushed.
+
+**The lesson is cheap and general: push the branch on the FIRST commit, not the last.** Every
+protection we have — `close-worktree.sh`, the promotion gate, recovery by reflog — assumes the work
+still exists locally. A pushed branch survives the directory being deleted by anything, including
+things we have not identified. The agent's own instinct here was right: on recovery it pushed
+immediately, before re-adding the worktree or re-running anything.
+
+**Gap worth closing:** `close-worktree.sh` protects `sc`-managed worktrees only. Agents spawned into
+plain directories get none of its checks. Either spawn agents exclusively into `sc` worktrees, or
+teach the guard to handle plain paths.
