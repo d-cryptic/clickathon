@@ -47,6 +47,29 @@ verified. Switching the graded database to incremental publication changes how o
 are maintained, and that is a call for a human — especially given a doubled tier was served for hours
 today from a *simpler* operation than this one.
 
+## 1c · ⚠ NEW — ADR 0024 is declared but NOT applied to the graded database
+
+Found 2026-08-02 while repairing the truncation suite. `sql/00_schema.sql` declares `ev_raw.extra`
+(the `Map` that carries unknown columns), and `sonyliv.ev_raw` **does not have it**.
+
+**Why this matters more than a normal drift.** `dataset_details.md:43` states in writing that the
+solution should work as the number of dimensions increases, and the judges repeated it. ADR 0024
+exists to satisfy exactly that: a new filter column on the unseen day is carried into `extra` and is
+queryable the same day, with no migration and no human awake. **That capability is in the repository
+and not on the service.** On the unseen day a new column would be announced by the loader and then
+have nowhere to go.
+
+**The fix is one non-destructive statement** — `ALTER TABLE sonyliv.ev_raw ADD COLUMN extra
+Map(LowCardinality(String), String) DEFAULT map()` — but it is a schema change on the graded service,
+so it is an **operator decision**, and it is the same class as A3 below.
+
+**Related, and cheaper:** `sql/01_policy.sql` (ADR 0032) also needs one `CREATE OR REPLACE VIEW`
+against `sonyliv` before its next build. That one is genuinely non-destructive and passes the
+destructive-DDL scanner without an override. `tools/build-model.sh` applies it itself at stage 0/6,
+so an authorised rebuild handles it — but until then `sql/30` and `sql/90` fail there loudly with
+`Unknown table expression identifier 'v_model_policy'`, which is the intended failure rather than a
+silent wrong answer.
+
 ## 2 · Open engineering — short
 
 **Q30 · Local `default.session_intervals` predates ADR 0012** (no `build_version`), so it cannot be
