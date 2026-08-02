@@ -22,7 +22,35 @@ fi
 # headless Chrome snapshots t=0, so printing it yields blank/garbled pages.
 # deck-static.html freezes every animation at its end state and pins @page to 16:9.
 SRC="deck-static.html"
-[ -f "$SRC" ] || { echo "FAIL: $SRC missing — regenerate it from deck.html"; exit 1; }
+
+# DERIVE the static copy from deck.html on every build. It used to be a
+# hand-maintained file that only errored when MISSING, never when STALE — so an
+# edit to deck.html silently produced a PDF of the previous deck. That shipped:
+# a repositioned diagram node was fixed in deck.html and the PDF kept the broken
+# placement. The static copy is deck.html plus a freeze-CSS block, nothing else,
+# so generating it is strictly safer than storing it.
+python3 - "$SRC" <<'PYFREEZE'
+import pathlib, sys
+src = pathlib.Path("deck.html").read_text()
+freeze = """<style>
+/* static print build: freeze all animation at END state and fix the page box */
+*{animation:none!important;transition:none!important}
+html{scroll-snap-type:none!important;scroll-behavior:auto!important}
+body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.rail,footer{display:none!important}
+@page{size:1600px 900px;margin:0}
+@media print{
+  .slide{height:900px;min-height:900px;padding:72px 90px;border:none;break-after:page;overflow:hidden;justify-content:center}
+  .slide:last-of-type{break-after:auto}
+  svg{max-height:480px}
+}
+</style>
+</head>"""
+assert "</head>" in src, "deck.html has no </head>"
+pathlib.Path(sys.argv[1]).write_text(src.replace("</head>", freeze, 1))
+print("  regenerated " + sys.argv[1] + " from deck.html")
+PYFREEZE
+[ -f "$SRC" ] || { echo "FAIL: could not generate $SRC"; exit 1; }
 
 # file:// URL that works on both POSIX and Git-Bash-on-Windows paths
 case "$PWD" in
