@@ -285,13 +285,42 @@ def grain_minute_counts(intervals: list[Interval]) -> dict[tuple, int]:
 
 
 def user_minute_sets(intervals: list[Interval]) -> dict[tuple, set[str]]:
-    """The user tier, mirrored from sql/45_user_concurrency.sql's stated shape:
-    per INTERVAL (not merged run), every covered minute at the
-    (platform, country, content_id) grain collects the interval's user_id;
-    concurrency is the distinct-user count. Key: (minute, (plat, ctry, cid))."""
-    out: dict[tuple, set[str]] = {}
+    """The user tier, mirrored from sql/45_user_concurrency.sql AS IT IS NOW.
+
+    Folds each session's MINUTE-ADJACENT intervals into one run and attributes
+    the whole run to the dimensions of the interval that OPENED it — ADR 0012
+    first-wins, matching sql/40_deltas.sql.
+
+    UPDATED 2026-08-02. This mirrored the pre-fix shape (per INTERVAL, not
+    merged run) and was not updated when ADR 0031 rewrote sql/45. The mismatch
+    showed up as property P6 failing on 3 of 200 cases, every failure
+    mirror-only: reference=1 on one platform and 0 on another, same minutes —
+    the signature of per-interval expansion against a merge-fold.
+
+    The product defect this oracle used to catch is CLOSED: user concurrency
+    exceeded session concurrency in 82 of 91,692 cells (63 with zero sessions)
+    and is now 0. An oracle that lags the code it mirrors reports the fix as a
+    failure, which is how a suite trains people to ignore it."""
+    runs: dict[str, list[Interval]] = {}
     for iv in intervals:
-        for m in minutes_covered(iv.start_s, iv.end_s):
-            out.setdefault((m, (iv.platform, iv.country, iv.content_id)),
-                           set()).add(iv.user_id)
+        runs.setdefault(iv.video_session_id, []).append(iv)
+
+    out: dict[tuple, set[str]] = {}
+    for _sid, ivs in runs.items():
+        ivs = sorted(ivs, key=lambda i: (i.start_s, i.end_s))
+        cur_start, cur_end, cur_dims, cur_user = None, None, None, None
+        for iv in ivs:
+            dims = (iv.platform, iv.country, iv.content_id)
+            # minute-adjacent: the next interval opens in the same minute the
+            # current one closes, or earlier. Anything further apart is a new run.
+            if cur_start is not None and iv.start_s // 60 <= cur_end // 60:
+                cur_end = max(cur_end, iv.end_s)          # extend, keep opening dims
+                continue
+            if cur_start is not None:
+                for m in minutes_covered(cur_start, cur_end):
+                    out.setdefault((m, cur_dims), set()).add(cur_user)
+            cur_start, cur_end, cur_dims, cur_user = iv.start_s, iv.end_s, dims, iv.user_id
+        if cur_start is not None:
+            for m in minutes_covered(cur_start, cur_end):
+                out.setdefault((m, cur_dims), set()).add(cur_user)
     return out
