@@ -1,0 +1,149 @@
+UNSEEN-DAY RUN
+generated 2026-08-01T22:53:00Z   commit 7789748
+target database sonyliv_q37_newcol   ·   raw data/cruel-newcol-raw.csv   ·   content data/cruel-content.csv
+--------------------------------------------------------------------------
+reset: DROP DATABASE sonyliv_q37_newcol — re-loading without this DOUBLES ev_raw (measured; see the note in this script)
+preflight ok · server 26.2.1.525 · database sonyliv_q37_newcol ready and empty
+raw CSV shape (tools/load.sh analyse_header is the authority at phase 2):
+  NEW columns (1): experiment_id -> carried into `extra`, queryable as extra['experiment_id'] (ADR 0024)
+  128 CSV data records — counted as RFC-4180 records, not lines:
+    a quoted embedded newline is ONE row here and two to `wc -l` (Q37).
+
+SQL fingerprint (sha256, first 12) — the exact model this run exercised:
+  125d80b9b5aa  sql/00_schema.sql
+  de80eaf031af  sql/10_intervals.sql
+  4ffca75940bf  sql/20_views.sql
+  6ba8c21fb5f8  sql/30_build_intervals.sql
+  d1dfeb14c894  sql/40_deltas.sql
+  764ee4c5d810  sql/45_user_concurrency.sql
+  20fefccc4705  sql/50_hour_agg.sql
+  15525d8870b4  sql/80_content.sql
+  0e278f3516e3  sql/85_windows.sql
+  be6a7a4f2e0f  sql/90_reconcile.sql
+  75f66b090f0e  tools/load.sh
+  git 7789748 (sql+tools DIRTY — uncommitted changes)
+
+--------------------------------------------------------------------------
+PHASE — 1 schema (00_schema, 10_intervals) — tables + the stateless MV
+--------------------------------------------------------------------------
+  objects: 6 created
+
+--------------------------------------------------------------------------
+PHASE — 2 load (tools/load.sh, unmodified)
+--------------------------------------------------------------------------
+target=cloud  database=sonyliv_q37_newcol  (from --database)  mode=refuse
+
+phase A — landing both files as text (load_id 20260801T225319Z-58004)
+  content_landing <- /Users/barun/.superconductor/worktrees/clickathon-project/sc-charged-magnon-7668/data/cruel-content.csv ...
+  ev_landing      <- /Users/barun/.superconductor/worktrees/clickathon-project/sc-charged-magnon-7668/data/cruel-newcol-raw.csv ...
+  landed: ev_landing 128 rows · content_landing 30 rows — nothing typed yet
+
+phase B — casting forward, one row at a time
+
+loaded into TARGET=cloud, database sonyliv_q37_newcol:
+   ┌─t───────────┬─before─┬─rows─┬─added─┐
+1. │ ev_raw      │      0 │  128 │   128 │
+2. │ content_dim │      0 │   30 │    30 │
+   └─────────────┴────────┴──────┴───────┘
+disposition: every landed row reached exactly one terminal state
+  ev_raw       landed 128 = typed 128 + rejected 0
+  content_dim  landed 30 = typed 30 + rejected 0
+  ev_raw 128 = CSV data rows 128
+  4 sessions · 4 users · 1 content ids · 2026-08-22 09:00:00.250 -> 2026-08-22 09:20:00.733
+  content_dim 30 rows
+  cc_minute_stateless 20 rows (mv_stateless fired during the load)
+  data spans 2026-08-22 09:00:00 .. 2026-08-22 09:20:00  (1 calendar day(s))
+
+--------------------------------------------------------------------------
+PHASE — 2b SOURCE CONTRACT — is this file what we think it is?
+--------------------------------------------------------------------------
+source-contract gate (ADR 0026, read-only) — target=cloud database=sonyliv_q37_newcol vocabulary=47 pairs
+  sev   probe                                                       count  note
+  FAIL  ev_raw is empty                                                  0  nothing to validate — wrong file, wrong database, or a failed load
+  FAIL  timestamp outside 2020..2035                                     0  epoch-zero or millis-not-divided; raw span 2026-08-22 09:00:00.250 -> 2026-08-22 09:20:00.733
+  FAIL  epoch-zero session_start_epoch                                   0  
+  FAIL  empty identity (session or user id)                              0  rows the session/user tiers cannot attribute
+  FAIL  unknown event_type (outside the 7)                               0  
+  FAIL  expected columns missing from ev_raw                             0  
+  WARN  columns beyond the 13-column contract                            1  extra — DDL drift vs sql/00_schema.sql; CSV-header shape is the loader\'s phase-0 check (T1)
+  WARN  vocabulary drift: unknown event values                           0  
+  WARN  reused video_session_id (>1 session_start_epoch)                 0  two lifecycles under one id merge into one session
+  WARN  events before declared session start                             0  sessions; the model derives starts from event timestamps, not this column
+  WARN  future-dated events (> now + 5 min)                            128  wall-clock skew; synthetic rehearsal days trip this by design
+  WARN  VideoSessionEnd before VideoSessionStart                         0  sessions; out-of-order lifecycle markers
+  WARN  multiple VideoSessionEnd in one session                          0  sessions; the end marker is an idempotent hard stop in the model
+  WARN  tied dimensions at one (session, timestamp)                      0  0% of groups disagree on platform/country/content — ADR 0009 vote assumes this is rare
+  WARN  exact duplicate rows (retry copies)                              0  dedup proven inert for totals/peak but NOT at filter grain (doubts/06)
+  WARN  sentinel collision: content_id = -1 events                       0  cube rows are safe (cube_level, ADR 0022) but the p_* = -1 query API stays ambiguous (R9)
+  WARN  literal * in platform or country                                 0  collides with the all-rollup sentinel of the query API (sql/85_windows.sql)
+  WARN  event content_id absent from content_dim                         0  distinct ids; they serve (unknown) titles, joins do not error (R10)
+  WARN  conflicting content_dim definitions                              0  ReplacingMergeTree picks arbitrarily between conflicting rows
+  WARN  dimension column entirely empty                                  0  
+  INFO  rows                                                           128  
+  INFO  sessions / users                                                 4  4 distinct users
+  INFO  span (minutes)                                                  20  2026-08-22 09:00:00.250 -> 2026-08-22 09:20:00.733
+  INFO  event_type histogram                                             4  VideoHeartbeat:116 VideoPlay:4 VideoSessionEnd:4 VideoSessionStart:4
+  INFO  distinct content ids                                             1  platforms 1 - countries 1
+
+VERDICT: WARN — 0 failures, 2 warning(s). Proceed with eyes open; diff the WARN rows against evidence/source-contract/.
+  source contract: no FAIL — proceeding to derive the model.
+
+--------------------------------------------------------------------------
+PHASE — 3 intervals (30_build_intervals.sql)
+--------------------------------------------------------------------------
+  4 intervals over 4 sessions · 0 still open · 1.4 active hours
+
+--------------------------------------------------------------------------
+PHASE — 4 user tier (45_user_concurrency.sql)
+--------------------------------------------------------------------------
+  cc_user_minute 22 rows
+
+--------------------------------------------------------------------------
+PHASE — 5 deltas (40_deltas.sql)
+--------------------------------------------------------------------------
+  2 delta rows · opens 4 · closes 4
+
+--------------------------------------------------------------------------
+PHASE — 6 views (20) + hour agg (50) + content (80) + windows (85)
+--------------------------------------------------------------------------
+  cc_hour_agg 8 rows
+  hour tier says peak 4 @ 2026-08-22 09:00:00
+
+--------------------------------------------------------------------------
+PHASE — 7 the answer (this is what we would submit)
+--------------------------------------------------------------------------
+  session concurrency  peak 4 @ 2026-08-22 09:00:00  (earliest tied minute — ADR 0014)
+  user concurrency     peak 4
+  stateless baseline   peak 4
+  minutes tied at the peak: 21  (dense spine; the change-point count under-reports)
+
+--------------------------------------------------------------------------
+PHASE — 8 THE GATE — truth recomputed from ev_raw
+--------------------------------------------------------------------------
+
+sql/90_reconcile.sql, verbatim (SUMMARY + up to 20 mismatches + 5 samples):
+     0	SUMMARY	minutes_compared=21	mismatched=0	max_abs_diff=0	peak=4	PASS
+     2	sample	2026-08-22 09:00:00	4	4	0	PASS
+     2	sample	2026-08-22 09:03:00	4	4	0	PASS
+     2	sample	2026-08-22 09:18:00	4	4	0	PASS
+     2	sample	2026-08-22 09:20:00	4	4	0	PASS
+
+     asserted: minutes_compared=21 equals the day's spine (2026-08-22 09:00:00 .. 2026-08-22 09:20:00)
+
+--------------------------------------------------------------------------
+TIMINGS — wall clock, this run, 128 events
+--------------------------------------------------------------------------
+  1 schema (00_schema, 10_intervals) — tables + the stateless MV     6s
+  2 load (tools/load.sh, unmodified)                            21s
+  2b SOURCE CONTRACT — is this file what we think it is?       2s
+  3 intervals (30_build_intervals.sql)                           5s
+  4 user tier (45_user_concurrency.sql)                          3s
+  5 deltas (40_deltas.sql)                                       3s
+  6 views (20) + hour agg (50) + content (80) + windows (85)    15s
+  7 the answer (this is what we would submit)                    2s
+  8 THE GATE — truth recomputed from ev_raw                    2s
+  TOTAL                                                         62s
+
+--------------------------------------------------------------------------
+VERDICT — GATE PASSED on sonyliv_q37_newcol. peak 4 @ 2026-08-22 09:00:00 (earliest tied minute).
+--------------------------------------------------------------------------

@@ -1,0 +1,427 @@
+TIMESPAN EVIDENCE — span (days..months) vs density (events/day), varied independently
+generated 2026-08-01T21:30:49Z   commit 8e52c61 (sql+tools DIRTY)
+host: 26.7.1.1315  cores 10  mem 7.82 GiB
+points: 12:694000 60:139000 180:46000 12:4170000 60:834000 180:278000   seed 20260202   span start 2026-02-01 (UTC)
+free disk at start: 406.98 GiB
+--------------------------------------------------------------------------
+WHAT IS BEING SCALED
+  The CALENDAR, not the audience — the complement of evidence/scale.txt.
+  Sessions keep the provided file's shape (length, beats, bursts, pauses,
+  gaps, dimensions — all fitted by tools/scale-gen.sql) but their START
+  TIMES follow a synthetic multi-day profile:
+    * diurnal curve: overnight floor, midday bump (13:00), prime-time peak
+      centred 21:00 — not the provided file's single launch-event spike
+    * weekday/weekend rhythm: weekends x1.35
+    * seasonal drift: +/-12% sinusoid over the year
+    * EVENT DAYS every 45 days (d%45==7): x2.2 traffic with a sharp 20:30
+      spike — the big-match shape that stresses partition heterogeneity
+    * hot-content rotation each 30-day epoch: 65% of picks come from a
+      rotated Zipf head (titles launch and decay), 35% evergreen
+    * sessions cross midnight naturally (counted per point below)
+  Volume is held CONSTANT across spans 12/60/180 so any change is caused
+  by span alone; a constant-span density pair isolates the other axis.
+
+  DESIGNED TRUTH: every point carries probe blocks on reserved platform
+  TIMESPAN_PROBE (40 sessions 20:00-20:29 + 30 sessions 23:45-00:14, on
+  day 0, a month-end mid-span day, and the last day) whose minute-by-
+  minute concurrency is known in closed form — a THIRD implementation of
+  the counting spec, python sets vs arraySplit vs window functions, same
+  as tools/unseen-gen.sh. The rest of the stream has no analytic answer;
+  there the reconcile gate (delta tier vs interval expansion) is the
+  check, run at every point.
+--------------------------------------------------------------------------
+PHASE 0 — fit vocabularies from the provided file (tools/scale-gen.sql)
+  loaded 905,558 real events, 33,464 catalog rows
+  vocabularies fitted: 7 dims / 226 values, 33464 content ranks, 4096 event slots  (gen_start unused — the time axis is the thing this file replaces)
+--------------------------------------------------------------------------
+POINT d12_e694k — span 12 days, density 694,000 events/day
+  target 8,328,000 events, 99,976 sessions, 10,420 content ids in play
+--------------------------------------------------------------------------
+  probe days (of 12): 0,6,11  ·  designed truth in evidence/timespan/probe-truth-d12_e694k.tsv
+  [gen]  8,295,351 events  ·  14630 ms  ·  peak mem 1.21 GiB
+
+  GENERATOR SHAPE (background stream only, probe excluded):
+    events/day  weekday 510.97 thousand  ·  weekend 762.17 thousand  ·  event-day 1.65 million  ·  days with data 13
+    hour-of-day shares  prime 19-23h 49.4%  ·  overnight 0-5h 9.8%
+    sessions crossing midnight: 1139 of 99976
+    distinct dims in stream: platform 10 · country 1 · app 65 · content 10237 · blank-platform rows 0
+
+  [intervals]  5682 ms  ·  peak mem 2.45 GiB  ·  read 8,295,351 rows  ·  wrote 269,050 rows
+  [users]  1251 ms  ·  peak mem 923.62 MiB  ·  read 269,050 rows  ·  wrote 1,483,834 rows
+  [deltas]  706 ms  ·  peak mem 243.49 MiB  ·  read 538,100 rows  ·  wrote 408,545 rows
+  [houragg]  1023 ms  ·  peak mem 487.96 MiB  ·  read 408,545 rows  ·  wrote 439,483 rows
+
+  ROWS  intervals 269,050  ·  delta 408,545  ·  hour cube 439,483  ·  user 1,483,834  ·  stateless 1,578,080
+  hour cube vs delta tier: 1.08x the rows  ·  1.43x the bytes
+
+  STORAGE — system.parts, active only, no OPTIMIZE FINAL beforehand.
+  table                            rows      on disk   uncompressed    parts   partns  max p/ptn
+  ev_raw                  8.30 million   72.86 MiB      1.42 GiB      45      13         4
+  session_intervals     269.05 thousan   16.56 MiB     46.68 MiB       1       1         1
+  cc_user_minute          1.48 million    7.60 MiB     57.03 MiB      26      13         2
+  cc_hour_agg           439.48 thousan    4.13 MiB     18.02 MiB       1       1         1
+  cc_minute_stateless     1.58 million    4.12 MiB     48.12 MiB      32      13         3
+  cc_minute_delta       408.55 thousan    2.89 MiB     16.38 MiB      13      13         1
+  content_dim           33.46 thousand  367.90 KiB      1.12 MiB       1       1         1
+  ts_min_e              65.54 thousand  264.65 KiB    384.00 KiB       1       1         1
+  ts_min_n              65.54 thousand  264.57 KiB    384.00 KiB       1       1         1
+  gen_content           33.46 thousand  264.46 KiB    392.16 KiB       1       1         1
+  ts_day                65.54 thousand  258.53 KiB    512.00 KiB       1       1         1
+  gen_ev                 4.10 thousand   17.45 KiB    186.22 KiB       1       1         1
+  gen_lut                       226.00    3.84 KiB      9.94 KiB       1       1         1
+  point on-disk total: 110.24 MiB
+
+  SERVING COST — median of 3, plus parts/marks actually selected (query_log):
+  query                                             ms     rows read   bytes read   parts    marks  result
+  W1 window-range, ONE day (hour tier)             8.7         8,193   272.00 KiB       1        1  375/9021900/104.42/24/0
+  W2 window-range, 30 days                        11.3         8,193   272.00 KiB       1        1  1547/96138780/92.73/288/0
+  W3 window-range, WHOLE history (12 d)            9.2         8,193   272.00 KiB       1        1  1547/96138780/92.73/288/0
+  M1 minute tier, whole history (contrast)         5.2       408,545     4.68 MiB      13       57  1547
+  M2 minute tier, one day (pruning check)          2.6        37,817   443.17 KiB       1        5  375
+
+  reconcile (delta serving vs interval expansion, every minute of 12 days): PASS  17392 minutes compared, peak 1547
+  reconcile (user tier vs interval expansion): PASS  17392 minutes, user peak 1543
+  designed-truth probe (python truth vs interval expansion): PASS  186 designed minutes, peak 40, month/midnight-crossing blocks included
+--------------------------------------------------------------------------
+POINT d60_e139k — span 60 days, density 139,000 events/day
+  target 8,340,000 events, 100,120 sessions, 11,388 content ids in play
+--------------------------------------------------------------------------
+  probe days (of 60): 0,58,59  ·  designed truth in evidence/timespan/probe-truth-d60_e139k.tsv
+  [gen]  8,307,711 events  ·  17157 ms  ·  peak mem 1.17 GiB
+
+  GENERATOR SHAPE (background stream only, probe excluded):
+    events/day  weekday 118.06 thousand  ·  weekend 163.12 thousand  ·  event-day 305.92 thousand  ·  days with data 61
+    hour-of-day shares  prime 19-23h 47.4%  ·  overnight 0-5h 10.1%
+    sessions crossing midnight: 1176 of 100120
+    distinct dims in stream: platform 10 · country 1 · app 65 · content 11126 · blank-platform rows 0
+    content rotation: 6 of the top-20 titles of the first month are still top-20 in the last month
+
+  [intervals]  5179 ms  ·  peak mem 2.45 GiB  ·  read 8,307,711 rows  ·  wrote 269,433 rows
+  [users]  2042 ms  ·  peak mem 991.56 MiB  ·  read 269,433 rows  ·  wrote 1,566,916 rows
+  [deltas]  1241 ms  ·  peak mem 246.00 MiB  ·  read 538,866 rows  ·  wrote 410,546 rows
+  [houragg]  1728 ms  ·  peak mem 499.73 MiB  ·  read 410,546 rows  ·  wrote 513,467 rows
+
+  ROWS  intervals 269,433  ·  delta 410,546  ·  hour cube 513,467  ·  user 1,566,916  ·  stateless 1,647,037
+  hour cube vs delta tier: 1.25x the rows  ·  1.67x the bytes
+
+  STORAGE — system.parts, active only, no OPTIMIZE FINAL beforehand.
+  table                            rows      on disk   uncompressed    parts   partns  max p/ptn
+  ev_raw                  8.31 million   72.90 MiB      1.42 GiB     187      61         4
+  session_intervals     269.43 thousan   16.72 MiB     46.75 MiB       1       1         1
+  cc_user_minute          1.57 million    8.14 MiB     58.91 MiB     122      61         2
+  cc_hour_agg           513.47 thousan    5.00 MiB     21.06 MiB       3       3         1
+  cc_minute_stateless     1.65 million    4.41 MiB     49.16 MiB     127      61         3
+  cc_minute_delta       410.55 thousan    2.99 MiB     16.50 MiB      61      61         1
+  content_dim           33.46 thousand  367.90 KiB      1.12 MiB       1       1         1
+  ts_min_e              65.54 thousand  264.65 KiB    384.00 KiB       1       1         1
+  ts_min_n              65.54 thousand  264.57 KiB    384.00 KiB       1       1         1
+  gen_content           33.46 thousand  264.46 KiB    392.16 KiB       1       1         1
+  ts_day                65.54 thousand  258.74 KiB    512.00 KiB       1       1         1
+  gen_ev                 4.10 thousand   17.45 KiB    186.22 KiB       1       1         1
+  gen_lut                       226.00    3.84 KiB      9.94 KiB       1       1         1
+  point on-disk total: 113.41 MiB
+
+  SERVING COST — median of 3, plus parts/marks actually selected (query_log):
+  query                                             ms     rows read   bytes read   parts    marks  result
+  W1 window-range, ONE day (hour tier)            34.7         8,193   272.00 KiB       1        1  74/1387920/16.06/24/0
+  W2 window-range, 30 days                        33.5        16,385   544.00 KiB       2        2  88/46102980/17.79/720/0
+  W3 window-range, WHOLE history (60 d)           15.7        24,025   797.67 KiB       3        3  320/96338700/18.58/1440/0
+  M1 minute tier, whole history (contrast)        12.9       410,546     4.70 MiB      61       70  320
+  M2 minute tier, one day (pruning check)          9.6         5,951    69.74 KiB       1        1  74
+
+  reconcile (delta serving vs interval expansion, every minute of 60 days): PASS  86426 minutes compared, peak 320
+  reconcile (user tier vs interval expansion): PASS  86426 minutes, user peak 320
+  designed-truth probe (python truth vs interval expansion): PASS  186 designed minutes, peak 40, month/midnight-crossing blocks included
+--------------------------------------------------------------------------
+POINT d180_e46k — span 180 days, density 46,000 events/day
+  target 8,280,000 events, 99,400 sessions, 13,751 content ids in play
+--------------------------------------------------------------------------
+  probe days (of 180): 0,119,179  ·  designed truth in evidence/timespan/probe-truth-d180_e46k.tsv
+  [gen] first attempt at DEFAULT settings (max_partitions_per_insert_block=100):
+    TRIPPED, as a naive 180-day bulk insert would: Too many partitions for single INSERT block (more than 100). The limit is controlled by 'max_partitions_per_insert_block' setting. Large number of partitions is a common misconception. It will lead to severe negative per
+    retrying with max_partitions_per_insert_block=400 (the fix any span >100 days needs)
+  [gen]  8,245,018 events  ·  29301 ms  ·  peak mem 1.18 GiB
+
+  GENERATOR SHAPE (background stream only, probe excluded):
+    events/day  weekday 40.09 thousand  ·  weekend 54.88 thousand  ·  event-day 103.57 thousand  ·  days with data 181
+    hour-of-day shares  prime 19-23h 47%  ·  overnight 0-5h 10.2%
+    sessions crossing midnight: 1168 of 99400
+    distinct dims in stream: platform 10 · country 1 · app 65 · content 13407 · blank-platform rows 0
+    content rotation: 8 of the top-20 titles of the first month are still top-20 in the last month
+
+  [intervals]  23325 ms  ·  peak mem 2.55 GiB  ·  read 8,245,018 rows  ·  wrote 267,438 rows
+  [users]  3319 ms  ·  peak mem 930.10 MiB  ·  read 267,438 rows  ·  wrote 1,577,978 rows
+  [deltas]  1246 ms  ·  peak mem 243.98 MiB  ·  read 534,876 rows  ·  wrote 407,815 rows
+  [houragg]  1996 ms  ·  peak mem 776.02 MiB  ·  read 407,815 rows  ·  wrote 559,399 rows
+
+  ROWS  intervals 267,438  ·  delta 407,815  ·  hour cube 559,399  ·  user 1,577,978  ·  stateless 1,650,568
+  hour cube vs delta tier: 1.37x the rows  ·  1.73x the bytes
+
+  STORAGE — system.parts, active only, no OPTIMIZE FINAL beforehand.
+  table                            rows      on disk   uncompressed    parts   partns  max p/ptn
+  ev_raw                  8.25 million   72.11 MiB      1.41 GiB     548     181         4
+  session_intervals     267.44 thousan   16.67 MiB     46.40 MiB       1       1         1
+  cc_user_minute          1.58 million    8.75 MiB     59.01 MiB     362     181         2
+  cc_hour_agg           559.40 thousan    5.56 MiB     22.94 MiB       6       6         1
+  cc_minute_stateless     1.65 million    5.28 MiB     49.05 MiB     368     181         3
+  cc_minute_delta       407.81 thousan    3.21 MiB     16.46 MiB     181     181         1
+  content_dim           33.46 thousand  367.90 KiB      1.12 MiB       1       1         1
+  ts_min_e              65.54 thousand  264.65 KiB    384.00 KiB       1       1         1
+  ts_min_n              65.54 thousand  264.57 KiB    384.00 KiB       1       1         1
+  gen_content           33.46 thousand  264.46 KiB    392.16 KiB       1       1         1
+  ts_day                65.54 thousand  259.27 KiB    512.00 KiB       1       1         1
+  gen_ev                 4.10 thousand   17.45 KiB    186.22 KiB       1       1         1
+  gen_lut                       226.00    3.84 KiB      9.94 KiB       1       1         1
+  point on-disk total: 117.20 MiB
+
+  SERVING COST — median of 3, plus parts/marks actually selected (query_log):
+  query                                             ms     rows read   bytes read   parts    marks  result
+  W1 window-range, ONE day (hour tier)            20.2         8,193   272.00 KiB       1        1  34/656400/7.6/24/0
+  W2 window-range, 30 days                        28.7        16,385   544.00 KiB       2        2  116/16699020/6.44/720/0
+  W3 window-range, WHOLE history (180 d)          13.6        49,153     1.59 MiB       6        6  135/95640960/6.15/4320/0
+  M1 minute tier, whole history (contrast)        35.1       407,815     4.67 MiB     181      181  135
+  M2 minute tier, one day (pruning check)          5.7         2,865    33.57 KiB       1        1  34
+
+  reconcile (delta serving vs interval expansion, every minute of 180 days): PASS  250169 minutes compared, peak 135
+  reconcile (user tier vs interval expansion): PASS  250169 minutes, user peak 135
+  designed-truth probe (python truth vs interval expansion): PASS  186 designed minutes, peak 40, month/midnight-crossing blocks included
+--------------------------------------------------------------------------
+POINT d12_e4170k — span 12 days, density 4,170,000 events/day
+  target 50,040,000 events, 600,720 sessions, 25,195 content ids in play
+--------------------------------------------------------------------------
+  probe days (of 12): 0,6,11  ·  designed truth in evidence/timespan/probe-truth-d12_e4170k.tsv
+  [gen]  49,759,554 events  ·  147456 ms  ·  peak mem 1.47 GiB
+
+  GENERATOR SHAPE (background stream only, probe excluded):
+    events/day  weekday 3.06 million  ·  weekend 4.54 million  ·  event-day 10.04 million  ·  days with data 13
+    hour-of-day shares  prime 19-23h 49.6%  ·  overnight 0-5h 9.8%
+    sessions crossing midnight: 6941 of 600720
+    distinct dims in stream: platform 10 · country 1 · app 65 · content 25191 · blank-platform rows 0
+
+  [intervals]  169781 ms  ·  peak mem 3.11 GiB  ·  read 49,759,554 rows  ·  wrote 1,614,635 rows  ·  SPILLED 314.70 MiB to disk
+  [users]  24944 ms  ·  peak mem 2.24 GiB  ·  read 1,663,787 rows  ·  wrote 8,527,162 rows  ·  SPILLED 231.36 MiB to disk
+  [deltas]  5593 ms  ·  peak mem 1.78 GiB  ·  read 3,327,574 rows  ·  wrote 2,438,222 rows
+  [houragg]  16876 ms  ·  peak mem 2.32 GiB  ·  read 2,438,222 rows  ·  wrote 2,363,397 rows  ·  SPILLED 134.82 MiB to disk
+
+  ROWS  intervals 1,614,635  ·  delta 2,438,222  ·  hour cube 2,363,397  ·  user 8,527,162  ·  stateless 9,019,961
+  hour cube vs delta tier: 0.97x the rows  ·  0.93x the bytes
+
+  STORAGE — system.parts, active only, no OPTIMIZE FINAL beforehand.
+  table                            rows      on disk   uncompressed    parts   partns  max p/ptn
+  ev_raw                 49.76 million  436.73 MiB      8.53 GiB      67      13         7
+  session_intervals       1.61 million   99.55 MiB    280.25 MiB       2       1         2
+  cc_user_minute          8.53 million   49.06 MiB    333.51 MiB      39      13         3
+  cc_minute_delta         2.44 million   25.83 MiB     97.73 MiB      39      13         3
+  cc_hour_agg             2.36 million   24.02 MiB     96.93 MiB       3       1         3
+  cc_minute_stateless     9.02 million   23.59 MiB    281.87 MiB      19      13         6
+  content_dim           33.46 thousand  367.90 KiB      1.12 MiB       1       1         1
+  ts_min_e              65.54 thousand  264.65 KiB    384.00 KiB       1       1         1
+  ts_min_n              65.54 thousand  264.57 KiB    384.00 KiB       1       1         1
+  gen_content           33.46 thousand  264.46 KiB    392.16 KiB       1       1         1
+  ts_day                65.54 thousand  258.53 KiB    512.00 KiB       1       1         1
+  gen_ev                 4.10 thousand   17.45 KiB    186.22 KiB       1       1         1
+  gen_lut                       226.00    3.84 KiB      9.94 KiB       1       1         1
+  point on-disk total: 662.96 MiB
+
+  SERVING COST — median of 3, plus parts/marks actually selected (query_log):
+  query                                             ms     rows read   bytes read   parts    marks  result
+  W1 window-range, ONE day (hour tier)            12.1        24,577     1.01 MiB       3        3  2098/53318580/617.11/24/0
+  W2 window-range, 30 days                        14.6        24,577     1.01 MiB       3        3  9094/575124840/554.71/288/0
+  W3 window-range, WHOLE history (12 d)           10.0        24,577     1.01 MiB       3        3  9094/575124840/554.71/288/0
+  M1 minute tier, whole history (contrast)        10.3     2,438,222    27.90 MiB      39      310  9094
+  M2 minute tier, one day (pruning check)          4.4       224,631     2.57 MiB       3       28  2098
+
+  reconcile (delta serving vs interval expansion, every minute of 12 days): PASS  17529 minutes compared, peak 9094
+  designed-truth probe (python truth vs interval expansion): PASS  186 designed minutes, peak 40, month/midnight-crossing blocks included
+--------------------------------------------------------------------------
+POINT d60_e834k — span 60 days, density 834,000 events/day
+  target 50,040,000 events, 600,720 sessions, 26,155 content ids in play
+--------------------------------------------------------------------------
+  probe days (of 60): 0,58,59  ·  designed truth in evidence/timespan/probe-truth-d60_e834k.tsv
+  [gen]  49,759,554 events  ·  124542 ms  ·  peak mem 1.50 GiB
+
+  GENERATOR SHAPE (background stream only, probe excluded):
+    events/day  weekday 707.13 thousand  ·  weekend 979.31 thousand  ·  event-day 1.84 million  ·  days with data 61
+    hour-of-day shares  prime 19-23h 47.6%  ·  overnight 0-5h 10.2%
+    sessions crossing midnight: 7165 of 600720
+    distinct dims in stream: platform 10 · country 1 · app 65 · content 26148 · blank-platform rows 0
+    content rotation: 6 of the top-20 titles of the first month are still top-20 in the last month
+
+  [intervals]  208814 ms  ·  peak mem 3.14 GiB  ·  read 49,759,554 rows  ·  wrote 1,614,635 rows  ·  SPILLED 311.59 MiB to disk
+  [users]  57729 ms  ·  peak mem 2.23 GiB  ·  read 1,663,787 rows  ·  wrote 9,175,268 rows  ·  SPILLED 234.82 MiB to disk
+  [deltas]  7379 ms  ·  peak mem 1.55 GiB  ·  read 3,327,574 rows  ·  wrote 2,459,225 rows
+  [houragg]  28616 ms  ·  peak mem 2.27 GiB  ·  read 2,459,225 rows  ·  wrote 2,830,449 rows  ·  SPILLED 161.28 MiB to disk
+
+  ROWS  intervals 1,614,635  ·  delta 2,459,225  ·  hour cube 2,830,449  ·  user 9,175,268  ·  stateless 9,586,275
+  hour cube vs delta tier: 1.15x the rows  ·  1.09x the bytes
+
+  STORAGE — system.parts, active only, no OPTIMIZE FINAL beforehand.
+  table                            rows      on disk   uncompressed    parts   partns  max p/ptn
+  ev_raw                 49.76 million  437.53 MiB      8.53 GiB     229      61         6
+  session_intervals       1.61 million  100.30 MiB    280.25 MiB       2       1         2
+  cc_user_minute          9.18 million   60.50 MiB    347.76 MiB     244      61         4
+  cc_hour_agg             2.83 million   30.46 MiB    116.08 MiB       9       3         3
+  cc_minute_delta         2.46 million   27.84 MiB     98.70 MiB     183      61         3
+  cc_minute_stateless     9.59 million   24.61 MiB    289.98 MiB      70      61         5
+  content_dim           33.46 thousand  367.90 KiB      1.12 MiB       1       1         1
+  ts_min_e              65.54 thousand  264.65 KiB    384.00 KiB       1       1         1
+  ts_min_n              65.54 thousand  264.57 KiB    384.00 KiB       1       1         1
+  gen_content           33.46 thousand  264.46 KiB    392.16 KiB       1       1         1
+  ts_day                65.54 thousand  258.74 KiB    512.00 KiB       1       1         1
+  gen_ev                 4.10 thousand   17.45 KiB    186.22 KiB       1       1         1
+  gen_lut                       226.00    3.84 KiB      9.94 KiB       1       1         1
+  point on-disk total: 687.79 MiB
+
+  SERVING COST — median of 3, plus parts/marks actually selected (query_log):
+  query                                             ms     rows read   bytes read   parts    marks  result
+  W1 window-range, ONE day (hour tier)            50.6        24,577     1.01 MiB       3        3  354/8337900/96.5/24/0
+  W2 window-range, 30 days                        27.6        49,153     2.02 MiB       6        6  480/276183180/106.55/720/0
+  W3 window-range, WHOLE history (60 d)           36.0        73,729     3.02 MiB       9        9  1877/575636040/111.04/1440/0
+  M1 minute tier, whole history (contrast)        47.7     2,459,225    28.14 MiB     183      351  1877
+  M2 minute tier, one day (pruning check)         13.1        35,400   414.84 KiB       3        5  354
+
+  reconcile (delta serving vs interval expansion, every minute of 60 days): PASS  86642 minutes compared, peak 1877
+  designed-truth probe (python truth vs interval expansion): PASS  186 designed minutes, peak 40, month/midnight-crossing blocks included
+--------------------------------------------------------------------------
+POINT d180_e278k — span 180 days, density 278,000 events/day
+  target 50,040,000 events, 600,720 sessions, 28,555 content ids in play
+--------------------------------------------------------------------------
+  probe days (of 180): 0,119,179  ·  designed truth in evidence/timespan/probe-truth-d180_e278k.tsv
+  [gen]  49,759,554 events  ·  394652 ms  ·  peak mem 1.63 GiB
+
+  GENERATOR SHAPE (background stream only, probe excluded):
+    events/day  weekday 243.13 thousand  ·  weekend 328.95 thousand  ·  event-day 627.52 thousand  ·  days with data 181
+    hour-of-day shares  prime 19-23h 47.2%  ·  overnight 0-5h 10.3%
+    sessions crossing midnight: 7200 of 600720
+    distinct dims in stream: platform 10 · country 1 · app 65 · content 28548 · blank-platform rows 0
+    content rotation: 6 of the top-20 titles of the first month are still top-20 in the last month
+
+  [intervals]  FAILED at default: Received exception from server (version 26.7.1): Code: 241. DB::Exception: Received from localhost:9000. DB::Exception: (total) memory limit exceeded: would use 5.30 GiB (attempt to allocate chunk of 75.87 MiB), current RSS: 4.11 GiB, maximum: 5.27 GiB. OvercommitTracker decision: Query was selected
+  [intervals+spill]  273175 ms  ·  peak mem 2.74 GiB  ·  read 49,759,554 rows  ·  wrote 1,614,635 rows  ·  SPILLED 312.28 MiB to disk
+  [users]  65272 ms  ·  peak mem 2.24 GiB  ·  read 1,647,403 rows  ·  wrote 9,410,327 rows  ·  SPILLED 235.92 MiB to disk
+  [deltas]  14016 ms  ·  peak mem 1.40 GiB  ·  read 3,294,806 rows  ·  wrote 2,463,659 rows
+  [houragg]  45449 ms  ·  peak mem 2.02 GiB  ·  read 2,463,659 rows  ·  wrote 3,049,881 rows  ·  SPILLED 258.54 MiB to disk
+
+  ROWS  intervals 1,614,635  ·  delta 2,463,659  ·  hour cube 3,049,881  ·  user 9,410,327  ·  stateless 9,816,118
+  hour cube vs delta tier: 1.24x the rows  ·  1.19x the bytes
+
+  STORAGE — system.parts, active only, no OPTIMIZE FINAL beforehand.
+  table                            rows      on disk   uncompressed    parts   partns  max p/ptn
+  ev_raw                 49.76 million  438.41 MiB      8.53 GiB     710     181         5
+  session_intervals       1.61 million  100.73 MiB    280.25 MiB       2       1         2
+  cc_user_minute          9.41 million   63.95 MiB    353.00 MiB     724     181         4
+  cc_hour_agg             3.05 million   34.77 MiB    125.08 MiB      18       6         3
+  cc_minute_delta         2.46 million   29.21 MiB     99.16 MiB     543     181         3
+  cc_minute_stateless     9.82 million   25.32 MiB    293.29 MiB     192     181         3
+  content_dim           33.46 thousand  367.90 KiB      1.12 MiB       1       1         1
+  ts_min_e              65.54 thousand  264.65 KiB    384.00 KiB       1       1         1
+  ts_min_n              65.54 thousand  264.57 KiB    384.00 KiB       1       1         1
+  gen_content           33.46 thousand  264.46 KiB    392.16 KiB       1       1         1
+  ts_day                65.54 thousand  259.27 KiB    512.00 KiB       1       1         1
+  gen_ev                 4.10 thousand   17.45 KiB    186.22 KiB       1       1         1
+  gen_lut                       226.00    3.84 KiB      9.94 KiB       1       1         1
+  point on-disk total: 704.77 MiB
+
+  SERVING COST — median of 3, plus parts/marks actually selected (query_log):
+  query                                             ms     rows read   bytes read   parts    marks  result
+  W1 window-range, ONE day (hour tier)            56.2        24,577     1.01 MiB       3        3  169/3888120/45/24/0
+  W2 window-range, 30 days                        35.2        49,153     2.02 MiB       6        6  691/101731740/39.25/720/0
+  W3 window-range, WHOLE history (180 d)          47.2       147,457     6.05 MiB      18       18  691/575721000/37.02/4320/0
+  M1 minute tier, whole history (contrast)        88.8     2,463,659    28.19 MiB     543      551  691
+  M2 minute tier, one day (pruning check)         22.8        16,820   197.11 KiB       3        3  169
+
+  reconcile (delta serving vs interval expansion, every minute of 180 days): PASS  259429 minutes compared, peak 691
+  designed-truth probe (python truth vs interval expansion): PASS  186 designed minutes, peak 40, month/midnight-crossing blocks included
+
+  OLD-STRAGGLER PUBLISH — event-time ~173 days before span end:
+    straggler: 000A1D3F0303BF7959C9…  heartbeat at 2026-02-07 13:37:53.000 (bridges a gap in week 1)
+      == run 1785621734771  ·  1 session(s) claimed  ·  cursor 1970-01-01 00:00:00.000 -> 2026-08-01 22:02:10.623
+         negated   4 corrective delta rows   85 ms
+         derived   4 intervals   199 ms   (window 2026-02-07 13:29:42.000 .. 2026-02-07 13:54:27.000)
+         pruned    superseded intervals   93 ms
+         emitted   2 delta rows   71 ms
+         hours     2398 hour-cube rows re-derived   59 ms
+         users     1020 user-minute buckets re-derived   490 ms
+         committed cursor now 2026-08-01 22:02:10.623
+    per-phase: negated 85ms · derived 199ms · pruned 93ms · emitted 71ms · hours 59ms · users 490ms
+    reconcile after the old-straggler publish: PASS  259429 minutes
+--------------------------------------------------------------------------
+SUMMARY — every point, side by side
+--------------------------------------------------------------------------
+point            days   events/day        events   intervals         delta   hour_cube   user_bkts     on disk    recon
+d12_e694k          12      694,000     8,295,351     269,050       408,545     439,483   1,483,834  110.24 MiB     PASS
+d60_e139k          60      139,000     8,307,711     269,433       410,546     513,467   1,566,916  113.41 MiB     PASS
+d180_e46k         180       46,000     8,245,018     267,438       407,815     559,399   1,577,978  117.20 MiB     PASS
+d12_e4170k         12    4,170,000    49,759,554   1,614,635     2,438,222   2,363,397   8,527,162  662.96 MiB     PASS
+d60_e834k          60      834,000    49,759,554   1,614,635     2,459,225   2,830,449   9,175,268  687.79 MiB     PASS
+d180_e278k        180      278,000    49,759,554   1,614,635     2,463,659   3,049,881   9,410,327  704.77 MiB     PASS
+--------------------------------------------------------------------------
+BUILD COST — per stage per point (system.query_log)
+--------------------------------------------------------------------------
+point          stage                          ms    peak memory
+d12_e694k      intervals                    5682       2.45 GiB
+d12_e694k      users                        1251     923.62 MiB
+d12_e694k      deltas                        706     243.49 MiB
+d12_e694k      houragg                      1023     487.96 MiB
+d60_e139k      intervals                    5179       2.45 GiB
+d60_e139k      users                        2042     991.56 MiB
+d60_e139k      deltas                       1241     246.00 MiB
+d60_e139k      houragg                      1728     499.73 MiB
+d180_e46k      intervals                   23325       2.55 GiB
+d180_e46k      users                        3319     930.10 MiB
+d180_e46k      deltas                       1246     243.98 MiB
+d180_e46k      houragg                      1996     776.02 MiB
+d12_e4170k     intervals                  169781       3.11 GiB
+d12_e4170k     users                       24944       2.24 GiB
+d12_e4170k     deltas                       5593       1.78 GiB
+d12_e4170k     houragg                     16876       2.32 GiB
+d60_e834k      intervals                  208814       3.14 GiB
+d60_e834k      users                       57729       2.23 GiB
+d60_e834k      deltas                       7379       1.55 GiB
+d60_e834k      houragg                     28616       2.27 GiB
+d180_e278k     intervals+default          FAILED              -
+d180_e278k     intervals+spill            273175       2.74 GiB
+d180_e278k     users                       65272       2.24 GiB
+d180_e278k     deltas                      14016       1.40 GiB
+d180_e278k     houragg                     45449       2.02 GiB
+--------------------------------------------------------------------------
+SERVING COST — the span claim, side by side (median ms · bytes read · parts)
+--------------------------------------------------------------------------
+point          query         ms     rows read   bytes read   parts
+d12_e694k      W1           8.7         8,193   272.00 KiB       1
+d12_e694k      W2          11.3         8,193   272.00 KiB       1
+d12_e694k      W3           9.2         8,193   272.00 KiB       1
+d12_e694k      M1           5.2       408,545     4.68 MiB      13
+d12_e694k      M2           2.6        37,817   443.17 KiB       1
+d60_e139k      W1          34.7         8,193   272.00 KiB       1
+d60_e139k      W2          33.5        16,385   544.00 KiB       2
+d60_e139k      W3          15.7        24,025   797.67 KiB       3
+d60_e139k      M1          12.9       410,546     4.70 MiB      61
+d60_e139k      M2           9.6         5,951    69.74 KiB       1
+d180_e46k      W1          20.2         8,193   272.00 KiB       1
+d180_e46k      W2          28.7        16,385   544.00 KiB       2
+d180_e46k      W3          13.6        49,153     1.59 MiB       6
+d180_e46k      M1          35.1       407,815     4.67 MiB     181
+d180_e46k      M2           5.7         2,865    33.57 KiB       1
+d12_e4170k     W1          12.1        24,577     1.01 MiB       3
+d12_e4170k     W2          14.6        24,577     1.01 MiB       3
+d12_e4170k     W3          10.0        24,577     1.01 MiB       3
+d12_e4170k     M1          10.3     2,438,222    27.90 MiB      39
+d12_e4170k     M2           4.4       224,631     2.57 MiB       3
+d60_e834k      W1          50.6        24,577     1.01 MiB       3
+d60_e834k      W2          27.6        49,153     2.02 MiB       6
+d60_e834k      W3          36.0        73,729     3.02 MiB       9
+d60_e834k      M1          47.7     2,459,225    28.14 MiB     183
+d60_e834k      M2          13.1        35,400   414.84 KiB       3
+d180_e278k     W1          56.2        24,577     1.01 MiB       3
+d180_e278k     W2          35.2        49,153     2.02 MiB       6
+d180_e278k     W3          47.2       147,457     6.05 MiB      18
+d180_e278k     M1          88.8     2,463,659    28.19 MiB     543
+d180_e278k     M2          22.8        16,820   197.11 KiB       3
+--------------------------------------------------------------------------
+DISK — peak scratch footprint across points (sum of per-point on-disk totals,
+       points built and dropped sequentially so concurrent peak is ~the largest
+       single point): 2.34 GiB
+free disk now: 404.81 GiB  (was 406.98 GiB at start)
+all scratch databases (tspan_*) dropped.
+done 2026-08-01T22:02:22Z

@@ -131,6 +131,31 @@ contradicting themselves a few lines apart.
 - **Docs-only features still pass checks 5 and 6.** Most of today's real defects were wrong *claims*,
   not wrong code.
 
+## ⚠ The waves are SEQUENTIAL. Do not run them in parallel — measured, 2026-08-02.
+
+The orchestrator spawned W1, W2 and W3 concurrently to save wall-clock. W3's check-1 analysis proved
+that cannot work, with three concrete dependencies:
+
+```
+ W1  tooling   apply-sql.sh --database parser · env-capture · the write guards
+       │
+       ▼
+ W2  model     sql/15_normalise.sql (ADR 0011) · 0009 · 0014
+       │
+       ▼
+ W3  publication  needs BOTH: the parser to install into scratch, normalise to build at all
+```
+
+W3 could not run check 3 **at all** — not "ran and failed", could not run — because `main`'s
+`apply-sql.sh` has no option parser, so its convergence claim was unverifiable. A promotion that
+cannot execute a check has failed check 1, and parallelism is what produced that state.
+
+**W3 is parked**, its cherry-picks and dependency analysis pushed to
+`chore/promotion-w3-publication`. It re-runs after W1 and W2 are on `main` — not before.
+
+**The general rule:** promote one wave, land it on `main`, then start the next. The wall-clock saving
+from parallel waves is illusory when each later wave has to be thrown away and re-derived.
+
 ## Promotion order — dependencies decide it, not importance
 
 Infrastructure that everything else assumes goes first; anything that changes a serving table's
@@ -168,6 +193,171 @@ live, ADR 0014 agrees 98/98 hours with no bare live-view `argMax`.
 **The lesson for every remaining wave:** a cherry-picked feature is not the ADR that introduced it.
 Isolation (check 1) must include the follow-up commits that make the ADR's claims true — grep the
 promoted tree for what the ADR *says* is gone, rather than trusting the ADR.
+
+## W3 refused at check 1 — the wave order is a real dependency, not a preference
+
+W3 (publication) cherry-picked ADR 0013+0016+0019 onto `main`, verified all three named risk checks
+against the **promoted tree rather than the ADR prose** — `mv_user_minute` has no surviving
+`CREATE MATERIALIZED VIEW`, `cc_user_minute` is `ReplacingMergeTree(computed_at)`, all 20 write
+statements in `publish-test.sh` are qualified — and then **refused at check 1** on three
+wave-1/wave-2 dependencies:
+
+| | dependency | consequence on `main` |
+|---|---|---|
+| **D1** | `publish-test.sh` calls `apply-sql.sh --database`; `main`'s copy has **no option parser** | the convergence claim cannot be re-derived, so check 3 never ran |
+| **D2** | `main`'s `apply-sql.sh` sources `.env` *after* the caller's environment | **there is no route on `main` that installs `sql/12_publish.sql` anywhere but the graded database.** Same Q33 family as the 2026-08-02 incident |
+| **D3** | ADR 0016's `build-model.sh` applies `sql/15_normalise.sql` (ADR 0011, wave 2), absent on `main` | `make model` is broken |
+
+**D2 is the one to sit with.** It is not a promotion problem — it is a property of `main` as it
+stands today: the only place the publisher can be installed is the database we are scored on. That is
+exactly the shape of the incident that already happened once.
+
+**It also corrected an attribution that two prior reviews had agreed on.** W1 and Codex both
+concluded "two characters (`>` → `>=`) account for all 177 mismatches". W3 re-verified rather than
+trusting either, and found `main`'s gate differs from `dev`'s in **three** places — the two resume
+predicates **plus a zero-length-window `arrayFilter`**. Patching only the two still takes the branch
+gate to 0/0/2,917, so the attribution's *conclusion* holds — but the third difference is real, and it
+is the zero-length-segment handling that queue item **Q35** is about (182 runs, peak 2,917 → 2,927).
+Two independent reviews had said "two" and the number was three.
+
+**The lesson, now a rule:** a promotion that *cannot run* a check is a check-1 failure, not a pass
+with a caveat. And an attribution agreed by two reviews is still worth re-deriving — "two characters"
+was very nearly right, and very nearly is how a third difference stays invisible.
+
+## W1 rejected a second time — one finding fixed, one scoped, one my own brief's fault
+
+**The scanner gap is real and is an accident risk.** It missed **`DELETE FROM`** — ClickHouse's
+lightweight delete, ordinary SQL that nobody thinks of as an `ALTER` — plus `OPTIMIZE`,
+`MOVE PARTITION`, `REPLACE PARTITION`, `MATERIALIZE TTL` and `MODIFY COLUMN`. Fixed; `DELETE FROM` is
+the one that would have bitten, because it is the form a person writes without noticing it is
+destructive.
+
+**The exported-function and conditional-source bypasses are real but out of threat model.** They
+require someone to deliberately export a shell function shadowing a command the guard depends on.
+These guards exist to stop **accidents** — a stale base, a mistyped target, a scrolled-past banner —
+not a determined operator. Recording that scope explicitly rather than hardening against an attacker
+we do not have: an unbounded guard is one people route around. Anyone who disagrees should say so in
+an ADR, not silently widen the check.
+
+**Check 4b's failure is my brief's fault, not W1's.** The re-validation brief was generated from
+W2's by substitution and carried W2's wording — *"any mismatch is a failure"*. That is right for W2,
+which carries ADR 0009. W1 does not, so its 177-mismatch spec skew is **expected and already
+attributed** to `0c0f020`, exactly as W1's own earlier analysis proved by isolation. Codex applied
+the brief it was given, correctly. **A generated brief inherits assumptions that do not transfer** —
+the same class of error as the incomplete cherry-picks, one level up.
+
+**What survived:** ADR 0011's five UDFs, four views and the 1,774 → 2,196 Hindi pair; ADR 0014's
+98/98 hours with no bare live-view `argMax`; the 2,887 → 2,917 and 1,949.3 → 1,978.1 h headline; and
+ADR 0018's "every layer" claim now explicitly withdrawn and replaced with a measured per-layer table.
+
+## 🔴 Wave A rejected — and it settles the wave question for good
+
+Codex validated the first file-state promotion and found three things. Two are fixed; the third
+changes the plan.
+
+**1 · A newline defeated every destructive-SQL pattern — including plain `DROP`.** Ordinary DDL
+formatting evades a line-oriented grep:
+
+```sql
+DROP
+  TABLE ev_raw;
+```
+
+The guard looked thorough and caught **nothing that spanned a line break**, which is how most people
+write DDL. Fixed: comments stripped, all whitespace collapsed, matched against one flat stream.
+Re-tested — `DROP`, `DELETE FROM` and `ALTER … DROP COLUMN` split across lines are all caught, and
+benign SQL still passes.
+
+**2 · The file-state-copy claim did not hold for one file.** Nine of ten were byte-identical to
+`dev`; `tools/load.sh` differed by 353 insertions. Cause: I copied at time T and `dev` moved —
+Y1's landing table and my own `--replace` guard both landed afterwards. **A copy is only as good as
+its timestamp**, so a wave must be rebuilt from `dev` immediately before validation, not once at
+the start.
+
+**3 · Tooling is NOT separable from SQL, and this is the structural finding.** The promoted
+`tools/build-model.sh` unconditionally applies `sql/15_normalise.sql`, which wave A does not carry;
+`dev`'s loader requires `sql/05_landing.sql`, likewise absent. **Wave A alone is not a runnable
+state.**
+
+### So the partition question is now closed, in both directions
+
+- **By ADR** — impossible: `sql/50_hour_agg.sql` implements 0003, 0006, 0014, 0016 and 0022.
+- **By file** — impossible: `tools/` executes `sql/`, so a tooling wave without its SQL cannot run.
+
+**`tools/` and `sql/` promote together or not at all.** That is not a retreat to the wholesale merge:
+it is one validated increment containing the model and the tooling that runs it, with evidence, docs
+and the Go layer following as genuinely separable waves. The candidate branches `promo/w12-fileset`
+and `promo/waveB-model` should be combined and re-validated as one.
+
+**Check 6 also failed:** `docs/RUNBOOK_UNSEEN.md` still says the caller environment is ignored, which
+contradicts all four promoted environment-capture scripts.
+
+**What held:** `make ci`, all four target-resolution probes, both ordinary graded guards, check 4a at
+17,028 / 0 / 0 / 2,917, and the expected 4b skew.
+
+## ✅ The method changes: promote FILES to `dev`'s state, not COMMITS onto `main`
+
+All three rejections share one cause, and it is the method rather than the agents.
+
+**Cherry-picking commits onto `main` reconstructs a state by hand**, and hand-reconstruction misses
+the follow-ups: `df6e7a2` for ADR 0009, the `build-model.sh` step for ADR 0011, 230 lines of
+`unseen-run.sh` for ADR 0014, wave-1 tooling for W3. Every miss produced a branch where the ADR's
+claim was false — and a green gate, because the gate does not check ADR prose.
+
+**The fix is to stop reconstructing.** For a wave, take **`dev`'s version of every file the wave
+owns**, wholesale:
+
+```bash
+git checkout dev -- sql/30_build_intervals.sql sql/90_reconcile.sql sql/15_normalise.sql \
+                    sql/50_hour_agg.sql sql/85_windows.sql tools/build-model.sh …
+```
+
+`dev` is the state in which those ADRs' claims are **true and gate-green**. Copying that state cannot
+produce a branch where an ADR contradicts its own tree — the failure mode that rejected three
+attempts.
+
+**This keeps everything the second level was for.** The wave is still one coherent feature group; the
+six checks still run; Codex still validates independently; `main` is still built up deliberately
+rather than fast-forwarded in one unexamined jump. What changes is only *how the branch reaches the
+state being validated* — by copy rather than by reconstruction.
+
+**What it gives up, stated honestly:** commit-level provenance on `main`. A wave lands as one commit
+per feature group rather than replaying `dev`'s history. That is a real loss for `git blame`, and it
+is worth it — `dev`'s history remains intact and is where anyone should look.
+
+**The file list per wave must still be derived, not guessed.** Use
+`git diff --name-only main..dev -- sql/ tools/` and assign every file to exactly one wave. A file in
+no wave never reaches `main`; a file in two waves is a conflict waiting to happen.
+
+## 🔴 Three rejections, three incomplete cherry-picks — this is now THE failure mode
+
+W2's **second** rejection has the same root cause as its first, and W3's was a variant. That makes it
+a pattern rather than an accident, and check 1 must change to catch it.
+
+| attempt | what was picked | what was NOT, and the consequence |
+|---|---|---|
+| W2 #1 | ADR 0009's derivation fix | `df6e7a2`'s `sql/40_deltas.sql` — so the ADR's own `any()` claim was false on its branch |
+| W2 #2 | ADR 0014's `50_hour_agg.sql` tie-break | `tools/unseen-run.sh` — **230 lines** different from `dev`. Codex ran it: the unseen-day submission path returns **16:59 and 16:35 instead of 15:51** |
+| W2 #2 | ADR 0011's `sql/15_normalise.sql` | the `build-model.sh` step that applies it — `make model` never runs it, so the promoted ADR "did nothing" |
+| W3 | ADR 0013+0016 | wave-1 tooling — check 3 could not run at all |
+
+**W2 #2 is the most serious defect any review has found**, because `tools/unseen-run.sh` is *the
+unseen-day submission path*. A promoted W2 would have shipped a `main` that answers the peak-minute
+question **wrongly on the day it counts most**, while every gate stayed green — the gate compares
+concurrency, not peak-minute attribution.
+
+Codex also caught the docs half: ADR 0011 says both three and four views; the unseen runbook calls
+**both 16:59 and 15:51** the expected good answer; ADR 0014 is marked Accepted while its submitted
+answer path is explicitly open.
+
+### The rule check 1 now carries
+
+**A feature is the ADR plus every commit that makes the ADR's claims true.** Before promoting:
+
+1. `git log --oneline --all -S'<the thing the ADR says is gone>' -- <file>` for each claim.
+2. Diff **every file the ADR names** between the branch and `dev` — not just the one the ADR
+   headlines. `unseen-run.sh` differed by 230 lines and nobody looked.
+3. **Run the path the ADR governs**, not just the gate. Three green gates hid all three of these.
 
 ## Ledger
 

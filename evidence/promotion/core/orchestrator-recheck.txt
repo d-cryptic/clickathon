@@ -1,0 +1,27 @@
+PROMO/CORE — orchestrator re-checks after the sixth Codex verdict
+branch c757be6 · base main 2b551b5 · 2026-08-01T23:24:43Z
+
+Codex verdict on the PREVIOUS state was DO NOT PROMOTE, with three findings.
+The copy claim HELD (all 64 changed files matched origin/dev). The rest are answered:
+
+  check 1  COHERENT — derived by tools/promotion-deps.sh, not by category.
+           It named the gap exactly: queries/validate_source_contract.sql,
+           referenced by tools/validate-source-contract.sh. The source-contract
+           gate was shipping without the SQL it executes. Added.
+
+  check 2  make ci green. sql/87_viz.sql no longer reads sonyliv.dict_content —
+           the ADR 0010 defect, which reads correctly on the graded database and
+           silently answers from PRODUCTION's catalog anywhere else. That is what
+           the unseen day does: it builds the whole model in a separate database.
+
+  check 3  TARGET=cloud -> sonyliv · build-model REFUSES · CRLF-split DROP caught.
+           Scanner third revision: strips /* */ block comments first (they span
+           lines AND sit between keywords), then line comments, then flattens
+           CR/LF/TAB. Each earlier revision was defeated by ordinary formatting.
+
+  check 4b reconcile PASSED · 17,028 minutes · 0 mismatched · peak 2,917.
+
+  check 6  RUNBOOK A5 corrected; 87_viz documented.
+
+CHECK 5 (Codex, independent) STILL REQUIRED. Six verdicts so far, every one
+correct. These are the orchestrator's own checks and do not substitute.

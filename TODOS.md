@@ -84,6 +84,23 @@
 
 ## Next
 
+- [x] **[V2-C1]** **Concurrency-decline alerting — done.** The statement's one optional item
+      (`PROBLEM_STATEMENT.md:42`). `tools/clickstack-alerts.sh` + `docs/DECLINE_ALERTING.md`:
+      detector (median baseline, lagged 3 min, floored — **28** firing minutes where a naive
+      "down 20% in 5 min" fires **962**) and the three-way ended/broken/boring classifier, live as
+      3 alerts on hosted HyperDX, watermark-anchored so a frozen dataset is not a contradiction.
+      Found and fixed an alert that fired permanently while its tile read 0 (a bare aggregate always
+      returns one row; the engine fires on the row, not the value). **Two honest gaps, deliberately
+      not tuned away:** `DISENGAGEMENT` is shipped **unvalidated** — no minute in the file exhibits
+      it — and the only outage-shaped episode is the file's own truncation at `11:30:04.847`
+      (0 unclosed sessions of 10,866, so the strongest outage signature never occurs).
+- [ ] **[V2-C1b]** **LLM explanation layer for a fired decline alert** — deliberately NOT in the
+      detection path (`DECLINE_ALERTING.md` §6: an LLM there would be slower, non-deterministic and
+      would fail *plausibly*). The value is turning the classified row
+      (`OUTAGE, 3 min, end_coverage 0.03, hb_per_session 0.07`) into the sentence an on-call engineer
+      acts on at 3 a.m. Feed it the **already-classified** row; never let it decide the class, or the
+      alert's correctness becomes a function of sampling temperature. Would also give the Langfuse
+      Spot Award a real trace to observe (`OBSERVABILITY.md` — one emitter can feed both).
 - [x] **[H3]** `cc_minute_delta` hour-clipped (ADR 0003) + `v_concurrency_minute` — **done**.
       `sql/40_deltas.sql`; **28,073** delta rows from **30,323** intervals *(live count re-read
       2026-08-01 after the tier-coherence rebuild; was 28,074 on the prior build)*. Reconcile PASSES on all

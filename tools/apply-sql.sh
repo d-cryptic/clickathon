@@ -178,8 +178,33 @@ if [ "$DB" = "$GRADED_DB" ] && [ "${APPLY_GRADED_DESTRUCTIVE:-}" != yes ]; then
     # Broadened after Codex 2026-08-02: the original pattern caught only DROP and
     # TRUNCATE, missing every other executable form that destroys or replaces data —
     # ALTER ... DELETE/DROP COLUMN/UPDATE, DETACH, RENAME, EXCHANGE, REPLACE TABLE.
-    if sed 's/--.*//' "$f" | grep -qiE '(^|[[:space:];])(DROP|TRUNCATE|DETACH|RENAME[[:space:]]+TABLE|EXCHANGE[[:space:]]+TABLES|REPLACE[[:space:]]+TABLE)[[:space:]]' \
-       || sed 's/--.*//' "$f" | grep -qiE 'ALTER[[:space:]]+TABLE[^;]*(DELETE|UPDATE|DROP[[:space:]]+(COLUMN|PARTITION)|CLEAR[[:space:]]+COLUMN)'; then
+    # Broadened twice. First after Codex 2026-08-02 (only DROP/TRUNCATE were
+    # caught). Then again after Codex re-validation found the list still missed
+    # six executable destructive forms — notably `DELETE FROM`, ClickHouse's
+    # LIGHTWEIGHT delete, which is ordinary SQL somebody would write without
+    # thinking of it as an ALTER. That one is a real accident risk; the rest are
+    # rarer but equally destructive.
+    # NORMALISE FIRST, then match. Codex found that every pattern below — including
+    # plain DROP and TRUNCATE — was defeated by ordinary SQL formatting:
+    #
+    #     DROP
+    #       TABLE ev_raw;
+    #
+    # A line-oriented grep never sees "DROP TABLE" there. The guard looked
+    # thorough and caught nothing that spanned a line break, which is how most
+    # people write DDL. So: strip comments, collapse ALL whitespace to single
+    # spaces, and match against one flat stream.
+    # Normalisation, third revision. Each round of Codex review found another
+    # way ordinary SQL walked past this scanner:
+    #   1. only DROP/TRUNCATE matched              -> six more forms added
+    #   2. a newline after DROP defeated everything -> collapse whitespace
+    #   3. CRLF line endings, and /* */ block comments used as separators
+    #      (`DROP/* x */TABLE`) -> both bypassed the collapse
+    # So: strip block comments FIRST (they can span lines and sit between
+    # keywords), then line comments, then flatten CR/LF/TAB, then squeeze.
+    NORM="$(perl -0pe 's{/\*.*?\*/}{ }gs' "$f" | sed -e 's/--.*//' | tr '\r\n\t' '   ' | tr -s ' ')"
+    if printf '%s' "$NORM" | grep -qiE '(^| |;)(DROP|TRUNCATE|DETACH|RENAME TABLE|EXCHANGE TABLES|REPLACE TABLE|DELETE FROM|OPTIMIZE) ' \
+       || printf '%s' "$NORM" | grep -qiE 'ALTER TABLE[^;]*(DELETE|UPDATE|DROP (COLUMN|PARTITION)|CLEAR COLUMN|MOVE PARTITION|REPLACE PARTITION|MATERIALIZE TTL|MODIFY COLUMN)'; then
       die "$f contains DROP or TRUNCATE and '$DB' is the GRADED database.
 
 Applying it destroys answers we are scored on, and there is no undo. If that is

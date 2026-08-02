@@ -16,6 +16,9 @@ released in the final hours. Full statement: [docs/PROBLEM.md](docs/PROBLEM.md).
 
 ## Where to go
 
+**Just waking up, or picking this up cold? Read [HANDOFF.md](HANDOFF.md) first** — what is blocked,
+what only a human can do, and where the promotion gate stands.
+
 **New here, or resuming after a break? Read [WALKTHROUGH.md](WALKTHROUGH.md) first** — what is built,
 what is verified, what is broken, and what is still missing, in one page.
 
@@ -25,6 +28,7 @@ what is verified, what is broken, and what is still missing, in one page.
 | **Understand the whole problem from scratch, in plain English** | [docs/EXPLAINER.md](docs/EXPLAINER.md) — the ask, what is really in the data, and why the obvious approach is wrong |
 | **Answer "which sessions count, and what does it cost me when you are wrong?"** | [docs/BUSINESS_RULES.md](docs/BUSINESS_RULES.md) — the inclusion ledger, the cost of error in both directions, decision→tier mapping, and a straight answer on billing |
 | Understand the concurrency model and why | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| **Answer "what about sessions that are still open?"** | [docs/LIVE_INTERVALS.md](docs/LIVE_INTERVALS.md) — the live edge under-reports **−14.8%** and is exact beyond **240 s**; labelling proposal in [ADR 0029](docs/adr/0029-provisional-and-final-buckets-labelled-off-the-watermark.md) |
 | Know the field names / event types / data shape | [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) |
 | Write SQL the way this repo writes SQL | [docs/CONVENTIONS.md](docs/CONVENTIONS.md) |
 | **Set up the Go toolchain / write Go here** | [docs/GO.md](docs/GO.md) — `direnv allow`, then `make ci` |
@@ -38,6 +42,7 @@ what is verified, what is broken, and what is still missing, in one page.
 | **Know what every dashboard panel shows** | [docs/CLICKSTACK_DASHBOARDS.md](docs/CLICKSTACK_DASHBOARDS.md) — 6 dashboards, 41 tiles, captured live |
 | **Bring up ClickStack / see the concurrency chart** | [docs/CLICKSTACK.md](docs/CLICKSTACK.md) — `make stack-up && make clickstack` |
 | **See ClickStack observing OUR pipeline (watermark lag, build timing, reconcile gate)** | [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) — `sonyliv observe -target cloud` |
+| **Alert on concurrency decline — and tell apart ended / broken / boring** | [docs/DECLINE_ALERTING.md](docs/DECLINE_ALERTING.md) — the spec's optional item. 3 live alerts; the discrimination is the deliverable, and one of the three classes is shipped **unvalidated** and says so |
 | Know what is already **verified** vs assumed | [docs/VERIFIED.md](docs/VERIFIED.md) ← **read before trusting any ClickHouse claim** |
 | **Answer "how does this behave at 100×?"** | [evidence/scale.txt](evidence/scale.txt) — measured at 1×/10×/100×, and what breaks first. Regenerate with `tools/scale-test.sh` |
 | **Answer the organiser's four "design decisions to confirm"** | [docs/DESIGN_DECISIONS.md](docs/DESIGN_DECISIONS.md) — session timeout, lateness tolerance, window size, freshness. Three decided; **lateness is the open one** |

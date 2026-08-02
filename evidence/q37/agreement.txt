@@ -1,0 +1,19 @@
+CONTRACT GATE vs REAL RUNNER — do they agree about what a valid file is?
+generated 2026-08-01T23:11:17Z   commit 4eb4746
+invariant: anything the gate PASSES, the runner must ACCEPT
+gate db sonyliv_q37_agree_gate · runner db sonyliv_q37_agree_runner
+--------------------------------------------------------------------------
+
+  fixture                        gate      runner           verdict
+  cruel-newline-raw.csv          ACCEPT    ACCEPT           ok
+  cruel-newcol-raw.csv           ACCEPT    ACCEPT           ok
+  ctl-misscol.csv                REFUSE    REFUSE-FILE      ok
+  ctl-dupecol.csv                REFUSE    REFUSE-FILE      ok
+
+--------------------------------------------------------------------------
+VERDICT: PASS — no file was passed by the gate and refused by the runner.
+
+Read the both-refuse rows as load-bearing: they are the proof that agreement
+was reached by making the runner match the loader, not by making either stop
+checking. If those rows ever read ACCEPT/ACCEPT, this script has stopped
+testing anything.

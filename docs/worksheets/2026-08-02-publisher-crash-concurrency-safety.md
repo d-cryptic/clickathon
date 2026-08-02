@@ -41,7 +41,18 @@ idempotent, fenced, and — the valuable part — what is still not guaranteed.
    lease serializes, +1 not +2), 14 (same-ms pair identity), 15 (retention alert). Fault hooks
    `PUBLISH_CRASH_AT` / `PUBLISH_SLEEP_AT` in publish.sh, inert unless set; injected crashes keep
    the lease held so recovery must win it honestly (TTL).
-5. **Full harness run** → `evidence/publish.txt` (all PHASES 0–15; every `differing` row 0).
+5. **The crash matrix caught a fifth defect the fix itself had inherited**: ADR 0013's
+   `insert_deduplication_token` does NOT drop a replayed `INSERT SELECT` into the shared delta
+   table — `system.query_log` showed the crash rounds' negate and emit each finishing TWICE with
+   `written_rows > 0`, and the served number double-counted by exactly one viewer. The token was
+   the only protection on the two append-only statements. Resume now decides negate/emit replays
+   from the server's own query log (`stmt_landed`: wait out `system.processes`, flush, check for
+   a recorded finish); the tokens remain attached but carry no load. Every other statement is
+   replay-safe by construction (pinned BV + Replacing / idempotent DELETE / versioned rewrite).
+6. **Full harness run** → `evidence/publish.txt` (all PHASES 0–15; every `differing` row 0).
+   Also fixed in passing: the harness's served-minutes check now compares running sums over the
+   union of minutes — the *_total views emit rows only for minutes present in `cc_minute_delta`,
+   so a membership join miscounted correct net-zero correction minutes as differences.
 
 ## Decisions & gotchas (for whoever resumes)
 

@@ -3,20 +3,25 @@
 > **Summary:** One command runs the whole path on a dataset we have never seen —
 > `UNSEEN_DB=<fresh_name> tools/unseen-run.sh <raw.csv> <content.csv>` — into an isolated scratch
 > database, ending on the self-targeting correctness gate (`sql/90_reconcile.sql`, run verbatim; the
-> script asserts its SUMMARY row against the day's own minute spine). **Measured end to end: 47 s for
-> 30,097 events · 54 s for 6,887 · 58 s for 849,888** — fixed-cost dominated, budget ~3 min even for a
-> 5× day. Peak minutes resolve to the **earliest tied minute (ADR 0014) at every tier**. Ten unseen-day
+> script asserts its SUMMARY row against the day's own minute spine). **Plan against the contract-first
+> path: 90 s for 6,887 events · 93 s for 30,097 · 120 s for 849,888** (re-measured 2026-08-02; the
+> build alone is 66/67/82 s). Budget **4 min** for a delivered-size day and **6 min** for a 5× one.
+> Peak minutes resolve to the **earliest tied minute (ADR 0014) at every tier**. Ten unseen-day
 > assumptions (A1–A10) and the ten findings of the synthetic-day rehearsal (R1–R10) are the body of
 > this document. Evidence: [`evidence/unseen-rehearsal.txt`](../evidence/unseen-rehearsal.txt) (holdout
 > + full-size replay) and [`evidence/unseen/rehearsal.txt`](../evidence/unseen/rehearsal.txt) (synthetic).
 
-**Rehearsed three times, 2026-08-01:**
+**Rehearsed three times, 2026-08-01; re-timed 2026-08-02 on commit `7789748`:**
 
-| run | input | events | peak | gate | wall |
-|---|---|---:|---:|---|---:|
-| holdout | byte-exact slice, 2026-07-25 | 30,097 | 13 | green | 47 s |
-| full-size replay | 2026-07-26 day | 849,888 | 2,887 | green | 58 s |
-| **synthetic** | **manufactured day 2026-08-15** — designed to hit every [trap](DATA_DICTIONARY.md#traps), answer known analytically | 6,887 | **30 @ 20:00 (64-minute tie)** | green, **and matches the designed truth on all 1,081 minutes** | 54 s |
+| run | input | events | peak | gate | build | **contract-first** |
+|---|---|---:|---:|---|---:|---:|
+| holdout | byte-exact slice, 2026-07-25 | 30,097 | 13 | green | 67 s | **93 s** |
+| full-size replay | 2026-07-26 day | 849,888 | 2,887 ⚠ | green | 82 s | **120 s** |
+| **synthetic** | **manufactured day 2026-08-15** — designed to hit every [trap](DATA_DICTIONARY.md#traps), answer known analytically | 6,887 | **30 @ 20:00 (64-minute tie)** | green, **and matches the designed truth on all 1,081 minutes** | 66 s | **90 s** |
+
+⚠ The 2026-08-02 replay of the same 849,888 rows answers **2,917 @ 10:56**, which is the graded
+database's own peak. Same input, different answer, so the mover is the model, not the slice — fixes
+landed after commit `5433183`. Flagged rather than edited: the `peak` column is not this task's to own.
 
 The synthetic day matters most: it is the only run where the *right answer* was known independently
 of both the model and the gate, and it caught seven defects a green gate could not
@@ -76,6 +81,8 @@ three questions in [`evidence/source-contract/README.md`](../evidence/source-con
 This doubles as a dress rehearsal of the loader's positional header check (§2's first failure row)
 on a database whose loss costs nothing.
 
+`tools/contract-runner-agreement.sh` asserts that this step-zero gate and `tools/unseen-run.sh` agree about which files are loadable — **they did not, until Q37** (`evidence/q37/`). Its verdict table includes negative controls: a missing column and a duplicated one are still REFUSED by both, so the two were made to agree without loosening either.
+
 ---
 
 ## 1. The run
@@ -94,25 +101,55 @@ tables. There is no reason to do this before the model answer is final and revie
 
 ### What each phase does, verifies, and costs
 
-Wall clock, measured. Columns: synthetic 6,887 · holdout 30,097 · replay 849,888 events.
+Wall clock, **re-measured 2026-08-02** on commit `7789748` — evidence:
+[`evidence/unseen/timings-2026-08-02.txt`](../evidence/unseen/timings-2026-08-02.txt). Columns:
+synthetic 6,887 · holdout 30,097 · replay 849,888 events.
+
+> **The numbers this table carried until 2026-08-02 (54/47/58 s) were measured on commit `5433183`,
+> before the source-contract step existed anywhere on the path.** They understated the real path by
+> 1.7–2.1×. Budget from the **contract-first** row at the bottom, not from the build.
 
 | # | Phase | Verifies | 6.9k | 30k | 850k |
 |---|---|---|---:|---:|---:|
 | 0 | preflight | CSV header matches the loader's **positional** column list; DB empty; SQL fingerprint recorded | <1 s | <1 s | <1 s |
-| 1 | schema `00`, `10` | tables + `mv_stateless` exist **before** the load — it is the only populator of `cc_minute_stateless`, there is no backfill | 5 s | 5 s | 5 s |
-| 2 | load `tools/load.sh` | `count(ev_raw)` **equals** the CSV data-row count; `cc_minute_stateless` non-empty | 12 s | 9 s | 18 s |
-| 3 | intervals `30` | `session_intervals` non-empty; prints intervals / open / active hours | 2 s | 4 s | 3 s |
-| 4 | user tier `45` | `cc_user_minute` non-empty | 3 s | 3 s | 4 s |
-| 5 | deltas `40` | TRUNCATE-then-insert (a second insert **doubles** every number); non-empty | 3 s | 2 s | 3 s |
-| 6 | views `20`, hour `50`, content `80`, windows `85` | hour tier reports a peak **at the earliest tied minute (ADR 0014)** | 15 s | 15 s | 14 s |
-| 7 | the answer | session / user / stateless peaks; peak minute = **earliest tied (ADR 0014)**; tie count on the **dense spine** | 5 s | 2 s | 2 s |
-| 8 | the gate | `sql/90_reconcile.sql` **verbatim**; then asserts SUMMARY: verdict PASS **and** `minutes_compared` = the day's spine | 4 s | 4 s | 5 s |
-| | **TOTAL** | | **54 s** | **47 s** | **58 s** |
+| 1 | schema `00`, `10` | tables + `mv_stateless` exist **before** the load — it is the only populator of `cc_minute_stateless`, there is no backfill | 6 s | 6 s | 5 s |
+| 2 | load `tools/load.sh` | `count(ev_raw)` **equals** the CSV data-row count; `cc_minute_stateless` non-empty | 22 s | 25 s | 35 s |
+| **2b** | **source contract** (ADR 0026) | the file is the protocol we modeled — timestamp units, identity, vocabulary. **Did not exist when the old numbers were taken** | 3 s | 2 s | 4 s |
+| 3 | intervals `30` | `session_intervals` non-empty; prints intervals / open / active hours | 2 s | 3 s | 4 s |
+| 4 | user tier `45` | `cc_user_minute` non-empty | 4 s | 3 s | 3 s |
+| 5 | deltas `40` | TRUNCATE-then-insert (a second insert **doubles** every number); non-empty | 2 s | 2 s | 3 s |
+| 6 | views `20`, hour `50`, content `80`, windows `85` | hour tier reports a peak **at the earliest tied minute (ADR 0014)** | 18 s | 16 s | 16 s |
+| 7 | the answer | session / user / stateless peaks; peak minute = **earliest tied (ADR 0014)**; tie count on the **dense spine** | 3 s | 3 s | 2 s |
+| 8 | the gate | `sql/90_reconcile.sql` **verbatim**; then asserts SUMMARY: verdict PASS **and** `minutes_compared` = the day's spine | 2 s | 3 s | 6 s |
+| | **BUILD TOTAL** (`tools/unseen-run.sh` alone) | | **66 s** | **67 s** | **82 s** |
+| | §0 **source-contract step**, throwaway DB | the manual gate in [step zero](#step-zero--the-source-contract-before-the-load-is-trusted-adr-0026) | 24 s | 26 s | 38 s |
+| | **CONTRACT-FIRST TOTAL — plan against this** | | **90 s** | **93 s** | **120 s** |
 
-**Extrapolation.** 123× the events cost 1.07× the wall clock — the path is dominated by DDL, view
-creation and HTTP round trips, not volume. Only phase 2 tracks size (~0.085 s per MB of CSV over the
-venue link). A 1 GB unseen day: load ~90 s, everything else unchanged, **total ~2.5 min**. If the
-link is slower than the rehearsal's, phase 2 is the only number that moves.
+**Which number to plan against: the contract-first one.** §0 and phase 2b are two different checks of
+the same thing — §0 runs it on a throwaway database *before* you commit to a build, phase 2b runs it
+inside the build after the load. Phase 2b costs 2–4 s and is not optional; §0 costs 24–38 s and is
+what buys you the right to stop before deriving anything. **Budget 4 min for a delivered-size day and
+6 min for a 5× one.** An operator who budgets from the build alone has no room for the step that
+protects the answer, and that is the step that gets dropped under time pressure.
+
+> 🔴 **Taking these numbers required a workaround, and you will need it too.**
+> `tools/unseen-run.sh:351` reads `$TARGET`, which the script never sets in its own scope (line 276
+> sets it only inside the load subshell). Under `set -euo pipefail` that is fatal, so the advertised
+> one-command path **dies at phase 2b** — the contract gate itself — with
+> `line 351: TARGET: unbound variable`, after ~32 s, with no model built and no gate run. Every timing
+> above was taken with **`TARGET=cloud`** exported. Prefix the run with it until the fix lands:
+> ```bash
+> TARGET=cloud UNSEEN_DB=sonyliv_unseen_<slug> tools/unseen-run.sh <raw.csv> <content.csv>
+> ```
+> Not fixed here — `tools/unseen-run.sh` belongs to `fix/contract-gate-runner-agreement`. Note the
+> shape of it: phase 2b was wired onto the path on 2026-08-02 *because* Codex 005 found the gate was
+> documented but never called. It is called now, and it is the line that stops the run.
+
+**Extrapolation, restated.** 123× the events cost **1.24×** the wall clock (66 s → 82 s) — still
+fixed-cost dominated, but not the 1.07× this document used to claim. Phase 2 is the only one that
+tracks size, at **~0.17 s per MB** of CSV on the 2026-08-02 link (the old figure was 0.085 s/MB on a
+faster one). **The load is network-bound, so this is the number that will differ again on the day** —
+a 1 GB unseen day loads in ~170 s here and ~85 s on the earlier link, everything else unchanged.
 
 ### Expected output, tail of a good run
 

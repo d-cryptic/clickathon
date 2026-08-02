@@ -1,0 +1,52 @@
+UNSEEN-DAY RUN
+generated 2026-08-01T22:38:37Z   commit 7789748
+target database sonyliv_q37_newline   ·   raw data/cruel-newline-raw.csv   ·   content data/cruel-content.csv
+--------------------------------------------------------------------------
+reset: DROP DATABASE sonyliv_q37_newline — re-loading without this DOUBLES ev_raw (measured; see the note in this script)
+preflight ok · server 26.2.1.525 · database sonyliv_q37_newline ready and empty
+raw CSV header matches the loader · 99 data rows
+
+SQL fingerprint (sha256, first 12) — the exact model this run exercised:
+  125d80b9b5aa  sql/00_schema.sql
+  de80eaf031af  sql/10_intervals.sql
+  4ffca75940bf  sql/20_views.sql
+  6ba8c21fb5f8  sql/30_build_intervals.sql
+  d1dfeb14c894  sql/40_deltas.sql
+  764ee4c5d810  sql/45_user_concurrency.sql
+  20fefccc4705  sql/50_hour_agg.sql
+  15525d8870b4  sql/80_content.sql
+  0e278f3516e3  sql/85_windows.sql
+  be6a7a4f2e0f  sql/90_reconcile.sql
+  75f66b090f0e  tools/load.sh
+  git 7789748 (sql+tools clean)
+
+--------------------------------------------------------------------------
+PHASE — 1 schema (00_schema, 10_intervals) — tables + the stateless MV
+--------------------------------------------------------------------------
+  objects: 6 created
+
+--------------------------------------------------------------------------
+PHASE — 2 load (tools/load.sh, unmodified)
+--------------------------------------------------------------------------
+target=cloud  database=sonyliv_q37_newline  (from --database)  mode=refuse
+
+phase A — landing both files as text (load_id 20260801T223857Z-7565)
+  content_landing <- /Users/barun/.superconductor/worktrees/clickathon-project/sc-charged-magnon-7668/data/cruel-content.csv ...
+  ev_landing      <- /Users/barun/.superconductor/worktrees/clickathon-project/sc-charged-magnon-7668/data/cruel-newline-raw.csv ...
+  landed: ev_landing 98 rows · content_landing 30 rows — nothing typed yet
+
+phase B — casting forward, one row at a time
+
+loaded into TARGET=cloud, database sonyliv_q37_newline:
+   ┌─t───────────┬─before─┬─rows─┬─added─┐
+1. │ ev_raw      │      0 │   98 │    98 │
+2. │ content_dim │      0 │   30 │    30 │
+   └─────────────┴────────┴──────┴───────┘
+disposition: every landed row reached exactly one terminal state
+  ev_raw       landed 98 = typed 98 + rejected 0
+  content_dim  landed 30 = typed 30 + rejected 0
+
+=== FAILED: 2 load (tools/load.sh, unmodified) ===
+ev_raw holds 98 rows, the CSV has 99 data rows.
+A partial or doubled load is worse than no load: every downstream number would
+be plausible and wrong.

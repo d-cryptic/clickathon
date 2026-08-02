@@ -149,11 +149,19 @@ The invariant is unconditional: one user may hold several sessions, so users ≤
 minute and grain, always. It does not hold.
 
 ```
- violating cells on sonyliv     28
- worst excess                   +1   (2026-07-26 10:55)
- cells with sessions=0, users>0  0
- HEADLINE user peak 2,844  vs  session peak 2,917   ✓ correct
+ violating cells on sonyliv     82        ← CORRECTED, see below
+ worst excess                   +1
+ cells with sessions=0, users>0 63
+ HEADLINE user peak 2,844  vs  session peak 2,917   ✓ still correct
 ```
+
+⚠ **The orchestrator first published 28 and 0. Both were wrong.** The query joined `cc_user_minute`
+to `cc_minute_delta` on `minute` — but the delta table only carries rows at **change points**, so an
+inner join silently compares a dense table to a sparse one and only sees minutes where the level
+moved. Codex audit 005 caught it. The corrected figures are 82 cells with 63 at zero sessions.
+
+The severity verdict is unchanged — worst excess is still +1 and no total moves — but the sizing was
+wrong, and a wrong number offered as reassurance is worse than no number.
 
 Cause per T6: ADR 0012's first-wins dimension merge and ADR 0016's per-interval expansion disagree
 about attribution, so a user lands in a `(minute, dims)` bucket whose session deltas went elsewhere.
@@ -178,6 +186,43 @@ tail credit at explicit stops.
 **Neither is fixed.** `sql/30_build_intervals.sql` and `sql/90_reconcile.sql` are a shared-spec pair;
 changing one without the other makes the gate agree with a bug. That is a wave-2-style promotion, not
 a patch.
+
+## 🔴 Q36–Q39 · Open from the two Codex audits (005 dev-audit, 006 unseen rehearsal)
+
+### Q36 · Two more graded-write paths, both unguarded — **P0**
+
+The `REBUILD_GRADED` / `APPLY_GRADED_DESTRUCTIVE` guards cover `build-model.sh` and `apply-sql.sh`'s
+DROP/TRUNCATE. Codex 005 found they do **not** cover:
+
+- **`load.sh --replace`** against the graded database.
+- **Direct `apply-sql.sh` on a file whose statements are INSERT/CREATE** — deliberately ungated so
+  views and UDFs can be applied, which also means a file that *writes rows* passes freely.
+
+Same family as the two incidents. The guard was never meant to be the only line, and here it is not
+even present.
+
+### Q37 · The contract load and the real runner disagree about a valid file — **unseen-day risk**
+
+Codex 006: a valid CSV with an **embedded newline**, and a valid **new filter column**, are both
+accepted by the contract-gate load and then **rejected by the real runner**. So a file can pass the
+check that says "this file is fine" and fail the run. On a day with one attempt, a green pre-flight
+followed by a failed run is close to the worst sequence available.
+
+### Q38 · The runbook's timings understate by ~1.5× — **fix the number, not the code**
+
+Measured fresh: **70/67/71 s** for 6.9k/30k/850k builds, and **90/79/97 s** for the actual
+contract-first paths. The runbook quotes 47/54/58 s, which predates the contract step. Codex 006's
+verdict is the sentence to keep: *"At 3am, a correct submission is not guaranteed."*
+
+### Q39 · Two claims that do not hold, from Codex 005
+
+- **The decline-alert classifier's "semantic anchors" do not hold.** The merge message asserted
+  `hb_per_session < 1.0` sits below ADR 0007's measured 0.756/min paused rate and therefore cannot be
+  viewer behaviour. Codex checked and disagrees. **I repeated that claim in a merge message without
+  verifying it** — the pattern this repo keeps re-learning.
+- **`docs/BUSINESS_RULES.md` contains stale and arithmetically false statements**, despite its CPM
+  calculation being correct. A commercial reader checking one figure is exactly the audience that
+  will find them.
 
 ## 🔴 Q33 · `build-model.sh` and `reconcile.sh` still carry bug 11 — found INDEPENDENTLY by two agents
 

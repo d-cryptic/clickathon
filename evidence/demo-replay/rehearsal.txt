@@ -1,0 +1,192 @@
+──────────────────────────────────────────────────────────────────────────────
+REPLAY — a live-event day, ingested in event-time order
+  target        local   ·   scratch database   sonyliv_t7replay
+  source        default.ev_raw   (READ-ONLY — loaded from the provided CSV)
+  window        2026-07-26 09:00:00  ->  2026-07-26 11:31:00
+  compression   60x  (1 wall-clock second = 60 event-seconds)
+
+  WHAT THIS IS NOT: a scratch database, not the graded service. The graded
+  database sonyliv is BATCH-REBUILT and its publisher has committed ZERO
+  runs. Nothing here is running in the graded service. See demo/REPLAY.md.
+──────────────────────────────────────────────────────────────────────────────
+
+▶ SETUP  (one-time; --resume skips this)
+  created database sonyliv_t7replay
+  applied sql/00, 10, 12, 20, 45, 50 (canonical, unmodified)
+  staged 905,558 events · 10,866 sessions from default.ev_raw
+  withheld 37 sessions (5,097 events) — they arrive late, mid-replay
+  preloaded 88,591 events of history (everything before 2026-07-26 09:00:00)
+  bootstrapping the serving layer through tools/publish.sh …
+    == run 1785622393634  ·  601 session(s) claimed  ·  cursor 1970-01-01 00:00:00.000 -> 2026-08-01 22:13:09.547
+       negated   0 corrective delta rows   49 ms
+       derived   2012 intervals   202 ms   (window 2026-07-14 15:43:58.144 .. 2026-07-26 08:59:59.675)
+       pruned    superseded intervals   68 ms
+       emitted   2498 delta rows   73 ms
+       hours     3962 hour-cube rows re-derived   44 ms
+       users     12646 user-minute buckets re-derived   50 ms
+       committed cursor now 2026-08-01 22:13:09.547
+  setup took 8s
+
+──────────────────────────────────────────────────────────────────────────────
+▶ REPLAY RUNNING  ·  expect ~151s of wall clock  ·  ctrl-c to stop
+  tools/publish.sh --loop 1 is now running against sonyliv_t7replay (pid 64301).
+  The curve below moves ONLY because that finalizer is running. Nothing is
+  rebuilt: every update is -deltas(old) + deltas(new) for the sessions that
+  received events since the publisher's cursor (ADR 0013).
+
+  legend   replay-clock→absorbed-through │curve│ cc=concurrent at the
+           absorbed edge · lag=publish lag (wall) · q=queue depth (sessions)
+           '·' not yet reached   '~' sample landed mid-publish (ADR 0023)
+           The curve is LOG-SCALED (this day spans 30x); cc and the peak are
+           printed as numbers. The two clocks differ by the publisher's lag —
+           that gap is the honest freshness number, shown, not smoothed away.
+──────────────────────────────────────────────────────────────────────────────
+09:00→09:00  │▄···············································│ cc 24     pk 24     lag 0s   q 0    
+09:03→09:00  │▄···············································│ cc 24     pk 24     lag 9s   q 32   
+09:06→09:00  │▄···············································│ cc 24     pk 24     lag 12s  q 37   
+09:09→09:02  │▄···············································│ cc 25     pk 29     lag 6s   q 40   
+09:12→09:05  │▁█··············································│ cc 28     pk 30     lag 6s   q 44   
+09:16→09:08  │▁▆█·············································│ cc 31     pk 34     lag 7s   q 49   
+09:19→09:11  │▁▄█▇············································│ cc 35     pk 39     lag 7s   q 50   
+09:22→09:15  │▁▄█▇▆···········································│ cc 37     pk 39     lag 6s   q 39   
+09:25→09:18  │▁▃▇▆▆█··········································│ cc 40     pk 40     lag 6s   q 45   
+09:28→09:21  │▁▃▇▆▆█▆·········································│ cc 31     pk 40     lag 6s   q 47   
+09:31→09:24  │▁▃▇▆▆█▆▆········································│ cc 37     pk 40     lag 6s   q 52   
+09:34→09:27  │▁▃▆▆▅▇▆█▆·······································│ cc 36     pk 41     lag 6s   q 53   
+09:37→09:30  │▁▃▅▅▄▆▅▆▆█······································│ cc 42     pk 45     lag 6s   q 51   
+09:41→09:33  │▁▃▅▅▄▆▅▆▆█▇·····································│ cc 44     pk 45     lag 7s   q 58   
+09:44→09:36  │▁▃▅▅▄▆▅▆▆██▇····································│ cc 44     pk 45     lag 7s   q 56   
+09:47→09:40  │▁▂▅▅▄▅▅▆▆▇▇▇█···································│ cc 46     pk 46     lag 6s   q 51   
+09:50→09:43  │▁▂▅▅▄▅▅▆▆▇▇▇█▇··································│ cc 41     pk 46     lag 6s   q 40   
+09:53→09:46  │▁▂▅▅▄▅▅▆▆▇▇▇█▇▅·································│ cc 38     pk 46     lag 6s   q 44   
+09:56→09:49  │▁▂▅▅▄▅▅▆▆▇▇▇█▇▅▃································│ cc 35     pk 46     lag 6s   q 43   
+09:59→09:52  │▁▂▅▅▄▅▅▆▆▇▇▇█▇▅▃▂·······························│ cc 33     pk 46     lag 6s   q 43   
+10:03→09:55  │▁▂▅▅▄▅▅▆▆▇▇▇█▇▅▃▃▃······························│ cc 34     pk 46     lag 7s   q 55   
+10:06→09:58  │▁▂▅▅▄▅▅▆▆▇▇▇█▇▅▃▃▃▃·····························│ cc 34     pk 46     lag 7s   q 58   
+10:09→10:02  │▁▂▅▅▄▅▅▆▆▇▇▇█▇▅▃▃▃▄▅····························│ cc 39     pk 46     lag 6s   q 56   
+10:12→10:05  │▁▂▅▅▄▅▅▆▆▇▇▇█▇▅▃▃▃▄▅▇···························│ cc 44     pk 46     lag 6s   q 74   
+10:15→10:08  │▁▂▄▄▃▄▄▅▅▆▆▅▆▅▄▃▃▃▃▄▅█··························│ cc 52     pk 52     lag 6s   q 86   
+10:18→10:11  │▁▂▃▃▃▃▃▃▃▄▄▄▄▄▃▂▂▂▃▃▄▆█·························│ cc 67     pk 67     lag 6s   q 103  
+10:21→10:14  │▁▂▃▃▂▃▃▃▃▄▄▄▄▄▃▂▂▂▂▃▄▆█▇························│ cc 67     pk 69     lag 6s   q 109  
+10:25→10:17  │▁▁▂▂▂▂▂▃▃▃▃▃▃▃▂▂▂▂▂▂▃▅▆▆█·······················│ cc 90     pk 90     lag 7s   q 128  
+10:28→10:20  │▁▁▂▂▂▂▂▃▃▃▃▃▃▃▂▂▂▂▂▂▃▅▆▆▇█······················│ cc 95     pk 95     lag 7s   q 129  
+10:31→10:24  │▁▁▂▂▂▂▂▂▂▃▃▃▃▃▂▂▂▂▂▂▃▄▅▅▇▇█·····················│ cc 104    pk 105    lag 6s   q 369  
+10:34→10:24  │▁▁▂▂▂▂▂▂▂▃▃▃▃▃▂▂▂▂▂▂▃▄▅▅▇▇█·····················│ cc 103    pk 105    lag 9s   q 1,079
+10:37→10:30  │▁▁▁▁▁▁▁▂▂▂▂▂▂▂▁▁▁▁▁▁▂▃▃▃▄▄▄▄█···················│ cc 299    pk 299    lag 6s   q 1,772
+
+  ▸ FILTER BEAT — the stream is still landing; the minute-grain view answers now.
+    Filtering the newest SERVED minute, 10:30 (the clock is at 10:37 — that gap is publish lag).
+       ┌─platform──────────┬─concurrent─┐
+    1. │ ANDROID_PHONE     │        204 │
+    2. │ IPHONE            │         43 │
+    3. │ SONY_ANDROID_TV   │         19 │
+    4. │ JIO_ANDROID_TV    │         17 │
+    5. │ XIAOMI_ANDROID_TV │          5 │
+    6. │ SAMSUNG_HTML_TV   │          5 │
+       └───────────────────┴────────────┘
+    platform breakdown — 134 ms, read from cc_minute_delta (the serving table, not events).
+       ┌─country─┬─concurrent─┐
+    1. │ india   │        299 │
+       └─────────┴────────────┘
+    country breakdown — 28 ms, read from cc_minute_delta (the serving table, not events).
+
+10:41→10:33  │▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▂▂▃▃▃▃▇█··················│ cc 874    pk 874    lag 7s   q 2,354
+10:44→10:36  │▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▂▂▃▃▃▃▆▇█·················│ cc 1,373  pk 1,373  lag 7s   q 2,686
+10:48→10:40  │▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▂▂▂▃▃▃▆▇▇█················│ cc 1,868  pk 1,868  lag 7s   q 3,639
+
+  ▸ LATE ARRIVAL — 37 sessions that closed by 2026-07-26 10:20:00 are only arriving now.
+    Minute 2026-07-26 09:58:00 has already scrolled past. It currently serves 35.
+    21 of the withheld sessions have events spanning it (how many of
+    those minutes are FOREGROUND-ACTIVE is the model's call, not the span's).
+    Injecting …
+    injected. Watch the 'probe' line: the publisher will correct that minute
+    IN PLACE — no rebuild, no truncate, just -deltas(old) + deltas(new).
+
+        probe 2026-07-26 09:58:00: 35  (waiting for the publisher to claim the arrivals)
+10:52→10:40  │▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▂▂▂▃▃▃▅▇▇█················│ cc 1,909  pk 1,909  lag 11s  q 4,183
+        probe 2026-07-26 09:58:00: 35  (waiting for the publisher to claim the arrivals)
+10:55→10:40~ │▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▂▂▂▃▃▃▅▇▇█················│ cc 1,909  pk 1,909  lag 11s  q 4,189
+        probe 2026-07-26 09:58:00: ~ publish in flight, not sampled (ADR 0023)
+10:59→10:47~ │▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▂▂▂▃▃▃▅▇▇█················│ cc 1,909  pk 1,909  lag 11s  q 4,326
+        probe 2026-07-26 09:58:00: ~ publish in flight, not sampled (ADR 0023)
+11:02→10:51~ │▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▂▂▂▃▃▃▅▇▇█················│ cc 1,909  pk 1,909  lag 10s  q 4,476
+        probe 2026-07-26 09:58:00: ~ publish in flight, not sampled (ADR 0023)
+11:06→10:54  │▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▂▂▂▂▂▂▂▂▅▆▇▇▇▇▇█▇···········│ cc 2,765  pk 2,771  lag 11s  q 3,660
+        probe 2026-07-26 09:58:00: 35 → 46  (+11, corrected in place — no rebuild)
+11:10→11:01  │▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▂▂▂▂▂▂▂▂▅▆▇▇▇▇▇▇█▇▇·········│ cc 2,821  pk 2,917  lag 8s   q 4,479
+        probe 2026-07-26 09:58:00: 35 → 51  (+16, corrected in place — no rebuild)
+11:13→11:05  │▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▂▂▂▂▂▂▂▂▅▆▇▇▇▇▇▇█▇▇▇········│ cc 2,684  pk 2,917  lag 7s   q 3,941
+        probe 2026-07-26 09:58:00: 35 → 51  (+16, corrected in place — no rebuild)
+11:17→11:09  │▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▂▂▂▂▂▂▂▂▅▆▇▇▇▇▇▇█▇▇▇▇▇······│ cc 2,500  pk 2,917  lag 7s   q 2,822
+        probe 2026-07-26 09:58:00: 35 → 51  (+16, corrected in place — no rebuild)
+11:20→11:12  │▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▂▂▂▂▂▂▂▂▅▆▇▇▇▇▇▇█▇▇▇▇▇······│ cc 2,285  pk 2,917  lag 7s   q 3,254
+        probe 2026-07-26 09:58:00: 35 → 51  (+16, corrected in place — no rebuild)
+11:23→11:16  │▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▂▂▂▂▂▂▂▂▅▆▇▇▇▇▇▇█▇▇▇▇▇▇▇····│ cc 1,991  pk 2,917  lag 7s   q 2,666
+        probe 2026-07-26 09:58:00: 35 → 51  (+16, corrected in place — no rebuild)
+11:27→11:19  │▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▂▂▂▂▂▂▂▂▅▆▇▇▇▇▇▇█▇▇▇▇▇▇▇▇···│ cc 1,761  pk 2,917  lag 7s   q 2,336
+        probe 2026-07-26 09:58:00: 35 → 51  (+16, corrected in place — no rebuild)
+11:30→11:22  │▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▂▂▂▂▂▂▂▂▅▆▇▇▇▇▇▇█▇▇▇▇▇▇▇▇▆··│ cc 1,389  pk 2,917  lag 6s   q 1,743
+        probe 2026-07-26 09:58:00: 35 → 51  (+16, corrected in place — no rebuild)
+11:31→11:26  │▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▂▂▂▂▂▂▂▂▅▆▇▇▇▇▇▇█▇▇▇▇▇▇▇▇▆▆·│ cc 867    pk 2,917  lag 6s   q 768  
+        probe 2026-07-26 09:58:00: 35 → 51  (+16, corrected in place — no rebuild)
+11:31→11:29  │▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▂▂▂▂▂▂▂▂▅▆▇▇▇▇▇▇█▇▇▇▇▇▇▇▇▆▆▅│ cc 427    pk 2,917  lag 3s   q 8    
+        probe 2026-07-26 09:58:00: 35 → 51  (+16, corrected in place — no rebuild)
+11:31→11:30  │▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▂▂▂▂▂▂▂▂▅▆▇▇▇▇▇▇█▇▇▇▇▇▇▇▇▆▆▅│ cc 197    pk 2,917  lag 0s   q 0    
+        probe 2026-07-26 09:58:00: 35 → 51  (+16, corrected in place — no rebuild)
+
+──────────────────────────────────────────────────────────────────────────────
+▶ REPLAY COMPLETE
+──────────────────────────────────────────────────────────────────────────────
+  ingested       905,558 events in 47 ticks over 160s wall clock
+                 (9060s of event time at 60x compression)
+  publisher      47 committed runs, 44,048 session-derivations
+  serving layer  46,628 delta rows · 30,323 intervals
+  peak served    2,917 at 2026-07-26 10:56:00
+
+  NOT ONE ROW WAS REBUILT. tools/build-model.sh never ran; no TRUNCATE was
+  issued. Every number above was reached by incremental correction.
+
+  ADR 0023 — publish visibility, measured live during this run:
+    samples taken                 50
+    landed mid-publish (phase)    3   — charted as '~', value carried forward
+    caught by the drop guard      0   — marker race, see the note in this script
+    deepest dip NOT charted       -86%  (1,909 → 259)
+    That collapse is real and transient: between 'negated' and 'emitted' the
+    serving table holds -deltas(old) with no +deltas(new) yet. It converges
+    every time. We refuse to chart it and we refuse to hide it.
+
+  LATE ARRIVAL — minute 2026-07-26 09:58:00: 35 → 51 (+16),
+  corrected in place by the finalizer. The rebuild path was never invoked.
+
+▶ IS IT RIGHT? — the committed gate (sql/90_reconcile.sql) against this database.
+  Truth is recomputed FROM ev_raw with a different algorithm; it never reads
+  the serving layer. Any disagreeing minute fails.
+
+     ┌─ord─┬─scope───┬─c1─────────────────────┬─c2───────────┬─c3─────────────┬─c4────────┬─verdict─┐
+  1. │   0 │ SUMMARY │ minutes_compared=17028 │ mismatched=0 │ max_abs_diff=0 │ peak=2917 │ PASS    │
+  2. │   2 │ sample  │ 2026-07-14 15:43:00    │ 1            │ 1              │ 0         │ PASS    │
+  3. │   2 │ sample  │ 2026-07-16 12:35:00    │ 0            │ 0              │ 0         │ PASS    │
+  4. │   2 │ sample  │ 2026-07-17 08:56:00    │ 0            │ 0              │ 0         │ PASS    │
+  5. │   2 │ sample  │ 2026-07-26 10:56:00    │ 2917         │ 2917           │ 0         │ PASS    │
+  6. │   2 │ sample  │ 2026-07-26 11:30:00    │ 197          │ 197            │ 0         │ PASS    │
+     └─────┴─────────┴────────────────────────┴──────────────┴────────────────┴───────────┴─────────┘
+
+  ✓ reconcile PASSED — the incrementally-published curve you just watched
+    being built agrees with an independent recompute from raw events, at
+    every minute compared.
+
+──────────────────────────────────────────────────────────────────────────────
+HONESTY — what this run does and does not prove
+  DOES:      the incremental publisher can absorb a live stream and late
+             arrivals, keep a minute-grain serving layer current, answer
+             filtered queries in milliseconds, and stay reconcilable.
+  DOES NOT:  say anything about the graded service. sonyliv_t7replay is a scratch
+             database built by this script. The graded database sonyliv is
+             BATCH-REBUILT; its publisher has committed ZERO runs and its
+             cursor is at epoch. Time here is compressed 60x, and
+             PUBLISH_SETTLE_S=3 (the floor on publish lag) is
+             lower than the default 5. Full detail: demo/REPLAY.md.
+  total wall clock  169s
+──────────────────────────────────────────────────────────────────────────────
+
+transcript: evidence/demo-replay/rehearsal.txt

@@ -219,20 +219,104 @@ the day would be counted twice. Drop the database, or unset UNSEEN_NO_RESET."
 fi
 say "preflight ok · server $(q1 "SELECT version()") · database ${DB} ready and empty"
 
-# CSV shape. A changed header on a new day is the single likeliest surprise, and
-# load.sh maps columns POSITIONALLY through input(...), so a reordered, renamed
-# or extended header loads garbage without erroring. Quoting is a CSV detail
-# (CSVWithNames accepts either), so normalise that but compare everything else.
-EXPECTED_HDR='content_id,video_session_id,user_id,event_type,event,event_timestamp,platform,app_version,country,audio_language,subtitle_language,player_version,session_start_epoch'
-ACTUAL_HDR="$(head -1 "$RAW" | tr -d '\r"' | tr -d ' ')"
-if [ "$ACTUAL_HDR" != "$EXPECTED_HDR" ]; then
-  die "raw CSV header does not match what tools/load.sh inserts.
-expected: $EXPECTED_HDR
-actual  : $ACTUAL_HDR
-Columns are mapped by POSITION, not by name. Fix the loader before continuing."
+# CSV SHAPE — read the file the way the LOADER reads it, not the way `head` and
+# `wc` do.
+#
+# This block used to do by hand two things a CSV parser does correctly, and both
+# refused files tools/load.sh accepts. Measured, Q37 (evidence/q37/):
+#
+#   1. It compared the header against a fixed 13-column string. Since ADR 0024
+#      the loader maps columns BY NAME and carries unknown ones into the `extra`
+#      Map: a file with a 14th column `experiment_id` loads clean and every row
+#      keeps it as extra['experiment_id'] (128/128 rows). The comment that used
+#      to sit here — "mapped by POSITION, not by name" — stopped being true when
+#      analyse_header() landed, and the guard outlived its own reason.
+#   2. It counted data rows as `wc -l` minus one. RFC-4180 permits a quoted
+#      embedded newline; ClickHouse's CSVWithNames reads that as ONE record and
+#      `wc -l` sees two. The row-count assert below then killed a load that had
+#      been perfect: 98 real records, `wc -l` said 99, and ev_raw held
+#      98 = typed 98 + rejected 0 when the harness declared it partial.
+#
+# THE AUTHORITY IS tools/load.sh. This preflight exists to fail fast, before an
+# hour of derivation is spent, and is deliberately a STRICT SUBSET of
+# analyse_header()'s refusal rules: it stops only on what no flag can rescue.
+# Anything subtler — a missing non-essential column, a rename — is ANNOUNCED
+# here and refused at phase 2 by the loader itself, with the precise message and
+# the --allow-missing hint. A preflight that refuses what the loader accepts is
+# the defect this replaced; a preflight quieter than the loader is safe, because
+# the loader still runs a few lines later and still refuses.
+SHAPE_ENV="$TMP/raw-shape.env"
+set +e
+python3 - "$RAW" "$SHAPE_ENV" 2>"$TMP/raw-shape.err" <<'PY'
+import csv, re, sys
+
+path, out = sys.argv[1], sys.argv[2]
+KNOWN = ["content_id", "video_session_id", "user_id", "event_type", "event",
+         "event_timestamp", "platform", "app_version", "country",
+         "audio_language", "subtitle_language", "player_version",
+         "session_start_epoch"]
+# analyse_header()'s NEVER_DEFAULT for ev_raw: no flag overrides these two,
+# because no interval can be derived without them.
+NEVER_DEFAULT = ["event_timestamp", "video_session_id"]
+
+err = lambda *a: print(*a, file=sys.stderr)
+
+# utf-8-sig, because a BOM on the first cell would otherwise rename content_id
+# to '﻿content_id' and report a missing column that is plainly present.
+with open(path, newline="", encoding="utf-8-sig") as f:
+    r = csv.reader(f)
+    try:
+        header = next(r)
+    except StopIteration:
+        err("REFUSING: the raw CSV is empty — no header row")
+        sys.exit(3)
+    rows = sum(1 for _ in r)   # RFC-4180 records; a quoted newline stays one row
+
+new     = [c for c in header if c not in KNOWN]
+missing = [c for c in KNOWN if c not in header]
+dupes   = sorted({c for c in header if header.count(c) > 1})
+badname = [c for c in new if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", c)]
+hard    = [c for c in missing if c in NEVER_DEFAULT]
+
+fatal = []
+if hard:
+    fatal.append("missing columns no flag overrides: " + ", ".join(hard))
+if dupes:
+    fatal.append("duplicate header columns: " + ", ".join(dupes))
+if badname:
+    fatal.append("new column names that are not plain identifiers: "
+                 + ", ".join(repr(c) for c in badname))
+if fatal:
+    for f_ in fatal:
+        err("REFUSING: " + f_)
+    sys.exit(3)
+
+if new:
+    err(f"NEW columns ({len(new)}): {', '.join(new)}"
+        f" -> carried into `extra`, queryable as extra['{new[0]}'] (ADR 0024)")
+if missing:
+    err(f"MISSING columns ({len(missing)}): {', '.join(missing)}")
+    err("  -> not fatal here; tools/load.sh decides at phase 2 and refuses unless")
+    err(f"     you pass --allow-missing {','.join(missing)}")
+if not new and not missing and [c for c in header if c in KNOWN] != KNOWN:
+    err("columns REORDERED — safe, the loader maps by name")
+
+with open(out, "w") as f:
+    f.write(f"CSV_ROWS={rows}\n")
+    f.write("CSV_NEW='" + " ".join(new) + "'\n")
+    f.write("CSV_MISSING='" + " ".join(missing) + "'\n")
+PY
+SHAPE_RC=$?
+set -e
+say "raw CSV shape (tools/load.sh analyse_header is the authority at phase 2):"
+if [ -s "$TMP/raw-shape.err" ]; then say "$(sed 's/^/  /' "$TMP/raw-shape.err")"; fi
+if [ "$SHAPE_RC" -ne 0 ]; then
+  die "the raw CSV shape is refused by a rule no flag overrides — see above.
+Nothing was loaded. Fix the file, not the guard."
 fi
-CSV_ROWS=$(( $(wc -l < "$RAW") - 1 ))
-say "raw CSV header matches the loader · ${CSV_ROWS} data rows"
+. "$SHAPE_ENV"
+say "  ${CSV_ROWS} CSV data records — counted as RFC-4180 records, not lines:"
+say "    a quoted embedded newline is ONE row here and two to \`wc -l\` (Q37)."
 
 # FINGERPRINT. sql/ is edited by other people while this runs — it was, during
 # the 2026-08-01 rehearsal (10/30/40 gained four dimensions mid-run). Evidence
@@ -328,6 +412,62 @@ ambiguous for the colliding value. Read the list, then re-run with
 UNSEEN_ACK_SENTINEL=1."
   fi
   say "  UNSEEN_ACK_SENTINEL=1 — acknowledged, continuing."
+fi
+
+# ---------------------------------------------------------------------------
+phase "2b SOURCE CONTRACT — is this file what we think it is?"
+# Wired in 2026-08-02 after Codex audit 005 found the gap: ADR 0026's gate
+# existed and docs/RUNBOOK_UNSEEN.md invoked it as a MANUAL step, but this
+# script — the advertised one-command path, and the one anybody actually runs
+# under time pressure — never called it. So the protection existed on paper and
+# not on the path.
+#
+# It must sit HERE: after the load (the probes query ev_raw) and BEFORE the
+# model is derived. Running it later would mean discovering the file was wrong
+# after building an answer on it.
+#
+# The hazard this exists for: a seconds-valued event_timestamp is divided by
+# 1000 at load, lands in 1970, the model derives intervals there quite happily,
+# and THE GATE STAYS GREEN — truth and serving agree, both in the wrong year.
+# Probe 3 (toYear NOT BETWEEN 2020 AND 2035) is what catches it.
+if [ -x tools/validate-source-contract.sh ]; then
+  # -c unconditionally, because every connection this script makes is Cloud:
+  # q()/qsys() post to https://$CH_HOST:$CH_PORT, run_file() uses --secure on
+  # port 9440, and phase 2 invokes the loader with a literal TARGET=cloud.
+  #
+  # The line here used to read `[ "$TARGET" = cloud ] && CONTRACT_ARGS="-c"`.
+  # TARGET is not set by .env and is not exported anywhere in this script, so
+  # under `set -euo pipefail` that aborted the whole run with "TARGET: unbound
+  # variable" — and even with TARGET=local exported, the `&&` list returns 1 as
+  # a complete statement and `set -e` kills the run just the same. Only
+  # TARGET=cloud in the caller's environment survived the line. Measured, Q37.
+  #
+  # The consequence is worth stating plainly: the source-contract gate wired in
+  # here after Codex audit 005 — precisely to stop the protection existing "on
+  # paper and not on the path" — could not execute in the default invocation.
+  # It was on the path and still never ran.
+  CONTRACT_ARGS="-c"
+  if tools/validate-source-contract.sh $CONTRACT_ARGS --database "$DB" 2>&1 | tee -a "$OUT"; then
+    say "  source contract: no FAIL — proceeding to derive the model."
+  else
+    if [ "${UNSEEN_ACK_CONTRACT:-}" != 1 ]; then
+      die "the source-contract gate reported a FAIL on '$DB'.
+
+Read the verdict above against the committed baseline
+(evidence/source-contract/baseline-sonyliv-2026-08-02.txt). A FAIL means the
+file is not the shape we believe it is, and every number derived from it
+inherits that. The reconcile gate CANNOT catch this class — it compares our
+model against our own re-derivation, so a file-level fault makes both wrong
+together and both agree.
+
+If you have read the verdict and decided to proceed anyway:
+  UNSEEN_ACK_CONTRACT=1 $0 $*"
+    fi
+    say "  UNSEEN_ACK_CONTRACT=1 — FAIL acknowledged, continuing deliberately."
+  fi
+else
+  say "  ⚠ tools/validate-source-contract.sh not present or not executable — SKIPPED."
+  say "    The unseen file is being trusted unchecked. This is a gap, not a pass."
 fi
 
 # ---------------------------------------------------------------------------

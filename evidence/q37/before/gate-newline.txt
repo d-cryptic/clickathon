@@ -1,0 +1,29 @@
+source-contract gate (ADR 0026, read-only) — target=cloud database=sonyliv_q37_newline vocabulary=47 pairs
+  sev   probe                                                       count  note
+  FAIL  ev_raw is empty                                                  0  nothing to validate — wrong file, wrong database, or a failed load
+  FAIL  timestamp outside 2020..2035                                     0  epoch-zero or millis-not-divided; raw span 2026-08-22 09:00:00.512 -> 2026-08-22 09:15:00.900
+  FAIL  epoch-zero session_start_epoch                                   0  
+  FAIL  empty identity (session or user id)                              0  rows the session/user tiers cannot attribute
+  FAIL  unknown event_type (outside the 7)                               0  
+  FAIL  expected columns missing from ev_raw                             0  
+  WARN  columns beyond the 13-column contract                            1  extra — DDL drift vs sql/00_schema.sql; CSV-header shape is the loader\'s phase-0 check (T1)
+  WARN  vocabulary drift: unknown event values                           0  
+  WARN  reused video_session_id (>1 session_start_epoch)                 0  two lifecycles under one id merge into one session
+  WARN  events before declared session start                             0  sessions; the model derives starts from event timestamps, not this column
+  WARN  future-dated events (> now + 5 min)                             98  wall-clock skew; synthetic rehearsal days trip this by design
+  WARN  VideoSessionEnd before VideoSessionStart                         0  sessions; out-of-order lifecycle markers
+  WARN  multiple VideoSessionEnd in one session                          0  sessions; the end marker is an idempotent hard stop in the model
+  WARN  tied dimensions at one (session, timestamp)                      0  0% of groups disagree on platform/country/content — ADR 0009 vote assumes this is rare
+  WARN  exact duplicate rows (retry copies)                              0  dedup proven inert for totals/peak but NOT at filter grain (doubts/06)
+  WARN  sentinel collision: content_id = -1 events                       0  cube rows are safe (cube_level, ADR 0022) but the p_* = -1 query API stays ambiguous (R9)
+  WARN  literal * in platform or country                                 0  collides with the all-rollup sentinel of the query API (sql/85_windows.sql)
+  WARN  event content_id absent from content_dim                         0  distinct ids; they serve (unknown) titles, joins do not error (R10)
+  WARN  conflicting content_dim definitions                              0  ReplacingMergeTree picks arbitrarily between conflicting rows
+  WARN  dimension column entirely empty                                  0  
+  INFO  rows                                                            98  
+  INFO  sessions / users                                                 4  4 distinct users
+  INFO  span (minutes)                                                  15  2026-08-22 09:00:00.512 -> 2026-08-22 09:15:00.900
+  INFO  event_type histogram                                             4  VideoHeartbeat:87 VideoSessionEnd:4 VideoSessionStart:4 VideoPlay:3
+  INFO  distinct content ids                                             1  platforms 1 - countries 1
+
+VERDICT: WARN — 0 failures, 2 warning(s). Proceed with eyes open; diff the WARN rows against evidence/source-contract/.
