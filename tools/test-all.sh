@@ -37,6 +37,7 @@ done
 
 # name | script | slow? | what it proves
 SUITES=$(cat <<'LIST'
+policy|tools/policy.sh check|0|sql/01_policy.sql is current, the covers exceed TAIL_S, no consumer kept a literal
 go-unit|make test|0|Go: the reconcile parser, config resolution, OTLP emitter, pipeline health
 golden|tools/golden-gen.sh|0|11 cohorts whose answers are computed OUTSIDE the pipeline
 property|PROP_COMPAT=1 tools/property-test.sh|0|random sessions vs an independent reference interpreter; batch invariance

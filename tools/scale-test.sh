@@ -221,7 +221,7 @@ hr
 say "PHASE 0 — 1x REAL baseline (the provided file, not synthetic)"
 qd default "DROP DATABASE IF EXISTS $REAL_DB" >/dev/null
 qd default "CREATE DATABASE $REAL_DB" >/dev/null
-for f in sql/00_schema.sql sql/10_intervals.sql sql/20_views.sql; do
+for f in sql/00_schema.sql sql/01_policy.sql sql/10_intervals.sql sql/20_views.sql; do
   docker exec -i ch clickhouse-client --database "$REAL_DB" --multiquery < "$f" >/dev/null 2>&1
 done
 RAW_COLS='content_id Int64, video_session_id String, user_id String, event_type String, event String, event_timestamp UInt64, platform String, app_version String, country String, audio_language String, subtitle_language String, player_version String, session_start_epoch UInt64'
@@ -628,7 +628,7 @@ for N in "${SCALES[@]}"; do
 
   qd default "DROP DATABASE IF EXISTS $DBN" >/dev/null
   qd default "CREATE DATABASE $DBN" >/dev/null
-  for f in sql/00_schema.sql sql/10_intervals.sql sql/20_views.sql; do
+  for f in sql/00_schema.sql sql/01_policy.sql sql/10_intervals.sql sql/20_views.sql; do
     docker exec -i ch clickhouse-client --database "$DBN" --multiquery < "$f" >/dev/null 2>&1
   done
   for t in gen_lut gen_content gen_ev gen_start content_dim; do

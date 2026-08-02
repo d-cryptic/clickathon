@@ -36,26 +36,30 @@
 -- ============================================================================
 
 WITH
-    150 AS GAP_S,
-    60  AS TAIL_S,
-    -- MUST MATCH sql/30_build_intervals.sql. Changing one without the other is
-    -- a spec divergence, and this gate WILL catch it — verified: flipping the
-    -- model to permissive while leaving this at 1 produces 240 mismatched
-    -- minutes, max_abs_diff 156. That is the gate working as intended, not a
-    -- bug, but it means the unclosed-pause rule is a TWO-FILE change.
-    -- Sharing the CONSTANT is correct; sharing the IMPLEMENTATION would not be
-    -- — truth is still derived from ev_raw with different code.
-    1 AS UNCLOSED_PAUSE_TO_RUN_END,
-    -- MUST MATCH sql/30_build_intervals.sql — the third shared constant, and the
-    -- one that most needs to be shared, because the filter it controls lived in
-    -- BOTH files verbatim. That is why the gate could not see the defect ADR
-    -- 0031 fixes: model and gate dropped the same zero-length segments, agreed
-    -- perfectly, and the agreement proved nothing. Sharing the CONSTANT is
-    -- correct; sharing the IMPLEMENTATION is not, and truth below is still
-    -- derived from ev_raw with window functions rather than arraySplit.
-    -- Verified as a live tripwire, not a comment: model at 1 against gate at 0
-    -- gives 80 mismatched minutes, max_abs_diff 16.
-    0 AS POINT_ACTIVITY_COUNTS,
+    -- ---- THE POLICY (ADR 0032) ----------------------------------------------
+    -- The gate SHARES THE SPEC with sql/30_build_intervals.sql and does NOT
+    -- share the implementation — truth below is still derived from ev_raw with
+    -- window functions where the model uses arraySplit, so an error in either
+    -- surfaces as a disagreement instead of cancelling out.
+    --
+    -- Until ADR 0032 "shares the spec" meant "carries its own copy of the same
+    -- four literals". That copy was the problem: model and gate agreed BY
+    -- CONSTRUCTION on the parameter, so `reconcile is green` never meant `the
+    -- parameters are right`. Both now read the one declaration in
+    -- policy/model.policy, which restores the gate's independence on
+    -- everything EXCEPT the parameter and makes the parameter's role explicit
+    -- rather than incidental (ADR 0028 item 4).
+    --
+    -- These constants remain LIVE TRIPWIRES for a spec divergence, and they
+    -- have been verified as such: the model at permissive against the gate at
+    -- conservative gives 240 mismatched minutes, max_abs_diff 156; the model at
+    -- POINT_ACTIVITY_COUNTS=1 against the gate at 0 gives 80 mismatched
+    -- minutes, max_abs_diff 16. What changed is that you can no longer create
+    -- that divergence by editing one file — you have to edit two builds.
+    (SELECT gap_s                     FROM v_model_policy) AS GAP_S,
+    (SELECT tail_s                    FROM v_model_policy) AS TAIL_S,
+    (SELECT unclosed_pause_to_run_end FROM v_model_policy) AS UNCLOSED_PAUSE_TO_RUN_END,
+    (SELECT point_activity_counts     FROM v_model_policy) AS POINT_ACTIVITY_COUNTS,
 
     -- ---------------------------------------------------------------- truth --
     -- DISTINCT first: the file contains duplicate events at identical
@@ -245,6 +249,9 @@ WITH
 SELECT * FROM
 (
     -- 1 — the summary. reconcile.sh fails if minutes_compared is 0 or absent.
+    -- `policy` carries the version and content hash of the declaration this
+    -- verdict was produced under (ADR 0032), so a pasted gate result is
+    -- traceable to a policy without also pasting the tree it came from.
     SELECT
         0 AS ord,
         'SUMMARY' AS scope,
@@ -252,21 +259,23 @@ SELECT * FROM
         concat('mismatched=', toString(countIf(diff != 0)))                  AS c2,
         concat('max_abs_diff=', toString(max(abs(diff))))                    AS c3,
         concat('peak=', toString(max(truth)))                                AS c4,
-        if(countIf(diff != 0) = 0, 'PASS', 'MISMATCH')                       AS verdict
+        if(countIf(diff != 0) = 0, 'PASS', 'MISMATCH')                       AS verdict,
+        concat('policy=v', (SELECT policy_version FROM v_model_policy),
+               '/', (SELECT policy_hash FROM v_model_policy))                AS policy
     FROM compared
 
     UNION ALL
 
     -- 2 — every disagreeing minute, capped so a total break stays readable.
     SELECT 1, 'MISMATCH', toString(minute), toString(truth), toString(served),
-           toString(diff), 'MISMATCH'
+           toString(diff), 'MISMATCH', ''
     FROM compared WHERE diff != 0 ORDER BY abs(diff) DESC LIMIT 20
 
     UNION ALL
 
     -- 3 — derived sample minutes, as human-readable evidence.
     SELECT 2, 'sample', toString(c.minute), toString(c.truth), toString(c.served),
-           toString(c.diff), if(c.diff = 0, 'PASS', 'MISMATCH')
+           toString(c.diff), if(c.diff = 0, 'PASS', 'MISMATCH'), ''
     FROM compared AS c
     WHERE c.minute IN (SELECT minute FROM samples)
 )

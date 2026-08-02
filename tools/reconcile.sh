@@ -36,13 +36,34 @@ qf() {  # qf <file>  — run a multi-line file
     curl -sS --fail-with-body "https://${h}:${CH_PORT}/?database=${CH_DATABASE}&default_format=PrettyCompact" \
       --user "${CH_USER}:${CH_PASSWORD}" --data-binary "@$1"
   else
-    docker exec -i ch clickhouse-client --format PrettyCompact < "$1"
+    # --database was MISSING here (Codex validation 008 §4.4). The local branch
+    # ran the gate against whatever database the client defaults to, so
+    # `CH_DATABASE_LOCAL=scratch tools/reconcile.sh` reconciled `default`,
+    # printed PASS, and named the scratch database nowhere — a gate that cannot
+    # see the data it was pointed at. q() above (via tools/ch) always sent the
+    # database explicitly, so sections 2 and 3 of this report were reading a
+    # DIFFERENT database from section 1, the gate itself.
+    docker exec -i ch clickhouse-client \
+      --database "${CH_DATABASE_LOCAL:?CH_DATABASE_LOCAL unset — the local data lives in 'default'; set it in .env or export it}" \
+      --format PrettyCompact < "$1"
   fi
 }
 
 {
   echo "RECONCILE — serving layer vs ev_raw"
   echo "target: $TARGET   commit: $(git rev-parse --short HEAD 2>/dev/null || echo n/a)"
+  # The POLICY this verdict was produced under (ADR 0032). Two lines, because
+  # they answer two different questions: the first is what the TREE declares,
+  # the second is what the DATABASE was actually built with. They can differ —
+  # an unapplied sql/01_policy.sql is exactly that failure — and an answer that
+  # cannot name its policy is not traceable.
+  echo "policy (tree):     $(tools/policy.sh stamp 2>/dev/null || echo 'UNAVAILABLE')"
+  echo "policy (database): $(q "SELECT concat('v', policy_version, ' (', policy_hash, ') ',
+                                     arrayStringConcat(arrayMap(x -> concat(upper(x.1), '=', x.2),
+                                       arraySort(groupArray((key, value)))), ' '))
+                                FROM v_model_policy, v_model_policy_kv
+                                WHERE tier = 'model' GROUP BY policy_version, policy_hash
+                                FORMAT TSVRaw" 2>/dev/null || echo 'UNAVAILABLE — is sql/01_policy.sql applied?')"
   echo
   echo "== 1. THE GATE — truth recomputed from ev_raw, five minutes"
   echo "   (peak, both data boundaries, two arbitrary; any non-zero delta is a failure)"

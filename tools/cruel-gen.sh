@@ -55,13 +55,20 @@ gen_one() {
   local knob="$1"
   case " $ALL_KNOBS " in *" $knob "*) ;; *) die "unknown knob '$knob' (see: tools/cruel-gen.sh list)";; esac
   python3 - "$knob" <<'PY'
-import csv, random, sys
+import csv, os, random, sys
 from datetime import datetime, timezone
+
+sys.path.insert(0, os.path.join(os.getcwd(), "tools"))
+import policy_reader
 
 KNOB = sys.argv[1]
 random.seed(20260822)
 T0 = int(datetime(2026, 8, 22, 0, 0, 0, tzinfo=timezone.utc).timestamp())  # cruel day, UTC
-GAP_S, TAIL_S = 150, 60
+# The generator shapes hazards AROUND the model's thresholds (a silence just
+# over GAP_S, a tail just under TAIL_S), so it must use the model's values, not
+# a copy of them — docs/DYNAMIC_PARAMS.md §D2 counted this file as one of the
+# six sites that made every instrument share the fitted number. ADR 0032.
+GAP_S, TAIL_S = policy_reader.get_int("GAP_S"), policy_reader.get_int("TAIL_S")
 HB = ["network-activity", "buffer-health", "video-resize", "network-bandwidth",
       "BufferStart", "BufferEnd", "Seek", "video_forward"]
 HDR = ["content_id", "video_session_id", "user_id", "event_type", "event",
@@ -923,7 +930,7 @@ run_one() {
       # apply-sql.sh/load.sh rightly die when --database contradicts it. Make
       # the environment agree with the scratch target for these two calls.
       CH_DATABASE="$DB" TARGET=cloud tools/apply-sql.sh --database "$DB" \
-        sql/00_schema.sql sql/10_intervals.sql >> "$out" 2>&1
+        sql/00_schema.sql sql/01_policy.sql sql/10_intervals.sql >> "$out" 2>&1
       set +e
       CH_DATABASE="$DB" TARGET=cloud tools/load.sh --database "$DB" \
         "$raw" data/cruel-content.csv >> "$out" 2>&1
