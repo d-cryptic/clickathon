@@ -1,10 +1,10 @@
 # tests/edge — the executable edge-case matrix
 
-> **Summary:** Codex 003 §11's edge-case register turned into 26 hand-auditable golden fixtures
-> (§13.1), run through the REAL derivation (`sql/30_build_intervals.sql` + `sql/40_deltas.sql`,
+> **Summary:** Codex 003 §11's edge-case register turned into 29 hand-auditable golden fixtures
+> (§13.1), run through the REAL derivation (`sql/30_build_intervals.sql` + `sql/40_deltas.sql` + `sql/45_user_concurrency.sql`,
 > sed-templated, never reimplemented) in scratch db `edge_matrix` by `tools/edge-test.sh`. Every
 > expected interval and minute was derived **by hand from the spec, never from the model** — and
-> every fixture family is **sabotage-checked**: 9 named mutations of the production SQL each turn
+> every fixture family is **sabotage-checked**: 10 named mutations of the production SQL each turn
 > their paired fixture red (ledger below). Catalogue + the §11 rows deliberately NOT implemented:
 > `docs/TESTS.md` §H. Local-only; the graded `sonyliv` database is never named.
 
@@ -48,7 +48,7 @@ and prune phase are `tools/publish-test.sh` territory, deliberately not retested
 
 ## Sabotage ledger — measured 2026-08-02, all via the sed stream (disk never modified)
 
-The final clean rebuild in the same run is the reversion proof: all 26 fixtures green again.
+The final clean rebuild in the same run is the reversion proof: all 29 fixtures green again.
 
 | Mutation | What it breaks in the production SQL | Caught by | Result |
 |---|---|---|---|
@@ -61,6 +61,7 @@ The final clean rebuild in the same run is the reversion proof: all 26 fixtures 
 | `merge-off-by-one` | merge predicate `x.1 > acc.2` — breaks only the touching-minute merge | D02 | red ✓ |
 | `close-leaks-next-hour` | removes the ADR 0003 close-suppression at the hour's last minute | B06 | red ✓ |
 | `corr-drops-vanished` | correction negates only old rows whose (minute, dims) key still exists in the new build | L02 | red ✓ |
+| `user-fold-by-session` | folds multiple user identities under one session id, erasing the later user | U03 | red ✓ |
 
 Instructive miss, kept on record: `merge-off-by-one` was first paired with S08 and **survived** —
 S08's two intervals start in the *same* minute, so `x.1 > acc.2` still merges them. The mutation
@@ -75,3 +76,4 @@ green is telling you which hazard the fixture actually covers — listen to it.
 - `fixtures/o_ordering.sql` — O01–O05, §11.1 (same-second ties, arrival order, ends, duplicates)
 - `fixtures/l_late.sql` — L01–L04, §11.4 (extend, shrink, bridge/vanish, dimension flip)
 - `fixtures/d_dimensions.sql` — D01–D02, §11.5's derivation share (dominant vote, first-wins merge)
+- `fixtures/u_users.sql` — U01–U03, exact user distinctness (same user/multiple sessions and dimensions; multiple users/one session)

@@ -226,7 +226,7 @@ whose format matches what `tools/reconcile.sh` writes today — verified by diff
 `tools/edge-test.sh` · fixtures + harness doc in [tests/edge/](../tests/edge/README.md) · scratch db
 `edge_matrix`, local-only · run after any change to `sql/30_build_intervals.sql` or `sql/40_deltas.sql`.
 
-26 hand-auditable fixtures, one hazard each, run through the **real** derivation (sed-templated, never
+29 hand-auditable fixtures, one hazard each, run through the **real** derivation (sed-templated, never
 reimplemented). Expected intervals AND expected per-minute concurrency are **derived by hand from the
 spec** (ADR 0003/0007/0008/0009, `interval-math`) in each fixture header — never from the model, per
 Codex 003 §13.1. All 26 PASS on the shipped model (2026-08-02). Every family is sabotage-checked: 9
@@ -264,6 +264,9 @@ to rewrite.
 | L04 | §11.4 late dimension flip | attribution flips web→android with time unchanged; the old web tuple must net to zero per-platform |
 | D01 | §11.5 dominant + tie | vote 2:2:1 → tie broken by smallest value, deterministically (ADR 0009) |
 | D02 | §11.5 mid-session dim change | per-segment attribution at interval level; the minute-merge keeps the EARLIER platform (ADR 0008 first-wins, pinned including its weirdness) |
+| U01 | §11.5 exact users | one user on two simultaneous sessions in one dimension: sessions=2, users=1 |
+| U02 | §11.5 exact users across dimensions | one user on web+tv: total users=1 while sum(per-platform users)=2, proving user counts are not additive |
+| U03 | §11.5 multi-user session | one session id carries two users across a pause: sessions=1 and users=2 at the overlap minute; grouping only by session erases a viewer |
 
 **§11 rows deliberately NOT implemented here** — silent omission reads as coverage, so they are named:
 
@@ -282,9 +285,7 @@ to rewrite.
 - **§11.4** events older than queue TTL / watermark / compacted state; processor crash points; two
   concurrent finalizers; dedup-window expiry — all **publisher coordination**, owned by
   `tools/publish-test.sh` (ADR 0019); this matrix tests the correction *algebra*, not the protocol.
-- **§11.5** distinct-user counting (one user, two sessions/platforms in a minute) — the user tier
-  (`sql/45_user_concurrency.sql`) has no fixture here yet; covered at data scale by
-  `tools/publish-test.sh`'s four-tier convergence, not by a hand-derived golden. Catalog arrival /
+- **§11.5** catalog arrival /
   title-to-multiple-content-ids (dictionary layer, `80_content.sql`); case/spelling aliases and
   sentinels (the normalisation self-test in `15_normalise.sql` owns those).
 - **§11.6** operations (MV install order, parts explosion, mutation backlog, FINAL cost, dictionary
