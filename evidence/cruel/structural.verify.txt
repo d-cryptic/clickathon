@@ -1,0 +1,12 @@
+CRUEL VERIFY · knob structural · database cruel_scratch · 2026-08-01T19:21:28Z
+minutes compared 120 · TRUTH mismatches 0 · SPEC_ONLY divergences 0
+VERDICT: PASS — every TRUTH minute matches
+
+vocabulary probe (pairs in ev_raw missing from evidence/liveness/vocabulary.tsv):
+  none — every pair is inside the committed vocabulary
+
+user-vs-session tier at 17:30-17:50 (8 sessions, ONE user u_cr_multi):
+  session peak: 10  (designed: includes the 8 su* sessions)
+  cc_user_minute rows for u_cr_multi minutes: 34
+
+verify verdict: PASS · full detail above · evidence/cruel/structural.verify.txt

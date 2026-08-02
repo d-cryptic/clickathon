@@ -1,0 +1,107 @@
+# evidence/query-modes/correctness.txt — point vs interval, same truth
+# database=sonyliv_u3 (scratch, single generation, dev HEAD)  commit=504cda7  2026-08-01T21:29:08Z
+# READ-ONLY. Truth for the minute curve is v_cc_minute_series_total (the spine);
+# truth independent of the delta model is v_concurrency_minute_intervals (session expansion).
+
+== C1: FINDING F1 — the naive WITH FILL densify vs the minute spine ==
+#  docs/CONVENTIONS.md's densify recipe, applied ACROSS hour boundaries.
+#  A nonzero count here is the DEFECT, not a regression: interpolation carries
+#  a level into an hour that opened empty. Benchmark b06 fills ONE hour and is unaffected.
+   ┌─minutes_compared─┬─phantom_minutes─┬─hours_affected─┬─viewers_invented─┬─worst_overstatement─┐
+1. │             6108 │              10 │              1 │               10 │                   1 │
+   └──────────────────┴─────────────────┴────────────────┴──────────────────┴─────────────────────┘
+#  the affected minutes, with the independent interval-expansion truth alongside:
+    ┌────────dense.minute─┬─naive_fill─┬─spine─┬─interval_expansion_truth─┐
+ 1. │ 2026-07-24 13:00:00 │          1 │     0 │ 0                        │
+ 2. │ 2026-07-24 13:01:00 │          1 │     0 │ 0                        │
+ 3. │ 2026-07-24 13:02:00 │          1 │     0 │ 0                        │
+ 4. │ 2026-07-24 13:03:00 │          1 │     0 │ 0                        │
+ 5. │ 2026-07-24 13:04:00 │          1 │     0 │ 0                        │
+ 6. │ 2026-07-24 13:05:00 │          1 │     0 │ 0                        │
+ 7. │ 2026-07-24 13:06:00 │          1 │     0 │ 0                        │
+ 8. │ 2026-07-24 13:07:00 │          1 │     0 │ 0                        │
+ 9. │ 2026-07-24 13:08:00 │          1 │     0 │ 0                        │
+10. │ 2026-07-24 13:09:00 │          1 │     0 │ 0                        │
+    └─────────────────────┴────────────┴───────┴──────────────────────────┘
+#  why the build gate never saw it: it INNER JOINs the truth view, and these
+#  minutes have no truth row to join to.
+   ┌─inner_join_mismatches_the_gate_uses─┬─full_outer_mismatches─┐
+1. │                                   0 │                    10 │
+   └─────────────────────────────────────┴───────────────────────┘
+
+== C2: the hour-ANCHORED densify vs the minute spine, whole data span ==
+#  the im06 recipe: every hour start gets an explicit 0-delta row. Must be 0 mismatches.
+#  Bounds are LITERAL because ClickHouse requires WITH FILL FROM/TO to be constant
+#  (Code 475 on a scalar subquery); they are toStartOfHour(min(minute)) and
+#  max(minute)+1min of cc_minute_delta on this build — asserted below before use.
+   bounds assertion PASS
+6108 minutes compared, 0 mismatched  PASS
+
+== C3: three point forms vs the 1-minute interval, at 26 chosen minutes ==
+#  m_direct = hour-anchored delta sum (pm02)   wr_peak/wr_avg = v_cc_window_range [M,M+1) (pm01)
+#  spine = v_cc_minute_series_total lookup (— = no row)   all present values must be equal
+minute                 m_direct   wr_peak    wr_avg   spine  verdict note
+2026-07-26 10:56:00        2917      2917      2917    2917  PASS    peak minute
+2026-07-26 10:55:00        2860      2860      2860    2860  PASS    peak-1
+2026-07-26 10:57:00        2885      2885      2885    2885  PASS    peak+1
+2026-07-14 15:42:00           0         0         0     —  PASS    minute before first data
+2026-07-14 15:43:00           1         1         1       1  PASS    FIRST data minute (boundary)
+2026-07-14 15:44:00           1         1         1       1  PASS    held minute (no change point)
+2026-07-26 11:31:00           5         5         5       5  PASS    LAST nonzero minute (boundary)
+2026-07-26 11:32:00           0         0         0       0  PASS    last delta minute (level back to 0)
+2026-07-26 11:33:00           0         0         0       0  PASS    after all data
+2026-07-26 10:00:00          57        57        57      57  PASS    hour boundary inside data
+2026-07-26 11:00:00        2873      2873      2873    2873  PASS    hour boundary inside data
+2026-07-24 13:00:00           0         0         0       0  PASS    F1 hour start (naive fill says 1, truth 0)
+2026-07-24 13:05:00           0         0         0       0  PASS    F1 mid-run
+2026-07-20 03:30:00           0         0         0     —  PASS    IDLE minute (hour has no rows)
+2026-07-15 06:00:00           0         0         0     —  PASS    spread
+2026-07-16 12:30:00           0         0         0     —  PASS    spread
+2026-07-17 20:15:00           0         0         0     —  PASS    spread
+2026-07-18 04:44:00           0         0         0     —  PASS    spread
+2026-07-19 09:07:00           0         0         0     —  PASS    spread
+2026-07-21 23:59:00           0         0         0     —  PASS    spread
+2026-07-22 07:13:00           1         1         1       1  PASS    spread
+2026-07-23 14:26:00           1         1         1       1  PASS    spread
+2026-07-25 10:56:00           5         5         5       5  PASS    spread
+2026-07-26 08:30:00          34        34        34      34  PASS    busy morning
+2026-07-26 10:30:00         335       335       335     335  PASS    busy morning
+2026-07-26 11:15:00        2135      2135      2135    2135  PASS    busy morning
+
+== C4: every stored hour row (cube 0) vs the minute curve inside that hour ==
+98 hours compared, 0 peak / 0 integral mismatched  PASS
+
+== C5: every day row (cube 0) vs the hour tier it rolls up ==
+7 days compared, 0 peak / 0 integral mismatched  PASS
+
+== C6: idle minute 2026-07-20 03:30 — what each path answers ==
+# hour-anchored delta sum (pm02) — sum over an empty set is 0, so this answers 0:
+   ┌─concurrent─┐
+1. │          0 │
+   └────────────┘
+# 1-minute v_cc_window_range (pm01) — hrs=0 AND chg=0 is the 'no data in range' signature,
+# which is how a caller tells a true 0 from an unanswerable minute. peak_minute is the
+# documented epoch sentinel, NOT a real minute — read it only where peak > 0:
+   ┌─peak─┬─────────peak_minute─┬─hrs─┬─chg─┐
+1. │    0 │ 1970-01-01 00:00:00 │   0 │   0 │
+   └──────┴─────────────────────┴─────┴─────┘
+# minute spine — 0 rows. The spine covers active hours + a 60-minute pad only,
+# so ABSENCE is its answer for a long-idle minute. A caller must read absence as 0:
+   ┌─spine_rows─┐
+1. │          0 │
+   └────────────┘
+
+== C7: the WRONG way, shown wrong — delta sum NOT anchored at the hour start ==
+# sum(delta) over [10:30, 10:56] misses the level already standing at 10:29.
+   ┌─unanchored_looks_plausible─┬─hour_anchored_truth─┐
+1. │                       2821 │                2917 │
+   └────────────────────────────┴─────────────────────┘
+
+== C8: F1's blast radius — does the phantom reach the SERVING views? ==
+# The hour tier and the window-range view are built from the spine arithmetic,
+# not from WITH FILL, so F1 must NOT appear in a served answer. Hour 13 on
+# 2026-07-24: peak/integral from storage, and the 1-minute point answers.
+hour row peak=3 integral=4440 | point 13:00=0 | point 13:05=0  PASS — serving layer is clean, F1 is a RECIPE defect only
+
+== VERDICT ==
+ALL GATES PASS (C1 is a documented defect count, not a gate).

@@ -1,0 +1,60 @@
+DEMO REHEARSAL — demo/run.sh executed end to end, live, against the graded service
+date: 2026-08-01 · commit at run: 1af163a (merge of origin/dev) · target: ClickHouse Cloud, database sonyliv
+mode: live (no fallback needed on any beat) · READ-ONLY throughout — sonyliv never written
+--------------------------------------------------------------------------------
+
+WALL CLOCK, measured (machine time only — the demo is talk-dominated)
+
+  beat 0  pre-flight (warm-up + sanity)      1 s     service already warm; sanity OK
+  beat 1  problem (naive vs actual)          2 s     3,708 vs 2,917 @ 10:56 · 33.6% hours
+  beat 2  signals (exhibit session)          0 s     37 raw rows, session 0AABD289…
+  beat 3  answer (peak/trend/platform+enc)   4 s     peak 2,917 · 6 queries incl. encore
+  beat 4  proof (TARGET=cloud reconcile.sh)  4 s     17,028 minutes · 0 mismatches · PASS
+  beat 5  scale (excerpt of scale.txt)       0 s     committed evidence, nothing re-run
+  ----------------------------------------------
+  total machine time                        11 s     (12.2 s wall including shell startup)
+
+  A second full live run earlier the same evening (--capture, which also wrote the
+  fallback files) measured 14 s machine time. Both runs green on every beat.
+
+COLD-START NOTE. Both rehearsal runs found the service already warm (warm-up 1 s).
+The ~29 s auto-suspend wake was NOT reproduced tonight; the pre-flight beat exists
+to absorb it and prints its own "that pause was auto-suspend" line if warm-up > 5 s.
+Run demo/run.sh once ~10 minutes before presenting and the question disappears.
+
+TALK BUDGET (demo/SCRIPT.md) — sums to 5:00 with the encore cut:
+  0 pre-flight 0:15 · 1 problem 0:55 · 2 signals 1:15 · 3 answer 1:10
+  4 proof 0:50 · 5 scale 0:35   (+0:20 encore, first thing cut)
+
+WHAT WAS CUT TO FIT FIVE MINUTES
+  · beat-3 Hindi normalisation (ADR 0011) demoted to an ENCORE, cut first —
+    strongest candidate for a mentor Q&A instead of the main path
+  · beat-3 trend window narrowed to 10:50–11:02 (13 rows) so it reads at a glance
+  · beat-4 output starts at the "== 1." gate table (script preamble above it skipped)
+  · beat-5 shows only the 100× serving table + row-count summary; memory sweep and
+    growth exponents stay in evidence/scale.txt, referenced out loud
+  · no ClickStack dashboard in the 5:00 path — the committed offline capture
+    (docs/artifacts/2026-08-01-clickstack-dashboards.html, verified to open) is the
+    "show me a dashboard" recovery, not a beat
+
+FALLBACKS — every beat has a committed artifact, each verified to open
+  beat 1  evidence/demo/beat1.txt, beat1-hours.txt
+  beat 2  evidence/demo/beat2.txt
+  beat 3  evidence/demo/beat3-{peak,trend,platform,hindi,hindi-norm}.txt
+  beat 4  evidence/demo/beat4-reconcile.txt (full gate output incl. SUMMARY row)
+  beat 5  evidence/scale.txt itself (committed; the beat is an excerpt of it)
+  verified three ways:
+    · demo/run.sh --offline played the ENTIRE demo from these files, no network path
+    · the auto-fallback branch was forced (throwIf query + dead command) and
+      correctly printed the committed artifact with the recovery banner
+    · beat-0 unreachable-service path exits with the instruction to rerun --offline
+
+SAFETY CHECKS EXERCISED
+  · run.sh's q() refused a write-shaped statement (returns 9, plays fallback)
+  · beat-0 sanity asserts "905558 events · day-tier peak 2917" and warns loudly on
+    mismatch (the two-model-generations incident earlier today is the scenario)
+  · after the live gate run, run.sh restored evidence/reconcile.txt (only the
+    commit-hash line differs run to run); git tree verified clean afterwards
+--------------------------------------------------------------------------------
+verdict: the demo has now been run start to finish, live and offline, and every
+failure mode named in the brief has a rehearsed, tested recovery path.

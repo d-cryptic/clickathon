@@ -1,0 +1,28 @@
+Expression ((Project names + (Projection + (WHERE + (Change column names to column identifiers + (Convert VIEW subquery result to VIEW table structure + (Materialize constants after VIEW subquery + (Project names + (Projection + (Change column names to column identifiers + (Project names + Projection)))))))))))
+  Aggregating
+    Expression ((((WHERE + (Change column names to column identifiers + (Convert VIEW subquery result to VIEW table structure + (Materialize constants after VIEW subquery + (Project names + (Projection + (Change column names to column identifiers + (Project names + Projection)))))))) + Before GROUP BY) + (WHERE + Change column names to column identifiers)))
+      Filter (((((WHERE + (Change column names to column identifiers + (Convert VIEW subquery result to VIEW table structure + (Materialize constants after VIEW subquery + (Project names + (Projection + (Change column names to column identifiers + (Project names + Projection)))))))) + Before GROUP BY) + (WHERE + Change column names to column identifiers)))[split])
+        ReadFromMergeTree (sonyliv_u3.cc_hour_agg)
+        Indexes:
+          MinMax
+            Keys:
+              hour
+            Condition: (toDate(hour) in [20660, 20660])
+            Parts: 1/1
+            Granules: 4/4
+          Partition
+            Condition: true
+            Parts: 1/1
+            Granules: 4/4
+          PrimaryKey
+            Keys:
+              platform
+              country
+              content_id
+              cube_level
+              hour
+            Condition: and((toDate(hour) in [20660, 20660]), and((cube_level in [0, 0]), and((content_id in [-1, -1]), and((country in ['*', '*']), (platform in ['*', '*'])))))
+            Parts: 1/1
+            Granules: 1/4
+            Search Algorithm: generic exclusion search
+          Ranges: 1

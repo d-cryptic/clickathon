@@ -1,0 +1,37 @@
+property-test run — mode=compat seed0=20260802 cases=400 db=prop_t6
+properties (docs/codex-validation/003.md §13.2):
+  P1 state machine == reference interpreter
+  P2 interval expansion == delta running sums
+  P3 batch split/merge/reorder invariance
+  P4 idempotence (block dedup + duplicate rows)
+  P5 correction algebra old+(−old+new)=new
+  P6 user tier == mirror, and user <= session per grain
+  P7 no negative concurrency
+P1: 400 cases, 0 failures
+P2: 400 cases, 0 failures
+P3: 40 cases, 0 failures
+P4: 40 cases, 0 failures
+P5: 40 cases, 0 failures
+P6: 400 cases, 7 failures
+P7: 400 cases, 0 failures
+
+FAIL P6 @ 20260802-69
+user concurrency EXCEEDS session concurrency at 63 (minute, grain) cells (first 4): [((1786816020, ('IPHONE', 'india', 21000002)), 1, 0), ((1786814100, ('IPHONE', 'india', 21000002)), 1, 0), ((1786813260, ('IPHONE', 'india', 21000002)), 1, 0), ((1786813680, ('IPHONE', 'india', 21000002)), 1, 0)]
+
+FAIL P6 @ 20260802-136
+user concurrency EXCEEDS session concurrency at 16 (minute, grain) cells (first 4): [((1786793160, ('IPHONE', 'india', -1)), 1, 0), ((1786793580, ('IPHONE', 'india', -1)), 1, 0), ((1786793640, ('IPHONE', 'india', -1)), 1, 0), ((1786793100, ('IPHONE', 'india', -1)), 1, 0)]
+
+FAIL P6 @ 20260802-142
+user concurrency EXCEEDS session concurrency at 4 (minute, grain) cells (first 4): [((1786784640, ('ANDROID_PHONE', 'IN', -987654399)), 1, 0), ((1786784700, ('ANDROID_PHONE', 'IN', -987654399)), 1, 0), ((1786784580, ('ANDROID_PHONE', 'IN', -987654399)), 1, 0), ((1786784760, ('ANDROID_PHONE', 'IN', -987654399)), 1, 0)]
+
+FAIL P6 @ 20260802-217
+user concurrency EXCEEDS session concurrency at 27 (minute, grain) cells (first 4): [((1786807140, ('SONY_ANDROID_TV', 'IN', -987654399)), 1, 0), ((1786806900, ('SONY_ANDROID_TV', 'IN', -987654399)), 1, 0), ((1786807320, ('SONY_ANDROID_TV', 'IN', -987654399)), 1, 0), ((1786806720, ('SONY_ANDROID_TV', 'IN', -987654399)), 1, 0)]
+
+FAIL P6 @ 20260802-237
+user concurrency EXCEEDS session concurrency at 3 (minute, grain) cells (first 4): [((1786820580, ('ANDROID_PHONE', 'india', 21000003)), 1, 0), ((1786820460, ('ANDROID_PHONE', 'india', 21000003)), 1, 0), ((1786820520, ('ANDROID_PHONE', 'india', 21000003)), 1, 0)]
+
+FAIL P6 @ 20260802-291
+user concurrency EXCEEDS session concurrency at 73 (minute, grain) cells (first 4): [((1786814760, ('IPHONE', 'nepal', 21000003)), 1, 0), ((1786812060, ('IPHONE', 'nepal', 21000003)), 1, 0), ((1786814580, ('IPHONE', 'nepal', 21000003)), 1, 0), ((1786815180, ('IPHONE', 'nepal', 21000003)), 1, 0)]
+
+FAIL P6 @ 20260802-375
+user concurrency EXCEEDS session concurrency at 46 (minute, grain) cells (first 4): [((1786755720, ('FIRE_TV', 'nepal', -987654399)), 1, 0), ((1786757460, ('FIRE_TV', 'nepal', -987654399)), 2, 1), ((1786756800, ('FIRE_TV', 'nepal', -987654399)), 2, 1), ((1786756920, ('FIRE_TV', 'nepal', -987654399)), 2, 1)]

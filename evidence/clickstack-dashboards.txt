@@ -1,0 +1,158 @@
+CLICKSTACK HOSTED DASHBOARDS — audit, build, and live verification
+target: ClickHouse Cloud service c483b8ed-1c82-4b6a-af31-08a0725362ad (HyperDX built in)
+date: 2026-08-01 · driven by tools/clickstack-cloud.sh over the Cloud control-plane API
+Every number below was read back THROUGH HyperDX's own query path (the clickstack
+MCP's query_tile / the control-plane API), not asserted from ClickHouse directly —
+except where marked "ClickHouse-side" for cross-checking.
+
+════════════════════════════════════════════════════════════════════════════════
+1. AUDIT — what actually existed before this session (script-vs-reality diff)
+════════════════════════════════════════════════════════════════════════════════
+
+Live state read from GET /clickstack/{sources,dashboards,saved-searches,alerts}:
+
+  sources          11   — all 11 the script claimed. No gap.
+  dashboards        1   — "SonyLIV concurrency", 10 tiles + 3 filters. Matches.
+  saved searches    4   — script claims 3. ONE ORPHAN: "Peak minutes", a
+                          pre-rename leftover no script creates. (Deleted below.)
+  alerts            0   — none claimed, none present.
+
+TWO REAL FINDINGS, not just drift:
+
+(a) THE DIMENSIONAL TILES WERE ARITHMETICALLY WRONG. "ACCURATE by platform/
+    content/country" charted max(concurrent) over v_concurrency_minute, which is
+    grained by (platform, country, content_id). max() over a finer grain is the
+    max single COMBINATION, not the group total. Measured at the peak minute
+    2026-07-26 10:56 (ClickHouse-side):
+
+        platform         true level   what the tile showed
+        ANDROID_PHONE         1,837                    285
+        IPHONE                  355                     61
+        SONY_ANDROID_TV         275                     12
+
+    Fix: per-dimension views (sql/87_viz.sql) that sum deltas AT THE DIMENSION'S
+    GRAIN first, then running-sum — same order of operations as 80_content.sql.
+
+(b) PIPELINE HEALTH EXISTED ONLY LOCALLY. The hosted service has NO otel_*
+    tables and no OTLP ingest path (verified: zero otel tables across all
+    databases), so the OTLP-fed "SonyLIV pipeline health" dashboard of
+    docs/OBSERVABILITY.md lives on the LOCAL stack only. The hosted twin built
+    below reads the same three signals cloud-natively (v_cc_watermark,
+    system.query_log, gate-run detection by read-set).
+
+Also: this worktree was based behind dev — the first reconcile run failed with
+truth=2,887 vs serving=2,917 because the ADR 0009 same-second-resume fix was in
+dev's sql/90_reconcile.sql but not in the checkout. Rebased onto dev; the gate
+then PASSED: minutes_compared=17028 · mismatched=0 · max_abs_diff=0 · peak=2917
+(evidence/reconcile.txt). sql/87_viz.sql is additive-only views; the gate was
+re-run AFTER applying it.
+
+════════════════════════════════════════════════════════════════════════════════
+2. WHAT EXISTS NOW (all provisioned + converged by tools/clickstack-cloud.sh)
+════════════════════════════════════════════════════════════════════════════════
+
+SOURCES: 24 (13 new). New ones:
+  Concurrency NAIVE session-span (minute)  v_concurrency_minute_naive
+  Session minutes (drilldown)              v_session_minutes (7 dims + title + user_id)
+  Concurrency by platform / country / app_version / audio_language /
+    subtitle_language / player_version     v_cc_by_* (per-dim delta views)
+  Content NOW by title / video_type / category   v_concurrency_*_now (ts = as_of)
+  Tumbling hour (cube)                     v_cc_tumbling_hour (ts = window_start)
+  Pipeline watermark (current)             v_cc_watermark (ts = now() — a one-row
+                                           current-state view; stamping it with
+                                           query time lets it render in the same
+                                           recent range as the query_log tiles)
+
+DASHBOARDS: 6 (5 new; the pre-existing one restructured).
+  SonyLIV concurrency                    10 tiles — 4 peak numbers (accurate /
+                                         stateless / naive / users), full-width
+                                         accurate headline, the three models
+                                         side-by-side, users, rolling 15-min
+  SonyLIV drilldown — sessions & users    8 tiles + 8 FILTERS (platform, country,
+                                         title, content_id, app_version,
+                                         audio_language, subtitle_language,
+                                         player_version) via appliesToSourceIds,
+                                         all naming ONLY the session-minute
+                                         source — the total-only sources have no
+                                         dimension columns and would error
+  SonyLIV content                         7 tiles — top-titles leaderboard, NOW
+                                         panels (title/video_type/category),
+                                         video_type + category + titles over time
+  SonyLIV time-window trend               4 tiles — rolling peaks 5/15/60 + avgs,
+                                         tumbling 15-min (raw-SQL tile calling the
+                                         parameterised view with $__timeFilter),
+                                         tumbling 1-hour from cc_hour_agg
+  SonyLIV pipeline health (cloud)         7 tiles — watermark lag / hour-tier
+                                         numbers, build-stage duration + rows
+                                         (query_log, exact filters of
+                                         internal/pipelinehealth/buildstages.go),
+                                         reconcile-gate runs, exception count
+  SonyLIV query cost                      5 tiles — p95/p50/max latency, BYTES
+                                         read, rows read, peak memory, heaviest
+                                         query shapes by bytes
+
+SAVED SEARCHES: 5 (2 new: peak-minute drilldown rows, slowest queries);
+  stale "Peak minutes" deleted.
+ALERTS: none, deliberately — the dataset is frozen at 2026-07-26, so a
+  threshold alert either never fires or fires forever; alert-worthy signals
+  (gate FAIL, watermark unhealthy) are OTLP metrics on the local stack.
+
+IDEMPOTENCY: script run three times — run 1 created, runs 2–3 "updated" every
+dashboard; source/search counts stable; no duplicates. NOTE: a PUT regenerates
+TILE ids (verified), so tile deep-links do not survive a re-run — dashboard ids
+and URLs do.
+
+════════════════════════════════════════════════════════════════════════════════
+3. LIVE VERIFICATION — numbers read back through HyperDX's own query path
+════════════════════════════════════════════════════════════════════════════════
+
+Drilldown "Sessions vs users" tile, 10:54–10:58, 1-min buckets:
+    10:54  2825 sessions / 2737 users
+    10:55  2860 / 2781
+    10:56  2917 / 2844   ← sessions match the graded headline EXACTLY
+    10:57  2885 / 2802
+    10:58  2855 / 2773
+    25 ms · 30,323 rows read · 4.5 MB
+
+Headline "NAIVE session-span" tile, 10:50–11:00:
+    10:56  3708   ← vs 2,917 accurate: the +21.3% over-count, visible
+    10:59  3743   ← naive's own peak (it peaks LATER than the real model)
+    96 ms · 905,558 rows read
+
+"Rolling peaks" tile, 10:55–10:57:
+    10:56  concurrent 2917 · peak_5m 2917 · peak_15m 2917 · peak_60m 2917
+    10:57  concurrent 2885 · peak_5m 2917  ← the window holds the peak, as defined
+    26 ms · 56,146 rows read
+
+"Top titles by peak" table tile: leaderboard renders, top title "wekek ked"
+    peak 433 · 49 ms · 61,537 rows read
+
+Tumbling 15-min raw-SQL tile: full series renders; window 10:45 → peak 2917,
+    avg 2730.9; window 11:30 → peak 197 (the decay) · 16 ms
+
+"Watermark sealed lag" number tile, queried under a TODAY range (now()-stamp
+    works): −116 s → negative = healthy steady state (TAIL_S grace) · 13 ms
+
+"Reconcile gate — runs and duration" tile, today: renders every gate-shaped run
+    (reads ev_raw AND cc_minute_delta), e.g. 15:00 bucket: 6 runs, max 2,741 ms.
+    Caveat, stated on purpose: query_log shows the gate RAN, not its verdict —
+    the PASS/FAIL bit lives in evidence/reconcile.txt and the OTLP metric
+    sonyliv.reconcile.gate_pass on the local stack.
+
+"BYTES read by our queries" tile, today: renders continuously; largest single
+    query 1.10 GB (a reconcile truth recomputation), typical buckets 0.1–8 GB
+    total · 18 ms · reads 45,151 query_log rows
+
+════════════════════════════════════════════════════════════════════════════════
+4. WHAT STILL NEEDS A HUMAN, EXPLICITLY
+════════════════════════════════════════════════════════════════════════════════
+
+1. TIME RANGE: dashboards 1–4 need 2026-07-14 → 2026-07-26 set in the picker
+   (the data is frozen; the default 15-min window renders EMPTY). Dashboards
+   5–6 need a RECENT range (last 24 h). A dashboard's default range is not
+   settable through the control-plane API.
+2. SCREENSHOTS for the deck: HyperDX in the Cloud console sits behind the
+   console's SSO session, which is not scriptable. Open each dashboard URL
+   (listed in docs/CLICKSTACK.md), set the range per (1), screenshot.
+   The no-network fallback is docs/artifacts/2026-08-01-clickstack-dashboards.html,
+   which charts the same verified data offline.

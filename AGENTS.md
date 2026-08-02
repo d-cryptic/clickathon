@@ -16,6 +16,9 @@ released in the final hours. Full statement: [docs/PROBLEM.md](docs/PROBLEM.md).
 
 ## Where to go
 
+**Just waking up, or picking this up cold? Read [HANDOFF.md](HANDOFF.md) first** — what is blocked,
+what only a human can do, and where the promotion gate stands.
+
 **New here, or resuming after a break? Read [WALKTHROUGH.md](WALKTHROUGH.md) first** — what is built,
 what is verified, what is broken, and what is still missing, in one page.
 
@@ -23,24 +26,36 @@ what is verified, what is broken, and what is still missing, in one page.
 |---|---|
 | Understand how work flows here (gates, reviews, worksheets) | [AGENT_WORKFLOW.md](AGENT_WORKFLOW.md) |
 | **Understand the whole problem from scratch, in plain English** | [docs/EXPLAINER.md](docs/EXPLAINER.md) — the ask, what is really in the data, and why the obvious approach is wrong |
+| **Answer "which sessions count, and what does it cost me when you are wrong?"** | [docs/BUSINESS_RULES.md](docs/BUSINESS_RULES.md) — the inclusion ledger, the cost of error in both directions, decision→tier mapping, and a straight answer on billing |
 | Understand the concurrency model and why | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| **Answer "what about sessions that are still open?"** | [docs/LIVE_INTERVALS.md](docs/LIVE_INTERVALS.md) — the live edge under-reports **−14.8%** and is exact beyond **240 s**; labelling proposal in [ADR 0029](docs/adr/0029-provisional-and-final-buckets-labelled-off-the-watermark.md) |
 | Know the field names / event types / data shape | [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) |
 | Write SQL the way this repo writes SQL | [docs/CONVENTIONS.md](docs/CONVENTIONS.md) |
 | **Set up the Go toolchain / write Go here** | [docs/GO.md](docs/GO.md) — `direnv allow`, then `make ci` |
 | Know what is tested and what to avoid | [docs/TESTS.md](docs/TESTS.md) |
+| **Check the model against answers it did not compute** | [docs/GOLDEN.md](docs/GOLDEN.md) — closed-form, statistical and degenerate cohorts plus the organiser file as a regression pin. `tools/golden-gen.sh` |
 | Pick up the next task | [TODOS.md](TODOS.md) |
+| **Spawn the next worktree** | [docs/WORKTREE_QUEUE.md](docs/WORKTREE_QUEUE.md) — prioritised, brief-ready, with ADR numbers pre-assigned |
+| **Read the cross-model audit** | [docs/codex-validation/](docs/codex-validation/) — Codex reviewing our claims, not our code |
 | Resume a dead session | newest file in [docs/worksheets/](docs/worksheets/) |
 | Run something (query, bench, reconcile, load) | [tools/README.md](tools/README.md) |
+| **Know what every dashboard panel shows** | [docs/CLICKSTACK_DASHBOARDS.md](docs/CLICKSTACK_DASHBOARDS.md) — 6 dashboards, 41 tiles, captured live |
 | **Bring up ClickStack / see the concurrency chart** | [docs/CLICKSTACK.md](docs/CLICKSTACK.md) — `make stack-up && make clickstack` |
 | **See ClickStack observing OUR pipeline (watermark lag, build timing, reconcile gate)** | [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) — `sonyliv observe -target cloud` |
+| **Alert on concurrency decline — and tell apart ended / broken / boring** | [docs/DECLINE_ALERTING.md](docs/DECLINE_ALERTING.md) — the spec's optional item. 3 live alerts; the discrimination is the deliverable, and one of the three classes is shipped **unvalidated** and says so |
 | Know what is already **verified** vs assumed | [docs/VERIFIED.md](docs/VERIFIED.md) ← **read before trusting any ClickHouse claim** |
+| **Answer "how does this behave at 100×?"** | [evidence/scale.txt](evidence/scale.txt) — measured at 1×/10×/100×, and what breaks first. Regenerate with `tools/scale-test.sh` |
+| **Answer the organiser's four "design decisions to confirm"** | [docs/DESIGN_DECISIONS.md](docs/DESIGN_DECISIONS.md) — session timeout, lateness tolerance, window size, freshness. Three decided; **lateness is the open one** |
 | Record a design decision | [docs/adr/](docs/adr/) |
-| **Understand the model in depth, with diagrams** | [docs/artifacts/](docs/artifacts/) — open the newest `.html` in a browser |
+| **Present at a mentor checkpoint** | [docs/artifacts/2026-08-01-mentor-checkpoint.html](docs/artifacts/2026-08-01-mentor-checkpoint.html) — 11 diagrams: what we show, explain, and need answered |
+| **Understand the model in depth, with diagrams** | [docs/artifacts/](docs/artifacts/) — the 4-part deep dive: `deep-1-data` · `deep-2-model` · `deep-3-correctness` · `deep-4-scale-ops` |
 | Know what we must **ask a mentor** (and what we assumed meanwhile) | [docs/MENTOR_QUESTIONS.md](docs/MENTOR_QUESTIONS.md) ← **every unanswered one is a silent-failure risk** |
 | **Ask a mentor the questions that carry measured evidence** | [doubts/](doubts/) — evidence + exact wording + a decision table per answer. `02` is worth **9.7%** of our headline number |
 | **What happened in the last session, and every bug it found** | [docs/SESSION-2026-08-01.md](docs/SESSION-2026-08-01.md) |
 | **Run the unseen day** | [docs/RUNBOOK_UNSEEN.md](docs/RUNBOOK_UNSEEN.md) — read BEFORE the data drops |
+| **Understand how aggregates stay current (the incremental publisher)** | [ADR 0013](docs/adr/0013-continuous-publication-by-incremental-finalizer.md) — `make publish`, proven in [evidence/publish.txt](evidence/publish.txt) |
 | Observability / what we emit | [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) |
+| **Edit or rebuild the submission deck** | [deck/checkpoint1/README.md](deck/checkpoint1/README.md) — source `deck/checkpoint1/deck.html`, `deck/checkpoint1/build.sh` → `deck/checkpoint1/deck.pdf` |
 | Leave feedback for the operator | [docs/AGENT_FEEDBACK.md](docs/AGENT_FEEDBACK.md) |
 
 ## Doc conventions

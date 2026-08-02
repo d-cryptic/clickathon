@@ -1,0 +1,109 @@
+=== LIVE-INTERVAL EVIDENCE · analysis
+generated 2026-08-01T21:38:35Z   ·   scratch database: sonyliv_v3live
+model constants in force: GAP_S=150  TAIL_S=60  (sql/30_build_intervals.sql)
+
+--------------------------------------------------------------------------
+0 — scope of the sweep
+--------------------------------------------------------------------------
+cuts=32  minute-cells compared=542537  cells wrong=65  (0.012%)
+
+--------------------------------------------------------------------------
+1 — THE PROVISIONAL WINDOW, in event time.
+    age_s = how old the minute is at the moment we ask (cut - minute).
+    Every cell at every cut, bucketed by age. A minute is FINAL once no
+    cut at that age ever disagrees with the completed build.
+--------------------------------------------------------------------------
+   ┌─age_s─┬─cells─┬─wrong─┬─worst_under─┬─worst_over─┬─worst_rel_pct─┬─mean_rel_pct─┐
+1. │     0 │    32 │    31 │        -446 │          0 │        -75.22 │       -14.82 │
+2. │    60 │    32 │    27 │         -60 │          1 │            -4 │       -1.729 │
+3. │   120 │    32 │     6 │          -1 │          2 │         -0.06 │        0.003 │
+4. │   180 │    32 │     1 │          -1 │          0 │         -0.04 │       -0.001 │
+5. │   240 │    32 │     0 │           0 │          0 │             0 │            0 │
+6. │   300 │    32 │     0 │           0 │          0 │             0 │            0 │
+7. │   360 │    32 │     0 │           0 │          0 │             0 │            0 │
+   └───────┴───────┴───────┴─────────────┴────────────┴───────────────┴──────────────┘
+
+oldest age at which ANY cut was ever wrong: 180 s
+the model's own revision horizon GAP_S + TAIL_S: 210 s
+  A minute stops moving once no open run can still reach back into it. That
+  is bounded by GAP_S + TAIL_S = 210 s after an interval's last event, and
+  the measurement lands exactly inside it: the last non-zero cell is at
+  180 s and every cell at 240 s and beyond is exact, across all 32 cuts.
+
+--------------------------------------------------------------------------
+2 — DIRECTION. Over-counting invents viewers who were not watching; it is
+    the failure the whole problem exists to prevent. Under-counting is
+    visible and explainable. So the sign matters more than the magnitude.
+--------------------------------------------------------------------------
+   ┌─undercounting_cells─┬─overcounting_cells─┬─largest_undercount─┬─largest_overcount─┐
+1. │                  61 │                  4 │               -446 │                 2 │
+   └─────────────────────┴────────────────────┴────────────────────┴───────────────────┘
+  every over-count, in full:
+   ┌─────────────────cut─┬──────────────minute─┬─age_s─┬─asof─┬─final─┬─diff─┐
+1. │ 2026-07-26 10:25:00 │ 2026-07-26 10:24:00 │    60 │  104 │   103 │    1 │
+2. │ 2026-07-26 11:00:00 │ 2026-07-26 10:58:00 │   120 │ 2856 │  2855 │    1 │
+3. │ 2026-07-26 11:10:00 │ 2026-07-26 11:08:00 │   120 │ 2572 │  2571 │    1 │
+4. │ 2026-07-26 11:25:00 │ 2026-07-26 11:23:00 │   120 │ 1275 │  1273 │    2 │
+   └─────────────────────┴─────────────────────┴───────┴──────┴───────┴──────┘
+
+--------------------------------------------------------------------------
+3 — HOW MUCH OF THE CURVE IS PROVISIONAL. Two different questions, and
+    conflating them is the trap:
+      (a) how many contributors are sessions that are still OPEN, and
+      (b) how many of them can still CHANGE an already-served minute.
+--------------------------------------------------------------------------
+   ┌─age_s─┬─pct_from_open_sessions─┬─max_open_contributors─┐
+1. │     0 │                   92.7 │                  2351 │
+2. │   120 │                   85.8 │                  2478 │
+3. │   240 │                   79.8 │                  2247 │
+4. │   360 │                   74.2 │                  2066 │
+5. │   480 │                   70.3 │                  1852 │
+6. │   600 │                   65.1 │                  1694 │
+   └───────┴────────────────────────┴───────────────────────┘
+
+    (b) of the sessions OPEN at the cut, how many actually revise a minute
+        the dashboard has already served?
+    ┌───────────────a.cut─┬─open_sessions─┬─revise_served─┬─pct_of_open─┐
+ 1. │ 2026-07-26 10:10:00 │           114 │             6 │         5.3 │
+ 2. │ 2026-07-26 10:15:00 │           126 │             7 │         5.6 │
+ 3. │ 2026-07-26 10:20:00 │           135 │            11 │         8.1 │
+ 4. │ 2026-07-26 10:25:00 │           148 │             6 │         4.1 │
+ 5. │ 2026-07-26 10:30:00 │           145 │            15 │        10.3 │
+ 6. │ 2026-07-26 10:35:00 │          1167 │           102 │         8.7 │
+ 7. │ 2026-07-26 10:40:00 │          2037 │           169 │         8.3 │
+ 8. │ 2026-07-26 10:45:00 │          2737 │           238 │         8.7 │
+ 9. │ 2026-07-26 10:50:00 │          3158 │           265 │         8.4 │
+10. │ 2026-07-26 10:55:00 │          3458 │           280 │         8.1 │
+11. │ 2026-07-26 10:56:00 │          3491 │           311 │         8.9 │
+12. │ 2026-07-26 11:00:00 │          3502 │           304 │         8.7 │
+13. │ 2026-07-26 11:05:00 │          3304 │           308 │         9.3 │
+14. │ 2026-07-26 11:10:00 │          3001 │           285 │         9.5 │
+15. │ 2026-07-26 11:15:00 │          2507 │           238 │         9.5 │
+16. │ 2026-07-26 11:20:00 │          1892 │           197 │        10.4 │
+17. │ 2026-07-26 11:25:00 │          1061 │           155 │        14.6 │
+    └─────────────────────┴───────────────┴───────────────┴─────────────┘
+
+--------------------------------------------------------------------------
+4 — CONVERGENCE. The peak minute, watched from successive cuts.
+--------------------------------------------------------------------------
+   ┌─────────────────cut─┬─age_s─┬─asof─┬─final─┬─diff─┬─contributors_still_open─┐
+1. │ 2026-07-26 10:56:00 │     0 │ 2471 │  2917 │ -446 │                    2351 │
+2. │ 2026-07-26 11:00:00 │   240 │ 2917 │  2917 │    0 │                    2235 │
+3. │ 2026-07-26 11:05:00 │   540 │ 2917 │  2917 │    0 │                    1685 │
+4. │ 2026-07-26 11:10:00 │   840 │ 2917 │  2917 │    0 │                    1220 │
+   └─────────────────────┴───────┴──────┴───────┴──────┴─────────────────────────┘
+
+--------------------------------------------------------------------------
+5 — WHAT A DASHBOARD WINDOW ACTUALLY SHOWS. Minutes that can still move,
+    as a share of the window, using the measured 240 s finality horizon.
+--------------------------------------------------------------------------
+   ┌─window_minutes─┬─provisional_minutes─┬─pct_of_window_provisional─┬─materially_wrong_minutes─┬─pct_materially_wrong─┐
+1. │              5 │                   4 │                        80 │                        1 │                   20 │
+2. │             15 │                   4 │                      26.7 │                        1 │                  6.7 │
+3. │             60 │                   4 │                       6.7 │                        1 │                  1.7 │
+   └────────────────┴─────────────────────┴───────────────────────────┴──────────────────────────┴──────────────────────┘
+  'provisional' = age < 240 s, i.e. can still change by any amount (measured
+  max beyond the newest minute: -60 viewers at 60 s, -1 at 120-180 s).
+  'materially wrong' = the newest minute, mean -14.8% / worst -75.2%.
+
+analysis done.

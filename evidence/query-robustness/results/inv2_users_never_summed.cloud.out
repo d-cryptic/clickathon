@@ -1,0 +1,2 @@
+invariant	minutes_compared	serving_mismatch_minutes	extra_serving_minutes	minutes_where_sum_overcounts	max_overcount	verdict
+users_never_summed	3658	586	74	69	9	FAIL: serving user tier disagrees with interval truth

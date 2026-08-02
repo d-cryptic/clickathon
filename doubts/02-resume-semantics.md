@@ -185,4 +185,43 @@ Rule A — a pause closes at the first `resume` after it. Unpaired resumes are n
 
 ## Answer
 
-_unrecorded_
+**ANSWERED — mentor, 2026-08-02, relayed by the operator.**
+
+> *"The 'more resume thing', or the irregular thing in the data — that's understandable and valid.
+> That's a part in large PB-scale datasets."*
+
+### What it settles
+
+The excess and unpaired resumes are **real signal, not a data-quality defect**. At petabyte scale
+this shape is expected: retries, multi-source emitters, client reconnects and at-least-once delivery
+all produce it. So the question we should *stop* asking is "which of these resumes is spurious" —
+none of them are, in the sense of being corrupt.
+
+**This closes the option we were most tempted by and would have been wrong to take.** The fourth row
+of the decision table — *"an unpaired resume implies an unlogged pause"* — treated the irregularity
+as evidence of missing data and would have invented an exclusion rule to compensate. That is now
+explicitly ruled out. The irregularity is the data being itself, not the data being broken.
+
+It also removes any case for "cleaning" resumes in preprocessing. `sql/15_normalise.sql` and
+[ADR 0025](../docs/adr/0025-hostile-input-quarantine-over-rejection.md) must **not** collapse,
+deduplicate or repair resume sequences — they are legitimate input. Quarantine is for malformed
+rows; an unpaired resume is not malformed.
+
+### What it does NOT settle
+
+The mentor confirmed the data's **validity**, not the **semantics** of the pause window. Rows 1–3 of
+the decision table are still live: does a pause close at the *first* resume after it (shipped Rule A),
+at the *last* of a consecutive burst, or only when a resume can be paired to it? The **189.2 h /
+9.7%** sensitivity between those readings is unchanged and still ours to defend.
+
+Our position, now on firmer ground: **Rule A stands.** Given that repeated resumes are a normal
+artifact of at-least-once delivery rather than distinct user actions, treating the first as the
+un-pause and the rest as redundant restatements of the same event is the reading most consistent
+with what the mentor described. We keep it, and we keep reporting the 9.7% envelope beside it.
+
+### Consequences applied
+
+- Decision-table row 4 struck as ruled out.
+- Preprocessing must not repair resume sequences — noted here and to be reflected in ADR 0025.
+- The 9.7% sensitivity stays in `SUBMISSION.md`'s open-questions list, re-scoped from "we may be
+  wrong about the data" to "this is a definitional choice we made, and here is its cost".

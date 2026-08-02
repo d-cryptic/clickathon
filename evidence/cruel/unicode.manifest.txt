@@ -1,0 +1,9 @@
+CRUEL knob 'unicode' · seed 20260822 · day 2026-08-22 UTC · data/cruel-unicode-raw.csv
+events 160 (+header) · sessions 5 · truth minutes 32 (0 SPEC_ONLY)
+designed peak 5 @ 2026-08-22 11:10 UTC (spec projection; SPEC_ONLY minutes are a policy, not a truth)
+
+hazards:
+  - u00 RTL mark prefixing platform · Devanagari country
+  - u01 ZWJ family-emoji platform · flag-emoji country
+  - u02/u03 NFD vs NFC 'éng' — two DISTINCT strings that render identically; the model must NOT merge them (raw-string policy) and dashboards will show two rows
+  - u04 zero-width space inside platform · Tamil subtitle

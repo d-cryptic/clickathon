@@ -1,0 +1,2 @@
+invariant	total_integral	catalogued_integral	orphan_integral	orphan_pct	orphan_content_ids	verdict
+join_consistency_orphan	7579380	7579380	0	0	[]	PASS: no orphans on this dataset

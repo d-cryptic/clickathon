@@ -1,0 +1,103 @@
+UNSEEN-DAY RUN
+generated 2026-08-01T22:00:35Z   commit c85dcd2
+target database codex006_unseen_30k_1aa9   ·   raw /tmp/codex006-fixtures.Ol8TVe/data/holdout-2026-07-25.csv   ·   content /Users/barun/Developers/personal/clickathon-project/data/ch-hackathon-content-data.csv
+--------------------------------------------------------------------------
+reset: DROP DATABASE codex006_unseen_30k_1aa9 — re-loading without this DOUBLES ev_raw (measured; see the note in this script)
+preflight ok · server 26.2.1.525 · database codex006_unseen_30k_1aa9 ready and empty
+raw CSV header matches the loader · 30097 data rows
+
+SQL fingerprint (sha256, first 12) — the exact model this run exercised:
+  125d80b9b5aa  sql/00_schema.sql
+  de80eaf031af  sql/10_intervals.sql
+  4ffca75940bf  sql/20_views.sql
+  6ba8c21fb5f8  sql/30_build_intervals.sql
+  d1dfeb14c894  sql/40_deltas.sql
+  764ee4c5d810  sql/45_user_concurrency.sql
+  20fefccc4705  sql/50_hour_agg.sql
+  15525d8870b4  sql/80_content.sql
+  0e278f3516e3  sql/85_windows.sql
+  be6a7a4f2e0f  sql/90_reconcile.sql
+  57ee555121dd  tools/load.sh
+  git c85dcd2 (sql+tools clean)
+
+--------------------------------------------------------------------------
+PHASE — 1 schema (00_schema, 10_intervals) — tables + the stateless MV
+--------------------------------------------------------------------------
+  objects: 6 created
+
+--------------------------------------------------------------------------
+PHASE — 2 load (tools/load.sh, unmodified)
+--------------------------------------------------------------------------
+target=cloud  database=codex006_unseen_30k_1aa9  (from --database)  mode=refuse
+loading content_dim from /Users/barun/Developers/personal/clickathon-project/data/ch-hackathon-content-data.csv ...
+loading ev_raw from /tmp/codex006-fixtures.Ol8TVe/data/holdout-2026-07-25.csv ...
+loaded into TARGET=cloud, database codex006_unseen_30k_1aa9:
+   ┌─t───────────┬─before─┬──rows─┬─added─┐
+1. │ content_dim │      0 │ 33464 │ 33464 │
+2. │ ev_raw      │      0 │ 30097 │ 30097 │
+   └─────────────┴────────┴───────┴───────┘
+  ev_raw 30097 = CSV data rows 30097
+  204 sessions · 137 users · 164 content ids · 2026-07-25 00:00:20.661 -> 2026-07-25 22:43:55.977
+  content_dim 33464 rows
+  cc_minute_stateless 4215 rows (mv_stateless fired during the load)
+  data spans 2026-07-25 00:00:00 .. 2026-07-25 22:43:00  (1 calendar day(s))
+
+--------------------------------------------------------------------------
+PHASE — 3 intervals (30_build_intervals.sql)
+--------------------------------------------------------------------------
+  682 intervals over 204 sessions · 8 still open · 63.2 active hours
+
+--------------------------------------------------------------------------
+PHASE — 4 user tier (45_user_concurrency.sql)
+--------------------------------------------------------------------------
+  cc_user_minute 4274 rows
+
+--------------------------------------------------------------------------
+PHASE — 5 deltas (40_deltas.sql)
+--------------------------------------------------------------------------
+  834 delta rows · opens 454 · closes 382
+
+--------------------------------------------------------------------------
+PHASE — 6 views (20) + hour agg (50) + content (80) + windows (85)
+--------------------------------------------------------------------------
+  cc_hour_agg 1286 rows
+  hour tier says peak 13 @ 2026-07-25 15:51:00
+
+--------------------------------------------------------------------------
+PHASE — 7 the answer (this is what we would submit)
+--------------------------------------------------------------------------
+  session concurrency  peak 13 @ 2026-07-25 15:51:00  (earliest tied minute — ADR 0014)
+  user concurrency     peak 13
+  stateless baseline   peak 13
+  minutes tied at the peak: 5  (dense spine; the change-point count under-reports)
+
+--------------------------------------------------------------------------
+PHASE — 8 THE GATE — truth recomputed from ev_raw
+--------------------------------------------------------------------------
+
+sql/90_reconcile.sql, verbatim (SUMMARY + up to 20 mismatches + 5 samples):
+     0	SUMMARY	minutes_compared=1364	mismatched=0	max_abs_diff=0	peak=13	PASS
+     2	sample	2026-07-25 00:00:00	1	1	0	PASS
+     2	sample	2026-07-25 01:29:00	1	1	0	PASS
+     2	sample	2026-07-25 13:22:00	4	4	0	PASS
+     2	sample	2026-07-25 16:59:00	13	13	0	PASS
+     2	sample	2026-07-25 22:43:00	1	1	0	PASS
+
+     asserted: minutes_compared=1364 equals the day's spine (2026-07-25 00:00:00 .. 2026-07-25 22:43:00)
+
+--------------------------------------------------------------------------
+TIMINGS — wall clock, this run, 30097 events
+--------------------------------------------------------------------------
+  1 schema (00_schema, 10_intervals) — tables + the stateless MV     7s
+  2 load (tools/load.sh, unmodified)                            17s
+  3 intervals (30_build_intervals.sql)                           4s
+  4 user tier (45_user_concurrency.sql)                          5s
+  5 deltas (40_deltas.sql)                                       4s
+  6 views (20) + hour agg (50) + content (80) + windows (85)    20s
+  7 the answer (this is what we would submit)                    3s
+  8 THE GATE — truth recomputed from ev_raw                    4s
+  TOTAL                                                         67s
+
+--------------------------------------------------------------------------
+VERDICT — GATE PASSED on codex006_unseen_30k_1aa9. peak 13 @ 2026-07-25 15:51:00 (earliest tied minute).
+--------------------------------------------------------------------------

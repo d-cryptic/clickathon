@@ -1,0 +1,41 @@
+Expression (Project names)
+  Sorting (Sorting for ORDER BY)
+    Expression ((Before ORDER BY + Projection))
+      Filter ((WHERE + (Change column names to column identifiers + Project names)))
+        Filling
+          Expression ((Before INTERPOLATE + (Before ORDER BY + (Projection + (Change column names to column identifiers + (Project names + Projection)))) [lifted up part]))
+            Sorting (Sorting for ORDER BY)
+              Expression ((Before ORDER BY + (Projection + (Change column names to column identifiers + (Project names + Projection)))))
+                Window (Window step for window 'PARTITION BY toStartOfHour(__table3.minute) ORDER BY __table3.minute ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW')
+                  Sorting (Sorting for window 'PARTITION BY toStartOfHour(__table3.minute) ORDER BY __table3.minute ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW')
+                    Expression ((Before WINDOW + (Change column names to column identifiers + (Project names + Projection))))
+                      Aggregating
+                        Union
+                          Expression ((Before GROUP BY + (Change column names to column identifiers + (Project names + (Projection + (Change column names to column identifiers + (Project names + Projection)))))))
+                            Aggregating
+                              Expression (Before GROUP BY)
+                                Expression ((WHERE + Change column names to column identifiers))
+                                  ReadFromMergeTree (sonyliv_u3.cc_minute_delta)
+                                  Indexes:
+                                    MinMax
+                                      Keys:
+                                        minute
+                                      Condition: and((minute in (-Inf, 1785065459]), (minute in [1785060000, +Inf)))
+                                      Parts: 1/7
+                                      Granules: 4/10
+                                    Partition
+                                      Keys:
+                                        toYYYYMMDD(minute)
+                                      Condition: and((toYYYYMMDD(minute) in (-Inf, 20260726]), (toYYYYMMDD(minute) in [20260726, +Inf)))
+                                      Parts: 1/1
+                                      Granules: 4/4
+                                    PrimaryKey
+                                      Keys:
+                                        minute
+                                      Condition: and((minute in (-Inf, 1785065459]), (minute in [1785060000, +Inf)))
+                                      Parts: 1/1
+                                      Granules: 4/4
+                                      Search Algorithm: generic exclusion search
+                                    Ranges: 1
+                          Expression ((Before GROUP BY + (Change column names to column identifiers + (Conversion before UNION + (Project names + (Projection + (Change column names to column identifiers + (Project names + (Projection + Change column names to column identifiers)))))))))
+                            ReadFromSystemOne

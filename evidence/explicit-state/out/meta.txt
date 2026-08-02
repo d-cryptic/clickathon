@@ -1,0 +1,12 @@
+measured: 2026-08-02 00:46 IST
+local ClickHouse: 26.7.1.1315
+source: default.ev_raw rows = 905558 (same count as graded sonyliv.ev_raw: 905,558)
+scratch db: exs_q12 (graded sonyliv never touched; local reads only)
+
+v1_transitions         31019	1945.8	2872	2026-07-26 10:56:00
+v1_shipped_tail        31019	1967.8	2909	2026-07-26 10:56:00
+v5a_to_run_end         31030	1946.4	2873	2026-07-26 10:56:00
+v5b_next_event         31039	1947.1	2875	2026-07-26 10:56:00
+v5c_next_heartbeat     31038	1947	2875	2026-07-26 10:56:00
+v2_union               30218	1935.9	2843	2026-07-26 10:56:00
+v3_explicit_only       29931	1946.2	2852	2026-07-26 10:56:00
