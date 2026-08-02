@@ -80,6 +80,33 @@ not had for days. Fix is a local `DROP` + re-apply + rebuild — **local only, n
 affected. In flight on `fix/shared-spec-defects`. Fix it because an invariant that "mostly holds" is
 not an invariant, not because it moves a number — it does not.
 
+**Q39 · A >100-day unseen file cannot be inserted, and the obvious fix is illegal on Cloud.**
+`cc_minute_delta` and `cc_user_minute` are `PARTITION BY toYYYYMMDD(minute)` — one partition per day —
+and ClickHouse Cloud pins `max_partitions_per_insert_block` **read-only at 100**. Measured
+2026-08-02 against the graded service:
+
+```
+SELECT 1 SETTINGS max_partitions_per_insert_block = 256
+  -> Code: 452. Setting max_partitions_per_insert_block should not be changed.
+```
+
+So a single INSERT block spanning more than 100 distinct days fails with a 252, and raising the limit
+in `SETTINGS` fails with a 452 — the override is not a fix, it is a second, unconditional failure. An
+agent added exactly that line to `sql/40_deltas.sql` and `sql/45_user_concurrency.sql`; it was reverted
+before it could turn a working build into a guaranteed one. **Do not reintroduce it.**
+
+The risk is nonetheless real for a "more real and cruel" unseen file. Today's data is nowhere near it —
+7 distinct dates, 7 active partitions, `ev_raw` spanning 2026-07-14..2026-07-26 — and the "102 calendar
+dates" figure that motivated the bad fix came from `tools/timespan-gen.sh`'s synthetic long-span
+fixture, not from the real file. Two fixes do work on Cloud:
+
+- **(a) chunk the INSERT in the driver** so no block spans >100 days. A `tools/` change, no schema
+  change, needs no authorisation. This is the safe one.
+- **(b) `PARTITION BY toYYYYMM(minute)`** — 102 days becomes 4 partitions. Strictly better, and daily
+  partitioning over a 7-day dataset is over-partitioned to begin with (see the vendored ClickHouse
+  partitioning guidance). But it is a **schema change**, so per the standing instruction it is an
+  **operator decision**, not a task an agent may take.
+
 **Independent validation of `main`.** 234 commits landed at once and **nothing reached `main` through
 the six-check gate** — seven attempts, seven rejections, all correct. A Codex audit of `main` as a
 submission is running. This is the largest genuinely-open item.
