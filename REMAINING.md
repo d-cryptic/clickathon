@@ -119,6 +119,31 @@ on Cloud:
 Whichever lands must prove **curve equivalence to the unchunked build**, not merely that the INSERT
 succeeded. A chunked build that silently drops a boundary minute is worse than one that fails loudly.
 
+**Q40 · No suite asserts its inputs exist, and one suite hides the absence.** `data/*.csv` is
+gitignored (`.gitignore:11`), so a fresh `git worktree add` produces a working environment with **no
+corpus**. Two suites meet that same missing prerequisite and fail in opposite directions:
+
+- `landing-test.sh` has no fallback, so it **fails loudly** — "missing data/ch-hackathon-raw-data.csv".
+- `golden-gen.sh:47-50` has a fallback that reaches into the shared checkout, so it **passes** — and
+  writes a machine-absolute path into `evidence/golden/run-*.txt`.
+
+**The one that passed is the more dangerous.** It produced a green suite and committed a
+machine-specific path. Worse than first reported: the fallback is not a relative resolution, it is a
+hardcoded `$HOME/Developers/personal/clickathon-project/data/...` — one developer's directory layout,
+committed in a script the judges may run.
+
+**The fix is not the path resolution.** It is that **nothing checks a suite's inputs before it reports
+a verdict** — `grep -l 'require_corpus|assert_inputs|check_data' tools/*.sh` returns nothing. Golden's
+fallback should be **removed rather than copied to the others**, so that a missing corpus fails the
+same way everywhere, loudly, instead of being silently papered over in the one place someone thought
+to paper it.
+
+This is the fourth instance in one day of a single shape — an artifact that looks fine where the
+**absence** is the signal. The other three: a two-sided test reporting `CONVERGES` on both halves with
+its sabotage half silent; a tally reading `3 passed · 2 failed · 8 skipped` with five suites absent;
+an evidence file with its header and no body. `tools/evidence.sh` (`044c703`) closes the third for one
+writer; **seven writers and every suite's inputs remain unchecked.**
+
 **Independent validation of `main`.** 234 commits landed at once and **nothing reached `main` through
 the six-check gate** — seven attempts, seven rejections, all correct. A Codex audit of `main` as a
 submission is running. This is the largest genuinely-open item.
