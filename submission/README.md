@@ -60,10 +60,43 @@ A model built on gaps alone silently counts every paused viewer as watching. Ful
 
 Evidence: [`evidence/unseen/official-20260802-codex-validation.txt`](../evidence/unseen/official-20260802-codex-validation.txt).
 
-The full result matrix — peak and average at minute, hour and day grains, dimension-filtered, with
-query IDs and latencies — is in [`evidence/submission/`](../evidence/submission/). Every number there
-comes from a query that was run, with a `query_id` joinable to `system.query_log`. Nothing in this
-submission is hand-computed.
+### Required results
+
+| | Session tier | User tier (distinct users) |
+|---|---:|---:|
+| **Peak concurrency** | **23,324** @ 2026-07-31 11:17:00 | **22,279** @ 11:16:00 |
+| Peak at minute / hour / day grain | 23,324 at all three (checked, not assumed) | — |
+| **Time-weighted average** | **944.6986** | 903.9986 |
+| Busiest hour, average | 11,277.43 (hour 11:00) | — |
+| Average over active minutes only (795) | 1,711.15 | — |
+
+The user peak lands **one minute before** the session peak — a real property of the data, not a
+rounding artefact, and the kind of thing a summed or averaged tier would hide.
+
+**Latency:** promoted session tiers answer in **2–13 ms**, the user tier's `uniqExact` merge in
+**28–40 ms**, and the single un-promoted fallback (`video_resolution`, no cube level) in **1,117 ms /
+753 MiB**. That last one is reported rather than hidden: it is the honest cost of answering on a
+dimension that arrived with the unseen file and was never pre-aggregated, and it is what "works as
+dimensions increase" actually costs today.
+
+Full matrix, the 27 queries verbatim, and a 108-row `system.query_log` extract:
+[`evidence/submission/`](../evidence/submission/). Every query ran 4× (one warm-up discarded, three
+measured) with a caller-supplied `query_id`, query cache off, and **all 27 returned byte-identical
+output across all four runs**. Nothing here is hand-computed.
+
+**Non-additivity, demonstrated rather than asserted.** Summing the 19 per-platform peaks gives
+**24,025 (+3.01%)** against the true 23,324; taking the maximum gives **7,163 (−69.29%)**. Both are
+wrong, in opposite directions. This is why the serving layer never sums a peak across dimensions.
+
+> **Where these numbers were produced.** The official 7,000,000-row build lives in a **local
+> ClickHouse container**, not on the hosted Cloud service — the Cloud service holds the original
+> 905,558-row file and a 30,097-row rehearsal slice. **Correctness is host-independent** and the
+> reconciliation above (3,201,716 minutes, 0 mismatched) is the proof of it. **The millisecond
+> latencies are not** — they are local-container timings, and we label them as such rather than
+> presenting them as hosted-service numbers. Seven further limitations are named in
+> [`evidence/submission/results-matrix.txt`](../evidence/submission/results-matrix.txt) §10, including
+> that this run reads the canonical tier tables rather than a committed generation, and that evidence
+> is `system.query_log` rather than distributed traces.
 
 **Two properties of these numbers that are easy to get wrong, and that we state explicitly rather
 than let a reader assume:** peak concurrency is **not summable across dimensions** — per-platform
