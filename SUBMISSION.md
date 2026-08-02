@@ -25,9 +25,23 @@ Final-package checklist:
       - `.env` was **never committed** — `git log --all -- .env` is empty. ✓
       - The Cloud **password appears in 0 commits and 0 files at HEAD**
         (`git log --all -S"$CH_PASSWORD"`, `git grep -F "$CH_PASSWORD" HEAD`). ✓
-      - The Cloud **hostname appears in 3 tracked files** — `evidence/load-guard.txt`,
-        `evidence/cruel/misscol.run.txt`, `evidence/cruel/newcol.run.txt` — up from the 1 file
-        recorded on 2026-08-01. It spreads because evidence files capture real command output.
+      - The Cloud **service identity appears in 4 tracked files, 40 lines** —
+        `evidence/graded-inventory/09-ddl-history-sonyliv.txt` (35 lines),
+        `evidence/load-guard.txt` (3), `evidence/cruel/misscol.run.txt` (1),
+        `evidence/cruel/newcol.run.txt` (1). It spreads because evidence files capture real
+        command output.
+
+        **Correction:** an earlier version of this line said 3 files / 4 lines. That scan grepped
+        the **fully-qualified** hostname, and the largest exposure — 35 of the 40 lines — writes the
+        **service subdomain alone**, which the FQDN pattern cannot match. Grep for the subdomain,
+        not the FQDN, or you will conclude the exposure is a tenth of its actual size.
+      - **Control-plane org and service UUIDs** appear in `api.clickhouse.cloud` URLs in
+        `evidence/alerting/clickstack-alerts.txt` and `...-BEFORE-having-fix.txt`. A hostname grep
+        cannot catch these — they need their own pattern.
+      - **Do not panic-grep for bare UUIDs.** That matches 14 files under `evidence/`, and almost
+        all of them are `query_id=` values from the query log — which are exactly what the contract
+        asks us to publish as proof the pipeline produced our numbers. Scrubbing those would delete
+        the evidence. Match UUIDs **inside `api.clickhouse.cloud` URLs**, not UUIDs generally.
 
       **Do not reflexively scrub the hostname.** The common submission contract *requires* that we
       "identify the ClickHouse service and tables" used as the destination. A hostname is therefore
