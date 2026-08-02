@@ -1,0 +1,16 @@
+property-test run — mode=compat seed0=20260802 cases=200 db=prop_t6
+properties (docs/codex-validation/003.md §13.2):
+  P1 state machine == reference interpreter
+  P2 interval expansion == delta running sums
+  P3 batch split/merge/reorder invariance
+  P4 idempotence (block dedup + duplicate rows)
+  P5 correction algebra old+(−old+new)=new
+  P6 user tier == mirror, and user <= session per grain
+  P7 no negative concurrency
+P1: 200 cases, 0 failures
+P2: 200 cases, 0 failures
+P3: 20 cases, 0 failures
+P4: 20 cases, 0 failures
+P5: 20 cases, 0 failures
+P6: 200 cases, 0 failures
+P7: 200 cases, 0 failures

@@ -1,5 +1,5 @@
 TRUNCATION / OPEN-SESSION ABSORPTION TEST   (TODOS H4 + H8)
-generated 2026-08-01T14:40:46Z
+generated 2026-08-02T00:58:32Z
 cut 2026-07-26 10:56:00  ·  isolated database sonyliv_trunc  ·  sonyliv read-only
 --------------------------------------------------------------------------
 PHASE 0 — reset the test database (never touches sonyliv)
@@ -33,13 +33,13 @@ RESULT — concurrency at the two probe minutes
 truncated (stump, pre-absorption)        2471          0
 after INCREMENTAL absorption             2953       2483
 control: from-scratch full build         2917       2483
-production truth (sonyliv)               2917       2483
+production truth (sonyliv)               5834       4966
 
 --------------------------------------------------------------------------
 CONVERGENCE over EVERY minute — spot checks prove nothing
 --------------------------------------------------------------------------
 DIVERGES   3 of 1579 minutes differ · max |diff| 36
-DIVERGES   3 of 1579 minutes differ · max |diff| 36
+DIVERGES   1470 of 1579 minutes differ · max |diff| 2890
    ┌──────────────minute─┬─incremental─┬─control─┬─diff─┐
 1. │ 2026-07-26 10:54:00 │        2826 │    2825 │    1 │
 2. │ 2026-07-26 10:55:00 │        2867 │    2860 │    7 │
@@ -88,7 +88,7 @@ THE FIX — ReplacingMergeTree(build_version), a MONOTONIC version column
 --------------------------------------------------------------------------
   Same two-pass absorption, only the version column changes.
 FIXED      versioned session_intervals is row-for-row identical to a clean rebuild
-CONVERGES  versioned incremental == production truth on all 1579 minutes · peak 2917
+DIVERGES   1470 of 1579 minutes · max |diff| 2917
 versioned incremental (FIXED)            2917       2483
 
 --------------------------------------------------------------------------
@@ -98,11 +98,11 @@ SECOND FINDING — starts/ends cannot carry the ADR 0006 negative correction
   step 3 says to append 'the NEGATION of the deltas for the old derivation'. For
   delta (Int64) that is exact — proven above. For an unsigned column it is not
   representable, and ClickHouse does not reject it; it wraps, silently:
-   ┌───────────stored_row─┐
-1. │                  100 │
-2. │ 18446744073709551516 │
-   └──────────────────────┘
-  sum() = 0  (correct, but only because UInt64 sum wraps modulo 2^64)   max() = 18446744073709551516  <- nonsense
+   ┌─stored_row─┐
+1. │       -100 │
+2. │        100 │
+   └────────────┘
+  sum() = 0  (correct, but only because UInt64 sum wraps modulo 2^64)   max() = 100  <- nonsense
 
   This run sidesteps it by zeroing starts/ends on the corrective row, which
   leaves the counters permanently inflated:
