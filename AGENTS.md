@@ -57,6 +57,7 @@ what is verified, what is broken, and what is still missing, in one page.
 | **Ask a mentor the questions that carry measured evidence** | [doubts/](doubts/) — evidence + exact wording + a decision table per answer. `02` is worth **9.7%** of our headline number |
 | **What happened in the last session, and every bug it found** | [docs/SESSION-2026-08-01.md](docs/SESSION-2026-08-01.md) |
 | **Run the unseen day** | [docs/RUNBOOK_UNSEEN.md](docs/RUNBOOK_UNSEEN.md) — read BEFORE the data drops |
+| **Know why a half-built model can no longer be served** | [ADR 0034](docs/adr/0034-generation-pinned-serving-surface.md) — the generation-pinned serving surface. The 2026-08-02 doubling reproduced (5,834) and defeated (2,917) in [evidence/generation-pinning/](evidence/generation-pinning/); `tools/build-generation.sh` |
 | **Understand how aggregates stay current (the incremental publisher)** | [ADR 0013](docs/adr/0013-continuous-publication-by-incremental-finalizer.md) — `make publish`, proven in [evidence/publish.txt](evidence/publish.txt) |
 | Observability / what we emit | [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) |
 | **Edit or rebuild the submission deck** | [deck/checkpoint1/README.md](deck/checkpoint1/README.md) — source `deck/checkpoint1/deck.html`, `deck/checkpoint1/build.sh` → `deck/checkpoint1/deck.pdf` |

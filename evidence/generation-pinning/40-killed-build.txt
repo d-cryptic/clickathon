@@ -1,0 +1,133 @@
+==================================================================
+BEFORE — both databases hold the same, correct model
+==================================================================
+   gp_ctl   served peak 2917    delta rows 28073   hour-tier peak 2917    intervals 30323
+   gp_pin   served peak 2917    delta rows 28073   hour-tier peak 2917    intervals 30323
+
+==================================================================
+CASE A — today's design (gp_ctl). Build dies at stage 4/6.
+==================================================================
+   stage 3/6: TRUNCATE cc_minute_delta, then the delta insert runs TWICE
+   stage 4/6: DIES (in the real incident: No such column cube_level)
+   stages 5, 6 and all three reconcile gates: NEVER RUN
+
+   what a dashboard reads one second later:
+   gp_ctl   served peak 5834    delta rows 56146   hour-tier peak 2917    intervals 30323
+
+   >>> SERVED, SILENTLY WRONG: peak 5834 (true 2917), 56146 rows (true 28073).
+   >>> The hour tier still says 2917, so the two tiers now disagree — which
+   >>> is the only visible symptom, and nothing was watching for it.
+
+==================================================================
+CASE B1 — ADR 0034 (gp_pin). Same corruption, build killed after staging.
+==================================================================
+   | == generation 2  (active is currently 1)  build db: gp_pin_bld_g2
+   |    [next]
+   | == 2/6  full rebuild into gp_pin_bld_g2 (tools/build-model.sh, unchanged)
+   |    ev_raw: 1811116 rows
+   | == target: local
+   | == 0/6  policy (policy v1 (e965954b23d4) GAP_S=150 TAIL_S=60 UNCLOSED_PAUSE_TO_RUN_END=1 POINT_ACTIVITY_COUNTS=0)
+   |    policy v1 (e965954b23d4) applied
+   | == 1/6  session_intervals (gap + pause, ADR 0001/0007)
+   |    intervals: 30323 over 10866 sessions
+   | == 2/6  cc_user_minute (uniqExact per bucket, replaced not unioned — ADR 0016)
+   |    user-minute buckets: 91679
+   | == 3/6  cc_minute_delta (hour-clipped, ADR 0003)
+   |    delta rows: 28073  opens 20002  closes 16826
+   | == 4/6  cc_hour_agg (the hour tier, ADR 0003)
+   |    hour rows: 98  peak 2917
+   | == 5/6  views
+   |    ok
+   | == 6/6  normalisation UDFs + views (ADR 0011)
+   |    ok
+   | == reconcile: delta serving layer vs interval expansion, every minute
+   |    PASS  17030 minutes, peak 2917
+   | == reconcile: user tier vs interval expansion, every minute
+   |    PASS  3732 minutes, user peak 2844
+   | == reconcile: hour tier peak vs minute tier peak
+   |    PASS  hour tier peak 2917 = minute tier peak
+   |    [build]
+   | == 3/6  stage generation 2 into gp_pin (invisible: pointer still at 1)
+   |    !! DOUBLE_DELTA=yes — staging cc_minute_delta a SECOND time (the 2026-08-02 corruption)
+   |    staged: 30323intervals,56146deltas,26254hours,91679userbuckets
+   |    [stage]
+   | == KILL_AFTER=stage — aborting deliberately, mid-build.
+   build exit code: 137 (killed, exactly as the real one was)
+
+   generations on disk:
+     2	building	0
+     1	committed	1
+   rows staged for the killed generation (they ARE there — just unreachable):
+     1	28073
+     2	56146
+
+   what a dashboard reads one second later:
+   gp_pin   served peak 2917    delta rows 28073   hour-tier peak 2917    intervals 30323
+
+==================================================================
+CASE B2 — ADR 0034. Same corruption, build allowed to RUN TO THE END.
+==================================================================
+   (the failure mode where nothing crashes and the model is simply wrong)
+   | == generation 3  (active is currently 1)  build db: gp_pin_bld_g3
+   |    [next]
+   | == 2/6  full rebuild into gp_pin_bld_g3 (tools/build-model.sh, unchanged)
+   |    ev_raw: 1811116 rows
+   | == target: local
+   | == 0/6  policy (policy v1 (e965954b23d4) GAP_S=150 TAIL_S=60 UNCLOSED_PAUSE_TO_RUN_END=1 POINT_ACTIVITY_COUNTS=0)
+   |    policy v1 (e965954b23d4) applied
+   | == 1/6  session_intervals (gap + pause, ADR 0001/0007)
+   |    intervals: 30323 over 10866 sessions
+   | == 2/6  cc_user_minute (uniqExact per bucket, replaced not unioned — ADR 0016)
+   |    user-minute buckets: 91679
+   | == 3/6  cc_minute_delta (hour-clipped, ADR 0003)
+   |    delta rows: 28073  opens 20002  closes 16826
+   | == 4/6  cc_hour_agg (the hour tier, ADR 0003)
+   |    hour rows: 98  peak 2917
+   | == 5/6  views
+   |    ok
+   | == 6/6  normalisation UDFs + views (ADR 0011)
+   |    ok
+   | == reconcile: delta serving layer vs interval expansion, every minute
+   |    PASS  17030 minutes, peak 2917
+   | == reconcile: user tier vs interval expansion, every minute
+   |    PASS  3732 minutes, user peak 2844
+   | == reconcile: hour tier peak vs minute tier peak
+   |    PASS  hour tier peak 2917 = minute tier peak
+   |    [build]
+   | == 3/6  stage generation 3 into gp_pin (invisible: pointer still at 1)
+   |    !! DOUBLE_DELTA=yes — staging cc_minute_delta a SECOND time (the 2026-08-02 corruption)
+   |    staged: 30323intervals,56146deltas,26254hours,91679userbuckets
+   |    [stage]
+   | == 4/6  verify generation 3 as staged
+   |    row counts             FAIL  1 of 4 tiers differ from gp_pin_bld_g3
+   |    delta vs intervals     FAIL  3732 of 17030 minutes disagree, served peak 5834 vs true 2917
+   |    hour vs minute peak    FAIL  hour peak 2917 != minute peak 5834
+   | 
+   | == GENERATION 3 FAILED ITS GATES — NOT COMMITTED.
+   |    The serving layer is untouched: readers stay on generation 1.
+   |    Staged rows are still on disk for inspection:
+   |      SELECT * FROM gp_pin.gen_cc_minute_delta WHERE generation = 3
+   |    Drop them with:
+   |      ALTER TABLE gp_pin.gen_cc_minute_delta DROP PARTITION ...   (see ADR 0034)
+   build exit code: 1
+
+   generations on disk:
+     3	abandoned	0
+     2	building	0
+     1	committed	1
+
+   what a dashboard reads one second later:
+   gp_pin   served peak 2917    delta rows 28073   hour-tier peak 2917    intervals 30323
+
+==================================================================
+VERDICT
+==================================================================
+   today  (gp_ctl): served peak 5834, 56146 delta rows   <- the incident
+   ADR 0034 (gp_pin): served peak 2917, 28073 delta rows   <- unchanged, twice over
+
+   The corrupt generations are still on disk and still readable if you ask
+   for one by name — which is the point: they are INSPECTABLE and they are
+   NOT SERVED. Retire one with a metadata-only DROP PARTITION:
+     ALTER TABLE gen_cc_minute_delta DROP PARTITION (2,20260714)
+     ALTER TABLE gen_cc_minute_delta DROP PARTITION (2,20260721)
+     ALTER TABLE gen_cc_minute_delta DROP PARTITION (2,20260722)

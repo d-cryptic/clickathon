@@ -1,0 +1,13 @@
+active generation: 1
+
+A · control-table commit — one INSERT, all four tiers
+   n=10  min 31.0 ms  median 74.5 ms  max 84.9 ms
+   window during which tiers disagree: NONE — the four views resolve the
+   same row, so there is no state in which some have flipped and some have not.
+
+B · baked-literal commit — four CREATE OR REPLACE VIEW
+   n=10  min 73.1 ms  median 79.0 ms  max 122.4 ms  (4 statements, incl. HTTP round trips)
+   window during which tiers disagree: the whole span above — a reader
+   landing inside it sees some tiers on the new generation and some on the old.
+
+restored: gp_pin reads through the control-table pointer
