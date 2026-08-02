@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="Real-time foreground-only streaming concurrency explorer">
   <title>Viewers Without Borders</title>
-  <link rel="stylesheet" href="/styles.css?v=20260802-8">
+  <link rel="stylesheet" href="/styles.css?v=20260802-9">
 </head>
 <body>
   <header class="topbar">
@@ -28,7 +28,7 @@
       </div>
       <div class="model-card">
         <span>MODEL</span>
-        <strong>State-gated intervals</strong>
+        <strong>Foreground-only intervals</strong>
         <small>40s heartbeat · 60s buckets · exact distinct</small>
       </div>
     </section>
@@ -75,7 +75,13 @@
           <button id="share-view" class="secondary">Copy link</button>
         </div>
       </div>
-      <div class="legend"><span class="dot"></span> accurate <span class="model-stateless"></span> stateless <span class="model-naive"></span> naive <span class="peak-dot"></span> peak <span class="brush-hint">drag across the chart to zoom</span></div>
+      <div class="legend" role="group" aria-label="Visible chart series">
+        <button class="legend-toggle active" data-chart-series="accurate" aria-pressed="true"><i class="dot"></i>accurate</button>
+        <button class="legend-toggle" data-chart-series="stateless" aria-pressed="false"><i class="model-stateless"></i>stateless</button>
+        <button class="legend-toggle" data-chart-series="naive" aria-pressed="false"><i class="model-naive"></i>naive</button>
+        <button class="legend-toggle active" data-chart-series="peak" aria-pressed="true"><i class="peak-dot"></i>peak</button>
+        <span class="brush-hint">drag across the chart to zoom</span>
+      </div>
       <div class="chart-wrap">
         <canvas id="curve-chart" aria-label="Concurrency curve"></canvas>
         <div id="chart-tooltip" class="chart-tooltip" hidden></div>
@@ -138,6 +144,6 @@
   </aside>
 
   <footer><span>Built on ClickHouse Cloud</span><span id="database-name">database —</span><span>All times UTC</span></footer>
-  <script src="/app.js?v=20260802-8" defer></script>
+  <script src="/app.js?v=20260802-9" defer></script>
 </body>
 </html>
