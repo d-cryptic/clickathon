@@ -1,5 +1,5 @@
 LANDING BOUNDARY (ADR 0030) — proof
-commit: 3c2d6db   server: 26.7.1.1315
+commit: 4416200   server: 26.7.1.1315
 raw: data/ch-hackathon-raw-data.csv   content: data/ch-hackathon-content-data.csv
 
 == 1  IDENTITY — the happy path is unchanged, byte for byte
@@ -19,10 +19,12 @@ raw: data/ch-hackathon-raw-data.csv   content: data/ch-hackathon-content-data.cs
     of the same spec, so it tests the pipeline instead of agreeing with itself)
 
     == target: local
+    == 0/6  policy (policy v1 (e965954b23d4) GAP_S=150 TAIL_S=60 UNCLOSED_PAUSE_TO_RUN_END=1 POINT_ACTIVITY_COUNTS=0)
+       policy v1 (e965954b23d4) applied
     == 1/6  session_intervals (gap + pause, ADR 0001/0007)
        intervals: 30323 over 10866 sessions
     == 2/6  cc_user_minute (uniqExact per bucket, replaced not unioned — ADR 0016)
-       user-minute buckets: 91692
+       user-minute buckets: 91679
     == 3/6  cc_minute_delta (hour-clipped, ADR 0003)
        delta rows: 28073  opens 20002  closes 16826
     == 4/6  cc_hour_agg (the hour tier, ADR 0003)
@@ -32,20 +34,20 @@ raw: data/ch-hackathon-raw-data.csv   content: data/ch-hackathon-content-data.cs
     == 6/6  normalisation UDFs + views (ADR 0011)
        ok
     == reconcile: delta serving layer vs interval expansion, every minute
-       PASS  3732 minutes, peak 2917
+       PASS  17030 minutes, peak 2917
     == reconcile: user tier vs interval expansion, every minute
        PASS  3732 minutes, user peak 2844
     == reconcile: hour tier peak vs minute tier peak
        PASS  hour tier peak 2917 = minute tier peak
 
-     ┌─ord─┬─scope───┬─c1─────────────────────┬─c2───────────┬─c3─────────────┬─c4────────┬─verdict─┐
-  1. │   0 │ SUMMARY │ minutes_compared=17028 │ mismatched=0 │ max_abs_diff=0 │ peak=2917 │ PASS    │
-  2. │   2 │ sample  │ 2026-07-14 15:43:00    │ 1            │ 1              │ 0         │ PASS    │
-  3. │   2 │ sample  │ 2026-07-16 12:35:00    │ 0            │ 0              │ 0         │ PASS    │
-  4. │   2 │ sample  │ 2026-07-17 08:56:00    │ 0            │ 0              │ 0         │ PASS    │
-  5. │   2 │ sample  │ 2026-07-26 10:56:00    │ 2917         │ 2917           │ 0         │ PASS    │
-  6. │   2 │ sample  │ 2026-07-26 11:30:00    │ 197          │ 197            │ 0         │ PASS    │
-     └─────┴─────────┴────────────────────────┴──────────────┴────────────────┴───────────┴─────────┘
+     ┌─ord─┬─scope───┬─c1─────────────────────┬─c2───────────┬─c3─────────────┬─c4────────┬─verdict─┬─policy─────────────────┐
+  1. │   0 │ SUMMARY │ minutes_compared=17028 │ mismatched=0 │ max_abs_diff=0 │ peak=2917 │ PASS    │ policy=v1/e965954b23d4 │
+  2. │   2 │ sample  │ 2026-07-14 15:43:00    │ 1            │ 1              │ 0         │ PASS    │                        │
+  3. │   2 │ sample  │ 2026-07-16 12:35:00    │ 0            │ 0              │ 0         │ PASS    │                        │
+  4. │   2 │ sample  │ 2026-07-17 08:56:00    │ 0            │ 0              │ 0         │ PASS    │                        │
+  5. │   2 │ sample  │ 2026-07-26 10:56:00    │ 2917         │ 2917           │ 0         │ PASS    │                        │
+  6. │   2 │ sample  │ 2026-07-26 11:30:00    │ 197          │ 197            │ 0         │ PASS    │                        │
+     └─────┴─────────┴────────────────────────┴──────────────┴────────────────┴───────────┴─────────┴────────────────────────┘
 
   PASS  no MISMATCH
   PASS  minutes compared = 17028
@@ -113,7 +115,7 @@ raw: data/ch-hackathon-raw-data.csv   content: data/ch-hackathon-content-data.cs
   itself, so it must do that AFTER the double-load guard — a refusal that quietly
   created three tables would not be a refusal.
   PASS  the non-empty database was refused (exit 1)
-  PASS  object count unchanged by the refusal = 6
+  PASS  object count unchanged by the refusal = 8
   PASS  no landing objects created = 0
 
 == 5  COST — what the extra materialisation actually costs
@@ -127,8 +129,8 @@ raw: data/ch-hackathon-raw-data.csv   content: data/ch-hackathon-content-data.cs
   Wall clock is not reported: this container is shared with other worktrees
   and its wall clock swings ~2x run to run. See ADR 0030 for a 14-run series.
    ┌─route───────┬─server_ms─┬─read───────┬─statements─┐
-1. │ landing     │      1744 │ 564.90 MiB │          6 │
-2. │ pre-landing │      2084 │ 333.07 MiB │          2 │
+1. │ landing     │      1545 │ 564.90 MiB │          6 │
+2. │ pre-landing │      1699 │ 333.07 MiB │          2 │
    └─────────────┴───────────┴────────────┴────────────┘
 
   ev_landing is the whole cost and it is reclaimable in one statement once a

@@ -5,7 +5,11 @@
 ## What disagreed
 
 ```
-user concurrency EXCEEDS session concurrency at 63 (minute, grain) cells (first 4): [((1786816020, ('IPHONE', 'india', 21000002)), 1, 0), ((1786814100, ('IPHONE', 'india', 21000002)), 1, 0), ((1786813260, ('IPHONE', 'india', 21000002)), 1, 0), ((1786813680, ('IPHONE', 'india', 21000002)), 1, 0)]
+user tier != reference mirror on 125 cells:
+  (1786812780, ('IPHONE', 'india', 21000002)): reference=1 cc_user_minute=0
+  (1786812840, ('IPHONE', 'india', 21000002)): reference=1 cc_user_minute=0
+  (1786812840, ('SONY_ANDROID_TV', 'india', 21000002)): reference=0 cc_user_minute=1
+  (1786812900, ('IPHONE', 'india', 21000002)): reference=1 cc_user_minute=0
 ```
 
 ## Shrunk counterexample — 4 events (from 1963)

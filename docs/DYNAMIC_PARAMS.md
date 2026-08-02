@@ -9,9 +9,15 @@
 > verification instrument we own shares the fitted value and is blind to a mis-fit*. Evidence:
 > [evidence/params/](../evidence/params/). Recommendation: [ADR 0028](adr/0028-fitted-parameters-are-declared-inputs-not-derived-per-run.md).
 
-**Nothing in this document has been applied.** It is an inventory, a measurement and a design. All
-measurement ran read-only against `default.ev_raw` locally or in scratch db `params_v2`; the graded
-`sonyliv` database was never written to.
+**Status, 2026-08-02: the de-duplication in §5 has been APPLIED; no value has changed.**
+[ADR 0032](adr/0032-one-versioned-policy-declaration-read-by-every-consumer.md) collapsed the six
+sites of §4 into one declaration (`policy/model.policy` → the generated view `v_model_policy`), read
+by the model, the gate, the reference interpreter, both generators and the publisher. Before/after
+builds are byte-identical — peak 2,917, 30,323 intervals, all four tiers hash-equal
+([evidence/policy/](../evidence/policy/README.md)). Everything else below — the values themselves,
+the `TAIL_S` re-derivation (§A2), the adaptive lease (C3) — is still an inventory and a design, not
+an applied change. All measurement ran read-only against `default.ev_raw` locally or in scratch db
+`params_v2`; the graded `sonyliv` database was never written to.
 
 ---
 
@@ -102,18 +108,32 @@ but the fact that the question exists at all is a property of this file.
 deflates**. Measured fork on this file: conservative 1,978.1 h / peak 2,917 vs permissive 2,070.0 h /
 peak 3,036 (+4.1%). Recorded as mentor Q2 / ADR 0007; not re-litigated here.
 
-### A4 · The pause/resume vocabulary — `event = 'pause'` / `'resume'` matched exactly
+### A4 · The event vocabulary — which pairs mean "watching", and which verbs pause
 
-`sql/30_build_intervals.sql:129-130`
+`contracts/event_semantics.tsv` (declaration) → `sql/30_build_intervals.sql`, `sql/90_reconcile.sql`
+(generated block, `tools/event-semantics.sh --write`)
 
 **Fitted from:** the 47 event-name pairs observed in this file.
 
-**What breaks.** A new pause-like verb on the unseen day (`AdPause`, `speed-pause` and 830 others
-already exist and are *not* matched) is invisible to the model, so paused time is booked as watching
-— **inflation, silently**. Measured immaterial here (+0.03% if the known variants are included), but
-that is a statement about this file's vocabulary mix, not about the next one. The
-source-contract gate (ADR 0026) is the only instrument that can see a new verb;
-`evidence/liveness/vocabulary.tsv` is the committed baseline.
+**Status, [ADR 0033](adr/0033-event-semantics-are-declared-and-unknown-events-fail-closed.md):** all 47
+pairs are now *declared* with a class and an action, and an **undeclared** pair renews nothing — so an
+unknown verb on the unseen day can only shorten the answer, never lengthen it. Pause/resume are still
+matched by declared **name** rather than by pair, deliberately and asymmetrically, so an undeclared
+`AdBreak/pause` still stops the clock. Cost on this file: zero (peak 2,917, boundaries bit-identical).
+
+**What still breaks.** Two things, and the second is the one to watch:
+
+- *A misdeclared pair.* The gate shares the vocabulary by construction, so `--check` catches
+  divergence between model and gate but never **wrongness**. Probe 8 of the source-contract gate fires
+  at load on any *undeclared* pair; nothing fires on a *misdeclared* one.
+  `evidence/liveness/vocabulary.tsv` is the committed baseline.
+- *`LIVENESS_CLASSES` is a fitted constant that moves the answer and is **not** covered by
+  `POLICY_VERSION`.* Unlike the four constants above it is a hand-edited literal in two SQL files, not
+  a key in `policy/model.policy`. It ships as all six classes; the measured ladder runs to
+  **2,879, −1.3% of the graded peak**. So it belongs in Tier A by elasticity, but it is the one Tier A
+  constant whose change leaves every policy stamp in every evidence file byte-identical. Migrating it
+  into the declaration is the open follow-up — sized, with its seven touch points, in ADR 0033
+  *What it does not fix*.
 
 ### A5 · Whole-second timestamp truncation
 
@@ -185,6 +205,14 @@ Combined with the gate (`sql/90_reconcile.sql:39-40`) carrying the same two lite
 > **Every instrument we own for detecting a wrong answer is calibrated with the number under
 > suspicion.** A mis-fitted `GAP_S` goes green on the reconcile gate, green on the property suite,
 > and green on the scale test, simultaneously and by construction.
+
+**CLOSED as of ADR 0032 — but read what was and was not closed.** The six sites are now one
+declaration, so the three encodings are gone and the covers are asserted `>= TAIL_S + 60` instead of
+drifting. The *sharing* is not gone and cannot be: every instrument still uses one value. What
+changed is that it is one **named, versioned** value rather than six numbers that happened to agree,
+so the circularity is a fact you can read off `policy/model.policy` instead of a discovery you make
+by grepping. Detecting a mis-fit still needs the sweep in [evidence/params/](../evidence/params/) and
+the mentor answers in [doubts/](../doubts/), not the refactor.
 
 That — not the value 150 itself — is the real hidden dependency on this file. It is the same class of
 blindness `evidence/adversarial/` was built to attack, applied to parameters rather than conventions.

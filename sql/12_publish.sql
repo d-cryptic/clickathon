@@ -372,32 +372,44 @@ SELECT
                                                               AS pending_sessions,
 
     -- RETENTION HEADROOM (Q11, ADR 0019). session_dirty / cc_publish_batch /
-    -- cc_publish_consumed all carry 7-day TTLs; work that outlives them
-    -- expires SILENTLY and the tiers are wrong with no signal. These columns
-    -- are that signal: headroom is seconds until the oldest undigested marking
-    -- hits the TTL, and the alert trips a full day before the cliff. Wire
-    -- retention_alert (and pending_sessions alongside it) into `sonyliv
+    -- cc_publish_consumed all carry QUEUE_TTL_DAYS TTLs; work that outlives
+    -- them expires SILENTLY and the tiers are wrong with no signal. These
+    -- columns are that signal: headroom is seconds until the oldest undigested
+    -- marking hits the TTL, and the alert trips a full day before the cliff.
+    -- Wire retention_alert (and pending_sessions alongside it) into `sonyliv
     -- observe` / ClickStack; alert when retention_alert = 1 OR when
     -- publish_lag_s grows monotonically across scrapes.
-    604800                                                    AS retention_ttl_s,
+    --
+    -- The seconds were a hardcoded 604800 in three places here. A VIEW can read
+    -- the policy, so it does (ADR 0032). The table TTLs above cannot — a
+    -- ClickHouse TTL must be a deterministic expression over the table's own
+    -- columns — so they keep the literal and `tools/policy.sh check` asserts
+    -- they equal QUEUE_TTL_DAYS. Declared-and-verified where injection is
+    -- impossible; injected everywhere it is possible.
+    (SELECT toInt64(queue_ttl_days) * 86400 FROM v_model_policy)
+                                                              AS retention_ttl_s,
     if(oldest_pending IS NULL, NULL,
        greatest(0, dateDiff('second', oldest_pending, now())))
                                                               AS oldest_pending_age_s,
     if(oldest_pending IS NULL, NULL,
-       604800 - dateDiff('second', oldest_pending, now()))    AS retention_headroom_s,
+       retention_ttl_s - dateDiff('second', oldest_pending, now()))
+                                                              AS retention_headroom_s,
     if(oldest_pending IS NULL, 0,
-       toUInt8(dateDiff('second', oldest_pending, now()) > 604800 - 86400))
+       toUInt8(dateDiff('second', oldest_pending, now()) > retention_ttl_s - 86400))
                                                               AS retention_alert,
 
     -- The live publisher lease, if any (ADR 0019). Winner rule matches
-    -- tools/publish.sh: newest (acquired_at, owner) among live rows. The 60 s
-    -- liveness window is PUBLISH_LEASE_TTL_S's default — informational only;
-    -- the publisher evaluates its own TTL, this column just shows the holder.
+    -- tools/publish.sh: newest (acquired_at, owner) among live rows. The
+    -- liveness window is PUBLISH_LEASE_TTL_S, read from the same declaration
+    -- the publisher reads (ADR 0032) — it was a third copy of the value, in a
+    -- third file, that no test bound to the other two (DYNAMIC_PARAMS C5).
+    -- Informational only; the publisher evaluates its own TTL, this column
+    -- just shows the holder.
     (SELECT owner FROM (
         SELECT owner, min(acquired_at) AS acq, max(renewed_at) AS ra,
                argMax(released, renewed_at) AS rel
         FROM cc_publish_lease GROUP BY owner)
-      WHERE rel = 0 AND ra > now64(3) - INTERVAL 60 SECOND
+      WHERE rel = 0 AND ra > now64(3) - toIntervalSecond((SELECT publish_lease_ttl_s FROM v_model_policy))
       ORDER BY acq DESC, owner DESC LIMIT 1)                  AS lease_holder,
 
     last_run                                                  AS last_committed_run,

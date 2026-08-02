@@ -1,17 +1,19 @@
 RECONCILE — serving layer vs ev_raw
-target: local   commit: 736a474
+target: local   commit: 4416200
+policy (tree):     policy v1 (e965954b23d4) GAP_S=150 TAIL_S=60 UNCLOSED_PAUSE_TO_RUN_END=1 POINT_ACTIVITY_COUNTS=0
+policy (database): v1 (e965954b23d4) GAP_S=150 POINT_ACTIVITY_COUNTS=0 TAIL_S=60 UNCLOSED_PAUSE_TO_RUN_END=1
 
 == 1. THE GATE — truth recomputed from ev_raw, five minutes
    (peak, both data boundaries, two arbitrary; any non-zero delta is a failure)
 
-   ┌─ord─┬─scope───┬─c1─────────────────────┬─c2───────────┬─c3─────────────┬─c4────────┬─verdict─┐
-1. │   0 │ SUMMARY │ minutes_compared=17028 │ mismatched=0 │ max_abs_diff=0 │ peak=2917 │ PASS    │
-2. │   2 │ sample  │ 2026-07-14 15:43:00    │ 1            │ 1              │ 0         │ PASS    │
-3. │   2 │ sample  │ 2026-07-16 12:35:00    │ 0            │ 0              │ 0         │ PASS    │
-4. │   2 │ sample  │ 2026-07-17 08:56:00    │ 0            │ 0              │ 0         │ PASS    │
-5. │   2 │ sample  │ 2026-07-26 10:56:00    │ 2917         │ 2917           │ 0         │ PASS    │
-6. │   2 │ sample  │ 2026-07-26 11:30:00    │ 197          │ 197            │ 0         │ PASS    │
-   └─────┴─────────┴────────────────────────┴──────────────┴────────────────┴───────────┴─────────┘
+   ┌─ord─┬─scope───┬─c1─────────────────────┬─c2───────────┬─c3─────────────┬─c4────────┬─verdict─┬─policy─────────────────┐
+1. │   0 │ SUMMARY │ minutes_compared=17028 │ mismatched=0 │ max_abs_diff=0 │ peak=2917 │ PASS    │ policy=v1/e965954b23d4 │
+2. │   2 │ sample  │ 2026-07-14 15:43:00    │ 1            │ 1              │ 0         │ PASS    │                        │
+3. │   2 │ sample  │ 2026-07-16 12:35:00    │ 0            │ 0              │ 0         │ PASS    │                        │
+4. │   2 │ sample  │ 2026-07-17 08:56:00    │ 0            │ 0              │ 0         │ PASS    │                        │
+5. │   2 │ sample  │ 2026-07-26 10:56:00    │ 2917         │ 2917           │ 0         │ PASS    │                        │
+6. │   2 │ sample  │ 2026-07-26 11:30:00    │ 197          │ 197            │ 0         │ PASS    │                        │
+   └─────┴─────────┴────────────────────────┴──────────────┴────────────────┴───────────┴─────────┴────────────────────────┘
 
 == 2. MODEL COMPARISON — the same minutes under three definitions
 

@@ -77,16 +77,40 @@ QUIET=0
 # re-claims nothing that was digested, so the 6,659-session pathology cannot
 # return. An insert delayed beyond the lookback is lost; retention_alert in
 # v_cc_publish_lag is the (indirect) tell, and ADR 0019 records the bound.
-SETTLE_S="${PUBLISH_SETTLE_S:-5}"
-LOOKBACK_S="${PUBLISH_LOOKBACK_S:-900}"
+# DEFAULTS COME FROM THE POLICY (ADR 0032), not from literals here. An explicit
+# environment override still wins — these are operational knobs an operator may
+# need to turn at 3am without editing a file — but the DECLARED value is the one
+# in policy/model.policy, so `tools/policy.sh list` shows what the publisher
+# actually runs under.
+pol() { tools/policy.sh get "$1"; }
+SETTLE_S="${PUBLISH_SETTLE_S:-$(pol PUBLISH_SETTLE_S)}"
+LOOKBACK_S="${PUBLISH_LOOKBACK_S:-$(pol PUBLISH_LOOKBACK_S)}"
 
 # THE LEASE (ADR 0019, Q9). At most one live publisher per database. TTL is
 # how long a silent holder stays authoritative — it must exceed the longest
 # single phase (measured: ≤ 2 s at this scale) with a wide margin, because a
 # holder only renews BETWEEN phases. SETTLE here plays the same role as above:
 # the acquisition lottery is decided a full visibility-window after inserting.
-LEASE_TTL_S="${PUBLISH_LEASE_TTL_S:-60}"
-LEASE_SETTLE_S="${PUBLISH_LEASE_SETTLE_S:-2}"
+LEASE_TTL_S="${PUBLISH_LEASE_TTL_S:-$(pol PUBLISH_LEASE_TTL_S)}"
+LEASE_SETTLE_S="${PUBLISH_LEASE_SETTLE_S:-$(pol PUBLISH_LEASE_SETTLE_S)}"
+
+# THE TAIL_S DEPENDENCIES, WRITTEN AS THREE DIFFERENT NUMBERS (ADR 0028 §A2).
+# The hours/users phases below cover a window that must be a SUPERSET of what
+# the batch could have touched, and the size of that window is a TAIL_S
+# question — new interval coverage ends at hi + TAIL_S, and the close delta
+# lands in the minute after. Until ADR 0032 those windows were the literals
+# `+7201`, `+241` and `INTERVAL 300 SECOND` in three separate expressions, none
+# of which mentioned TAIL_S: raising TAIL_S above 240 silently under-covered
+# the minute window and buckets went stale with no error.
+#
+# They are still DECLARED values rather than computed ones — a cover is a
+# deliberate margin, not an arithmetic consequence — but `tools/policy.sh
+# check` now asserts every one of them is >= TAIL_S + 60, so the same edit
+# fails loudly instead of going quiet. The `+ 1` at the use sites is range()
+# exclusivity, not slack.
+MINUTE_COVER_S="${PUBLISH_MINUTE_COVER_S:-$(pol PUBLISH_MINUTE_COVER_S)}"
+HOUR_COVER_S="${PUBLISH_HOUR_COVER_S:-$(pol PUBLISH_HOUR_COVER_S)}"
+INTERVAL_PREFILTER_S="${PUBLISH_INTERVAL_PREFILTER_S:-$(pol PUBLISH_INTERVAL_PREFILTER_S)}"
 
 die() { printf '\npublish.sh FAILED: %s\n' "$*" >&2; exit 1; }
 say() { [ "$QUIET" = 1 ] || printf '%s\n' "$*"; }
@@ -741,13 +765,14 @@ BV here deletes the run's own derivation. Inspect cc_publish_runs run $run_id." 
   # The touched-hour set comes from the batch's per-session read windows: every
   # old interval lies inside [lo, hi] (the claim's completeness argument) and
   # every new interval ends by hi + TAIL_S, so with close deltas landing at
-  # most one minute later, hours(lo .. hi + 2h) is a provable superset. A
-  # superset is all that is needed: re-deriving an untouched hour rewrites the
-  # identical row at a newer version.
+  # most one minute later, hours(lo .. hi + HOUR_COVER_S) is a provable
+  # superset. A superset is all that is needed: re-deriving an untouched hour
+  # rewrites the identical row at a newer version. HOUR_COVER_S is declared in
+  # policy/model.policy and asserted >= TAIL_S + 60 (ADR 0032).
   if [ "$phase" = emitted ]; then
     lease_beat
     local HOURS_IN
-    HOURS_IN="(SELECT toDateTime(h) FROM (SELECT DISTINCT arrayJoin(range(toUInt32(toStartOfHour(toDateTime(lo_event_ts))), toUInt32(toStartOfHour(toDateTime(hi_event_ts))) + 7201, 3600)) AS h FROM cc_publish_batch WHERE run_id = $run_id))"
+    HOURS_IN="(SELECT toDateTime(h) FROM (SELECT DISTINCT arrayJoin(range(toUInt32(toStartOfHour(toDateTime(lo_event_ts))), toUInt32(toStartOfHour(toDateTime(hi_event_ts))) + $((HOUR_COVER_S + 1)), 3600)) AS h FROM cc_publish_batch WHERE run_id = $run_id))"
     extract_insert sql/50_hour_agg.sql "$TMP/hours_src.sql"
     # The scope rides the ARRAY JOIN line, not the FROM line: WHERE must come
     # AFTER an ARRAY JOIN clause or the statement does not parse.
@@ -773,16 +798,19 @@ BV here deletes the run's own derivation. Inspect cc_publish_runs run $run_id." 
   # whose coverage vanished get an explicit empty state at the newer version.
   #
   # Touched minutes: same window argument as the hours phase, at minute grain —
-  # coverage ends by hi + TAIL_S, so minutes(lo .. hi + 4min) is a superset.
-  # The interval prefilter is the blast-radius bound: only intervals that can
-  # overlap the batch window are expanded, not all of session_intervals.
+  # coverage ends by hi + TAIL_S, so minutes(lo .. hi + MINUTE_COVER_S) is a
+  # superset. The interval prefilter is the blast-radius bound: only intervals
+  # that can overlap the batch window are expanded, not all of
+  # session_intervals. Both come from policy/model.policy and are asserted
+  # >= TAIL_S + 60 by `tools/policy.sh check` (ADR 0032) — before that, raising
+  # TAIL_S past 240 under-covered this window with no signal at all.
   if [ "$phase" = hours ]; then
     lease_beat
     local MINS_IN
-    MINS_IN="(SELECT toDateTime(m) FROM (SELECT DISTINCT arrayJoin(range(toUInt32(toStartOfMinute(toDateTime(lo_event_ts))), toUInt32(toStartOfMinute(toDateTime(hi_event_ts))) + 241, 60)) AS m FROM cc_publish_batch WHERE run_id = $run_id))"
+    MINS_IN="(SELECT toDateTime(m) FROM (SELECT DISTINCT arrayJoin(range(toUInt32(toStartOfMinute(toDateTime(lo_event_ts))), toUInt32(toStartOfMinute(toDateTime(hi_event_ts))) + $((MINUTE_COVER_S + 1)), 60)) AS m FROM cc_publish_batch WHERE run_id = $run_id))"
     extract_insert sql/45_user_concurrency.sql "$TMP/users_src.sql"
     template_or_die "$TMP/users_src.sql" "$TMP/users.sql" 'PUBLISH_USER_NEW' \
-      -e "s|^        FROM session_intervals FINAL\$|        FROM session_intervals FINAL WHERE interval_end >= toDateTime64('$LO',3) - INTERVAL 300 SECOND AND interval_start <= toDateTime64('$HI',3) + INTERVAL 300 SECOND /*PUBLISH_USER_PRE*/|" \
+      -e "s|^        FROM session_intervals FINAL\$|        FROM session_intervals FINAL WHERE interval_end >= toDateTime64('$LO',3) - INTERVAL $INTERVAL_PREFILTER_S SECOND AND interval_start <= toDateTime64('$HI',3) + INTERVAL $INTERVAL_PREFILTER_S SECOND /*PUBLISH_USER_PRE*/|" \
       -e "s|^    WHERE 1 /\\* publish: new coverage \\*/\$|    WHERE minute IN $MINS_IN /*PUBLISH_USER_NEW*/|" \
       -e "s|^    WHERE 1 /\\* publish: existing buckets \\*/\$|    WHERE minute IN $MINS_IN /*PUBLISH_USER_OLD*/|"
     grep -q 'PUBLISH_USER_OLD' "$TMP/users.sql" || die "users template lost its existing-buckets scope"

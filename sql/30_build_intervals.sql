@@ -172,14 +172,42 @@ WITH
     -- decided here; see the header. Same discipline as POINT_ACTIVITY_COUNTS.
     ['playback','lifecycle','app_state','error','download','ui'] AS LIVENESS_CLASSES,
     arrayMap(x -> (x.1, x.2), arrayFilter(x -> has(LIVENESS_CLASSES, x.3), EVENT_SEMANTICS)) AS LIVENESS_PAIRS,
-    -- Tunables. GAP_S is now derived from the MEASURED inter-arrival p99 of 49s
-    -- (ADR 0007), not from the "60s cadence" that the data disproved. 150s is
-    -- ~3x p99 — wide enough to survive a burst pause, tight enough to catch a
-    -- backgrounding within one minute bucket.
-    150 AS GAP_S,
-    -- Credit after the last event of a run. One cadence, not a full gap: the
-    -- viewer was watching until at least the next expected event.
-    60  AS TAIL_S,
+
+    -- ---- THE POLICY (ADR 0032) ------------------------------------------
+    -- These four constants USED TO BE LITERALS HERE, and copies of them lived
+    -- in sql/90_reconcile.sql, tools/reference_interpreter.py,
+    -- tools/cruel-gen.sh, tools/golden-gen.sh and tools/scale-load.sql. Six
+    -- sites across three languages meant the model, the GATE, the reference
+    -- ORACLE and both data GENERATORS all shared the fitted value — so a
+    -- mis-fitted GAP_S went green on every instrument we own, simultaneously
+    -- and by construction (docs/DYNAMIC_PARAMS.md §4).
+    --
+    -- They are now DECLARED ONCE in policy/model.policy and rendered into
+    -- v_model_policy by tools/policy.sh gen. The values are UNCHANGED — this
+    -- is a relocation, not a retune; see the ADR for the before/after build
+    -- diff. A scalar subquery over a one-row view folds to a constant, so it
+    -- is free inside the lambdas below, and a database with no policy view
+    -- FAILS LOUDLY rather than defaulting GAP_S to zero.
+    --
+    -- What each one means, and what it is worth, stays in the declaration.
+    -- Read policy/model.policy before changing any of them; the sensitivity
+    -- sweep is evidence/params/ and the decision is ADR 0028.
+    (SELECT gap_s                     FROM v_model_policy) AS GAP_S,
+    (SELECT tail_s                    FROM v_model_policy) AS TAIL_S,
+    (SELECT unclosed_pause_to_run_end FROM v_model_policy) AS UNCLOSED_PAUSE_TO_RUN_END,
+    (SELECT point_activity_counts     FROM v_model_policy) AS POINT_ACTIVITY_COUNTS,
+
+    -- GAP_S is derived from the MEASURED inter-arrival p99 of 49s (ADR 0007),
+    -- not from the "60s cadence" that the data disproved. 150s is ~3x p99 —
+    -- wide enough to survive a burst pause, tight enough to catch a
+    -- backgrounding within one minute bucket. (Re-measured 2026-08-02: the p99
+    -- is 45s counting same-second pairs and 155s excluding them, so the value
+    -- survives but "3x p99" depends on a choice this comment never stated.
+    -- ADR 0028 item 2.)
+    --
+    -- TAIL_S is the credit after the last event of a run. One cadence, not a
+    -- full gap: the viewer was watching until at least the next expected event.
+    --
     -- THE UNCLOSED-PAUSE RULE. 23% of pauses never resume, and the two readings
     -- are not close: MEASURED end to end on the real file,
     --   conservative  1,949.3 h counted, PEAK 2,887
@@ -189,7 +217,7 @@ WITH
     -- Default CONSERVATIVE: against an EXACT private ground truth, under-counting
     -- is a visible, explainable error while over-counting invents viewers that
     -- were demonstrably not receiving playback events. See ADR 0007; mentor Q2.
-    1 AS UNCLOSED_PAUSE_TO_RUN_END,
+    --
     -- THE POINT-ACTIVITY RULE (ADR 0031). Does a viewer who was demonstrably
     -- active at an instant, but for whom we can measure NO DURATION, count for
     -- one cadence — or for nothing at all?
@@ -228,8 +256,10 @@ WITH
     -- rule for every run that lasts even one second. ADR 0031 RECOMMENDS 1.
     -- It ships at 0 because flipping it moves a number we have already
     -- submitted (2,917 -> 2,927), and that is an operator's call, not a
-    -- build's. Flip it here and in sql/90_reconcile.sql together.
-    0 AS POINT_ACTIVITY_COUNTS,
+    -- build's. Since ADR 0032 flipping it is ONE edit in policy/model.policy
+    -- plus `tools/policy.sh gen` — the gate, the oracle and both generators
+    -- follow automatically, where it used to be a six-file change.
+    -- ------------------------------------------------------------------------
 
     per_session AS (
         SELECT

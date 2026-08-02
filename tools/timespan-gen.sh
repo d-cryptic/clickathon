@@ -253,7 +253,7 @@ run_point() {
   hr
   qd default "DROP DATABASE IF EXISTS $DBN" >/dev/null
   qd default "CREATE DATABASE $DBN" >/dev/null
-  for f in sql/00_schema.sql sql/10_intervals.sql sql/20_views.sql; do
+  for f in sql/00_schema.sql sql/01_policy.sql sql/10_intervals.sql sql/20_views.sql; do
     docker exec -i ch clickhouse-client --database "$DBN" --multiquery < "$f" >/dev/null 2>&1
   done
   local t
@@ -767,6 +767,10 @@ WITH
     (a, k1, k2) -> sqrt(-2 * log(greatest(U(a, k1), 1e-12))) * cos(2 * pi() * U(a, k2)) AS N01,
     (u, cdf) -> greatest(1, arrayFirstIndex(x -> x >= u, cdf)) AS PICK,
 
+    -- The model's gap threshold, from the one declaration (ADR 0032); this was
+    -- a literal 150 below, the same circularity as tools/scale-load.sql §D1.
+    (SELECT gap_s FROM v_model_policy) AS GAP_S,
+
     3.4    AS BURST_MEAN,
     53.0   AS SESS_MEDIAN,
     0.951  AS SESS_SIGMA,
@@ -871,7 +875,7 @@ FROM
                     greatest(1, toUInt32(round(nev / BURST_MEAN))) AS nb,
                     arrayMap(x -> t0 + x, arrayCumSum(arrayMap(j -> if(j = 1, toUInt32(0),
                         if(U(number, 1000000 + j) < P_BIG_GAP,
-                           least(toUInt32(3600), toUInt32(150 + round(exp(log(BIG_GAP_MEDIAN) + (BIG_GAP_SIGMA * N01(number, 2000000 + j, 3000000 + j)))))),
+                           least(toUInt32(3600), toUInt32(GAP_S + round(exp(log(BIG_GAP_MEDIAN) + (BIG_GAP_SIGMA * N01(number, 2000000 + j, 3000000 + j)))))),
                            toUInt32(40 + floor(U(number, 4000000 + j) * 2)))
                         ), range(1, nb + 1)))) AS beat_ts,
 

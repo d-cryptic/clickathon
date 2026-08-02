@@ -323,7 +323,7 @@ say "    a quoted embedded newline is ONE row here and two to \`wc -l\` (Q37)."
 # that does not name the revision it tested is not evidence.
 say ""
 say "SQL fingerprint (sha256, first 12) — the exact model this run exercised:"
-for f in sql/00_schema.sql sql/10_intervals.sql sql/20_views.sql sql/30_build_intervals.sql \
+for f in sql/00_schema.sql sql/01_policy.sql sql/10_intervals.sql sql/20_views.sql sql/30_build_intervals.sql \
          sql/40_deltas.sql sql/45_user_concurrency.sql sql/50_hour_agg.sql \
          sql/80_content.sql sql/85_windows.sql sql/90_reconcile.sql tools/load.sh; do
   say "  $(shasum -a 256 "$f" | cut -c1-12)  $f"
@@ -336,6 +336,7 @@ phase "1 schema (00_schema, 10_intervals) — tables + the stateless MV"
 # cc_minute_stateless — there is no backfill anywhere in sql/. Create it after
 # the load and that whole comparison deliverable is silently empty.
 run_file "$(render sql/00_schema.sql)"
+run_file "$(render sql/01_policy.sql)"
 run_file "$(render sql/10_intervals.sql)"
 say "  objects: $(q1 "SELECT count() FROM system.tables WHERE database='${DB}'") created"
 

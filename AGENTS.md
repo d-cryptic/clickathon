@@ -50,6 +50,7 @@ what is verified, what is broken, and what is still missing, in one page.
 | Know what is already **verified** vs assumed | [docs/VERIFIED.md](docs/VERIFIED.md) ← **read before trusting any ClickHouse claim** |
 | **Answer "how does this behave at 100×?"** | [evidence/scale.txt](evidence/scale.txt) — measured at 1×/10×/100×, and what breaks first. Regenerate with `tools/scale-test.sh` |
 | **Answer the organiser's four "design decisions to confirm"** | [docs/DESIGN_DECISIONS.md](docs/DESIGN_DECISIONS.md) — session timeout, lateness tolerance, window size, freshness. Three decided; **lateness is the open one** |
+| **Change a tuned constant (gap, tail, unclosed-pause, point-activity, publisher bounds)** | [policy/model.policy](policy/model.policy) — the ONE declaration. Edit it, run `tools/policy.sh gen`, re-run the gate. Never edit `sql/01_policy.sql` (generated) and never re-add a literal; `tools/policy.sh check` fails both. [ADR 0032](docs/adr/0032-one-versioned-policy-declaration-read-by-every-consumer.md) |
 | Record a design decision | [docs/adr/](docs/adr/) |
 | **Decide whether the headline peak is 2,917 or 2,927** | [ADR 0031](docs/adr/0031-point-activity-user-attribution-and-the-densify-recipe.md) — the only open question that moves a submitted number. Both readings measured, gate green at each; needs an **operator sign-off**, not more engineering |
 | **Present at a mentor checkpoint** | [docs/artifacts/2026-08-01-mentor-checkpoint.html](docs/artifacts/2026-08-01-mentor-checkpoint.html) — 11 diagrams: what we show, explain, and need answered |
@@ -58,6 +59,7 @@ what is verified, what is broken, and what is still missing, in one page.
 | **Ask a mentor the questions that carry measured evidence** | [doubts/](doubts/) — evidence + exact wording + a decision table per answer. `02` is worth **9.7%** of our headline number |
 | **What happened in the last session, and every bug it found** | [docs/SESSION-2026-08-01.md](docs/SESSION-2026-08-01.md) |
 | **Run the unseen day** | [docs/RUNBOOK_UNSEEN.md](docs/RUNBOOK_UNSEEN.md) — read BEFORE the data drops |
+| **Know why a half-built model can no longer be served** | [ADR 0034](docs/adr/0034-generation-pinned-serving-surface.md) — the generation-pinned serving surface. The 2026-08-02 doubling reproduced (5,834) and defeated (2,917) in [evidence/generation-pinning/](evidence/generation-pinning/); `tools/build-generation.sh` |
 | **Understand how aggregates stay current (the incremental publisher)** | [ADR 0013](docs/adr/0013-continuous-publication-by-incremental-finalizer.md) — `make publish`, proven in [evidence/publish.txt](evidence/publish.txt) |
 | Observability / what we emit | [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) |
 | **Edit or rebuild the submission deck** | [deck/checkpoint1/README.md](deck/checkpoint1/README.md) — source `deck/checkpoint1/deck.html`, `deck/checkpoint1/build.sh` → `deck/checkpoint1/deck.pdf` |

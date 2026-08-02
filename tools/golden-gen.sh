@@ -52,7 +52,7 @@ fi
 
 if [ "${GOLDEN_SKIP_SETUP:-}" != 1 ]; then
   tools/ch "CREATE DATABASE IF NOT EXISTS ${DB}" >/dev/null
-  tools/apply-sql.sh --database "$DB" sql/00_schema.sql sql/10_intervals.sql
+  tools/apply-sql.sh --database "$DB" sql/00_schema.sql sql/01_policy.sql sql/10_intervals.sql
 fi
 
 GOLDEN_DB="$DB" GOLDEN_ONLY="$ONLY_COHORT" GOLDEN_SKIP_ORG="$SKIP_ORGANISER" \
@@ -113,20 +113,22 @@ SQL30 = open("sql/30_build_intervals.sql").read()
 SQL40 = open("sql/40_deltas.sql").read()
 
 # ---------------------------------------------------------------- pipeline IO
-GAP_S, TAIL_S = 150, 60      # the model's tunables — asserted below
-# The cohort geometry is arithmetic on these two numbers, so a change to either
-# invalidates every closed-form expectation. sql/10_intervals.sql only DOCUMENTS
-# them in prose ("HEARTBEAT_GAP_S : a gap longer than this…"); the values that
-# actually run are the aliases in sql/30_build_intervals.sql. Assert against the
-# code, not the comment — matching the prose captured "99" out of "p99".
-for const, want in (("GAP_S", GAP_S), ("TAIL_S", TAIL_S)):
-    m = re.search(rf"(\d+)\s+AS\s+{const}\b", SQL30)
-    if not m:
-        sys.exit(f"golden-gen: no '<n> AS {const}' in sql/30 — cohort geometry "
-                 f"can no longer be checked against the model's tunables")
-    if int(m.group(1)) != want:
-        sys.exit(f"golden-gen: sql/30 {const}={m.group(1)} != {want} — every "
-                 f"closed-form expectation is derived from {want}; update cohorts")
+# The model's tunables. Until ADR 0032 they were literals here, checked against
+# a REGEX over sql/30_build_intervals.sql ("<n> AS GAP_S") — a copy plus a
+# scraper, which is two things that can rot instead of one. Both the fixture
+# geometry and the model now read policy/model.policy, so the check is
+# structural rather than textual and there is nothing left to scrape.
+import policy_reader                                       # noqa: E402
+GAP_S, TAIL_S = policy_reader.get_int("GAP_S"), policy_reader.get_int("TAIL_S")
+# The cohort geometry is closed-form arithmetic on these two numbers, so a
+# change to either invalidates every expectation in this file. That is now a
+# LOUD failure: sql/30 must consume the policy view rather than a literal, and
+# if somebody puts a literal back the two sources can diverge again.
+if not re.search(r"SELECT\s+gap_s\s+FROM\s+v_model_policy", SQL30):
+    sys.exit("golden-gen: sql/30_build_intervals.sql no longer reads gap_s from "
+             "v_model_policy — the cohort geometry below is derived from "
+             "policy/model.policy and can no longer be trusted to match the "
+             "model. See ADR 0032.")
 
 DIMS = dict(platform="GOLDEN_TV", app_version="1.0.0", country="india",
             audio_language="hin", subtitle_language="unk", player_version="1.8.2")

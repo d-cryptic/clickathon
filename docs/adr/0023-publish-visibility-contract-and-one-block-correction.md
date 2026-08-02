@@ -7,7 +7,9 @@
 > 3.8 s and 7.3 s, disagreeing categorically in between. No gate catches this — every gate runs
 > *between* publishes. Fix: stage both corrections and give `cc_minute_delta` ONE insert
 > (prototyped: 0 deviating samples, 79 ms, one part). Cross-tier `generation_id` gating is
-> REJECTED — it is incompatible with the ReplacingMergeTree tiers without a redesign. Status:
+> REJECTED **for the publisher** — it is incompatible with the ReplacingMergeTree tiers *while the
+> generation is a payload column*; moving it into the sort key removes that objection and is what
+> [ADR 0034](0034-generation-pinned-serving-surface.md) does for the **rebuild** path. Status:
 > accepted 2026-08-02; the fix is **handed off**, not applied (see Consequences). Evidence:
 > `evidence/publish-visibility/`. Closes Codex 003 §7.3.5/§7.3.9 (finding → contract + fix design).
 
@@ -132,6 +134,19 @@ What a reader is **not** guaranteed — the half that matters:
   State it; do not pretend the insert is globally atomic.
 
 ## Why `generation_id` is rejected
+
+> **SUPERSEDED FOR THE REBUILD PATH, 2026-08-02 — see
+> [ADR 0034](0034-generation-pinned-serving-surface.md).** Item 3 below is correct *and* incomplete:
+> FINAL-before-WHERE breaks a generation filter only while `generation` is a **payload** column.
+> Move it into the ORDER BY and rows of different generations are different keys, so FINAL has
+> nothing to collapse across — reproduced both ways in
+> `evidence/generation-pinning/10-final-vs-where.txt` (payload → 0 rows returned; key column → the
+> committed row, every time). ADR 0034 builds the pinned surface on that placement and measures its
+> cost at +0.0% rows read and +1.4–5.8 ms/query. What stands unchanged is the rejection **for the
+> publisher**: a per-publish generation means copying every tier per batch, which is not
+> affordable, so the one-block correction below is still the right fix for the dip. Items 1 and 2
+> below are still the honest cost of a pinned read, and ADR 0034 measures them rather than
+> estimating them.
 
 The proposal: stamp every published row with a generation, expose `committed_generation` from the
 runs log, and make every serving view filter `WHERE generation <= committed`. Three costs, the

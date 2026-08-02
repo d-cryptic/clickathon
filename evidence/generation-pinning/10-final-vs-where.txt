@@ -1,0 +1,23 @@
+server: 26.7.1.1315
+
+TEST 1 — generation as PAYLOAD (ADR 0023's rejected design)
+   SELECT ... FROM payload_gen FINAL WHERE generation = 1   (want: 1 row, v=100)
+   got: 0 row(s), v=0
+   -> FINAL collapsed the two generations on key (k) and kept the newer one;
+      the WHERE then discarded it. ADR 0023's objection reproduced exactly.
+
+TEST 2 — generation LEADING the sort key (ADR 0034)
+   SELECT ... FROM keyed_gen FINAL WHERE generation = 1     (want: 1 row, v=100)
+   got: 1 row(s), v=100
+   and the in-flight generation, asked for by name: 1 row(s), v=999
+   -> (1,7) and (2,7) are different keys. FINAL has nothing to collapse.
+
+TEST 3 — THE TRAP: FINAL over a normal VIEW is a SILENT no-op
+   base table, FINAL, k=9                    -> 1 row(s), v=20   (correct: v=20)
+   view WITHOUT final, reader says FINAL     -> 2 row(s), v=30   <-- WRONG, and silent
+   view WITH final, reader says nothing      -> 1 row(s), v=20   (correct)
+   view WITH final, reader ALSO says FINAL   -> 1 row(s), v=20   (correct; outer FINAL is inert)
+
+   -> No error, no warning: FINAL on a view is dropped. Every pinned base
+      view over a Replacing tier must therefore carry FINAL ITSELF, and
+      downstream FINAL can no longer be trusted to mean anything.

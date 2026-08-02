@@ -10,6 +10,7 @@
 | Test | Proves | Run by |
 |---|---|---|
 | `/verify-env` | the stack is actually configured — schema present, users real, constraints active | after any env change |
+| **policy check** | the one declaration ([ADR 0032](adr/0032-one-versioned-policy-declaration-read-by-every-consumer.md)) and everything derived from it are in step: `sql/01_policy.sql` is a current rendering of `policy/model.policy` (a hand-edit fails), every publisher cover is `>= TAIL_S + 60` (the latent break DYNAMIC_PARAMS §A2 found and nothing enforced), the queue TTLs in `sql/12_publish.sql` equal `QUEUE_TTL_DAYS`, and **no consumer has grown its own literal back** — the model, the gate, the oracle and both generators are grepped for the pattern the constants used to be written in. Add `--database DB` to also assert the deployed view matches the tree | `tools/policy.sh check` — in `tools/test-all.sh` and at stage 0/6 of `tools/build-model.sh`, which refuses to build on a stale rendering. Evidence: `evidence/policy/` |
 | `/reconcile` | the serving layer equals the truth recomputed from raw | after **every** model change |
 | `/bench` | benchmark latency and, more importantly, **bytes read** | before demo / unseen run |
 | **truncation / absorption test** | the model absorbs mid-stream truncation and a late arrival **incrementally**, converging on the from-scratch answer. Covers the open-session and late-arrival probes below in one run | `tools/truncation-test.sh` — after any change to `session_intervals`, its engine, or the delta emission |
@@ -71,6 +72,14 @@ densified with `WITH FILL` so every minute is checked.
 ## Truncation / open-session absorption (H4/H8)
 
 `tools/truncation-test.sh` · schema in `sql/70_truncation_test.sql` · output `evidence/truncation.txt`
+
+**PHASE 0 must apply `sql/01_policy.sql`, not just `sql/70`.** It DROPs and recreates `sonyliv_trunc`,
+and since [ADR 0032](adr/0032-one-versioned-policy-declaration-read-by-every-consumer.md) made the four
+tunables `(SELECT gap_s FROM v_model_policy)`, a database without that view kills PHASE 2 with
+`Unknown table expression identifier 'v_model_policy'`. This suite was red for exactly that reason from
+the moment 0032 landed, and nothing caught it because its own green evidence was regenerated 23 minutes
+*before* the change. Generalise the lesson: **any scratch database that `sql/30` is built into needs the
+policy view applied first**, and a suite that recreates its own database owns that prerequisite.
 
 Cuts the stream at the global peak (`2026-07-26 10:56:00`), builds the whole model on the stump,
 inserts the withheld 447,081 events as a late arrival, absorbs them by ADR 0006 correction-by-diff,
@@ -227,7 +236,7 @@ whose format matches what `tools/reconcile.sh` writes today — verified by diff
 `tools/edge-test.sh` · fixtures + harness doc in [tests/edge/](../tests/edge/README.md) · scratch db
 `edge_matrix`, local-only · run after any change to `sql/30_build_intervals.sql` or `sql/40_deltas.sql`.
 
-26 hand-auditable fixtures, one hazard each, run through the **real** derivation (sed-templated, never
+29 hand-auditable fixtures, one hazard each, run through the **real** derivation (sed-templated, never
 reimplemented). Expected intervals AND expected per-minute concurrency are **derived by hand from the
 spec** (ADR 0003/0007/0008/0009, `interval-math`) in each fixture header — never from the model, per
 Codex 003 §13.1. All 26 PASS on the shipped model (2026-08-02). Every family is sabotage-checked: 9
@@ -265,6 +274,9 @@ to rewrite.
 | L04 | §11.4 late dimension flip | attribution flips web→android with time unchanged; the old web tuple must net to zero per-platform |
 | D01 | §11.5 dominant + tie | vote 2:2:1 → tie broken by smallest value, deterministically (ADR 0009) |
 | D02 | §11.5 mid-session dim change | per-segment attribution at interval level; the minute-merge keeps the EARLIER platform (ADR 0008 first-wins, pinned including its weirdness) |
+| U01 | §11.5 exact users | one user on two simultaneous sessions in one dimension: sessions=2, users=1 |
+| U02 | §11.5 exact users across dimensions | one user on web+tv: total users=1 while sum(per-platform users)=2, proving user counts are not additive |
+| U03 | §11.5 multi-user session | one session id carries two users across a pause: sessions=1 and users=2 at the overlap minute; grouping only by session erases a viewer |
 
 **§11 rows deliberately NOT implemented here** — silent omission reads as coverage, so they are named:
 
@@ -283,9 +295,7 @@ to rewrite.
 - **§11.4** events older than queue TTL / watermark / compacted state; processor crash points; two
   concurrent finalizers; dedup-window expiry — all **publisher coordination**, owned by
   `tools/publish-test.sh` (ADR 0019); this matrix tests the correction *algebra*, not the protocol.
-- **§11.5** distinct-user counting (one user, two sessions/platforms in a minute) — the user tier
-  (`sql/45_user_concurrency.sql`) has no fixture here yet; covered at data scale by
-  `tools/publish-test.sh`'s four-tier convergence, not by a hand-derived golden. Catalog arrival /
+- **§11.5** catalog arrival /
   title-to-multiple-content-ids (dictionary layer, `80_content.sql`); case/spelling aliases and
   sentinels (the normalisation self-test in `15_normalise.sql` owns those).
 - **§11.6** operations (MV install order, parts explosion, mutation backlog, FINAL cost, dictionary

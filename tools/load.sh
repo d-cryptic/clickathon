@@ -419,7 +419,7 @@ CH_DATABASE_LOCAL=default in .env, or pass --database default."
 for t in ev_raw content_dim; do
   [ "$(sysq1 "SELECT count() FROM system.tables WHERE database = '$DB' AND name = '$t'")" = "1" ] || \
     die "$DB.$t does not exist. Apply the schema BEFORE loading:
-  TARGET=$TARGET tools/apply-sql.sh --database $DB sql/00_schema.sql sql/10_intervals.sql
+  TARGET=$TARGET tools/apply-sql.sh --database $DB sql/00_schema.sql sql/01_policy.sql sql/10_intervals.sql
 Order is not optional — mv_stateless is the only populator of cc_minute_stateless
 and there is no backfill, so a schema applied after the load leaves it empty."
 done

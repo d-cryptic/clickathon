@@ -1,0 +1,17 @@
+rows per generation:
+   1	1000000
+   2	1000000
+   3	1000000
+
+pin form            read_rows    read_bytes   parts   ms
+   literal             1.00 mill     11.44 MiB      1     5
+   pointer             1.00 mill     11.44 MiB      1     8
+   unpinned            3.00 mill     22.89 MiB      1     5
+
+   The pointer read is the literal read plus ONE row — that row is the
+   control table. Pruning is unaffected by the indirection.
+
+   Retiring a generation is metadata only:
+   partitions on cost_gen: 1 3 2
+   DROP PARTITION 3 took 40 ms
+   partitions now:         1 2

@@ -37,6 +37,7 @@ done
 
 # name | script | slow? | what it proves
 SUITES=$(cat <<'LIST'
+policy|tools/policy.sh check|0|sql/01_policy.sql is current, the covers exceed TAIL_S, no consumer kept a literal
 go-unit|make test|0|Go: the reconcile parser, config resolution, OTLP emitter, pipeline health
 evt-semantics|tools/event-semantics.sh --check|0|model and gate compile the SAME 47-pair contract and the SAME liveness policy (ADR 0033)
 golden|tools/golden-gen.sh|0|11 cohorts whose answers are computed OUTSIDE the pipeline

@@ -102,6 +102,12 @@ the load. Recorded rather than engineered around.
 moves a number we have already submitted, which is an operator's call, not a build's. Same discipline
 as `POINT_ACTIVITY_COUNTS` ([ADR 0031](0031-point-activity-user-attribution-and-the-densify-recipe.md)).
 
+**Why it is still a hand-edit after [ADR 0032](0032-one-versioned-policy-declaration-read-by-every-consumer.md)
+landed.** 0033 was written before 0032, so "there is nowhere to declare it" was the original reason.
+That reason expired when this branch merged 0032; the decision to keep the hand-edit was re-taken on
+the merge, on different grounds, and is a *deferral, not a conclusion* — see
+[What it does not fix](#what-it-does-not-fix).
+
 ### 4 · The load-time alert is promoted to FAIL and made quantitative
 
 `queries/validate_source_contract.sql` probe 8 was `WARN — vocabulary drift: unknown event values`,
@@ -169,6 +175,29 @@ Two findings that change how the TSV must be reviewed:
   so it can catch *divergence* (via `--check`) but never *wrongness*. Probe 8 at the boundary is the
   only defence, and it defends against *undeclared*, not against *misdeclared*.
 - **The known-event question.** doubts/11 stays open; this ADR only answers the unknown-event half.
+- **`LIVENESS_CLASSES` moves the answer but is invisible to the policy stamp.** This is the one gap the
+  0032 merge *created* and did not close. The four 0032 constants are covered by `POLICY_VERSION` and
+  the content hash, so changing one bumps a version that appears in every reconcile header
+  (`policy=v1/e965954b23d4`) and in `tools/policy.sh check --database`. `LIVENESS_CLASSES` is not: it is
+  a hand-edited literal in two SQL files, and the ladder above shows it is worth **2,917 → 2,879, a
+  1.3% swing in the graded number**. So someone can move the headline by 38 viewers and every policy
+  stamp in every evidence file stays byte-identical. That is precisely the class of defect ADR 0032
+  exists to close, and it should end up as a versioned key in `policy/model.policy`.
+
+  **Not done in the 0032 merge, deliberately, and this is a deferral rather than a judgement that it is
+  not worth doing.** Sized before deciding, it is seven touch points, not one: a new `Array(String)`
+  branch in `gen_sql` (`toArray(String)(…)` is not valid SQL, so it needs `splitByChar` or an array
+  literal); a matching normalisation in `db_check`, which today compares the deployed `toString(value)`
+  against the declared `KEY=VALUE` string and would fail on `['a','b']` vs `a,b`; both SQL files;
+  deleting the now-dead `POLICIES` divergence check in `tools/event-semantics.sh`; a `POLICY_VERSION`
+  and content-hash bump that **invalidates the policy stamp in every evidence file main regenerated
+  hours earlier**; and re-applying the `v_model_policy` DDL to the graded service, which is a schema
+  change on `sonyliv` that only the operator may authorise. Folding that into a merge whose entire
+  contract was *the answer must not move* would have made a green gate mean much less.
+
+  **What still holds meanwhile:** `--check` guarantees the model and the gate cannot carry *different*
+  hand-edits, which is the failure mode that actually rejects a promotion. What is unprotected is
+  traceability, not agreement — a change is visible in `git diff`, just not in the stamp.
 
 ### Newly visible open questions
 

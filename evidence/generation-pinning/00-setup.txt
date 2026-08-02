@@ -1,0 +1,80 @@
+== gp_ctl
+   ev_raw 905558, content_dim 33464
+== gp_pin
+   ev_raw 905558, content_dim 33464
+
+== gp_ctl — build the model the way it is built today
+== target: local
+== 0/6  policy (policy v1 (e965954b23d4) GAP_S=150 TAIL_S=60 UNCLOSED_PAUSE_TO_RUN_END=1 POINT_ACTIVITY_COUNTS=0)
+   policy v1 (e965954b23d4) applied
+== 1/6  session_intervals (gap + pause, ADR 0001/0007)
+   intervals: 30323 over 10866 sessions
+== 2/6  cc_user_minute (uniqExact per bucket, replaced not unioned — ADR 0016)
+   user-minute buckets: 91679
+== 3/6  cc_minute_delta (hour-clipped, ADR 0003)
+   delta rows: 28073  opens 20002  closes 16826
+== 4/6  cc_hour_agg (the hour tier, ADR 0003)
+   hour rows: 98  peak 2917
+== 5/6  views
+   ok
+== 6/6  normalisation UDFs + views (ADR 0011)
+   ok
+== reconcile: delta serving layer vs interval expansion, every minute
+   PASS  17030 minutes, peak 2917
+== reconcile: user tier vs interval expansion, every minute
+   PASS  3732 minutes, user peak 2844
+== reconcile: hour tier peak vs minute tier peak
+   PASS  hour tier peak 2917 = minute tier peak
+
+== gp_pin — install the generation-pinned surface, then build generation 1
+== generation-pinned surface -> local:gp_pin
+== 1/2  additive DDL (sql/95_generations.sql)
+   model_generation, v_active_generation, 4x gen_*, 4x p_*
+== 2/2  re-point the canonical tier names at the pinned views
+   session_intervals -> gen_session_intervals FINAL
+   cc_minute_delta -> gen_cc_minute_delta
+   cc_hour_agg -> gen_cc_hour_agg FINAL
+   cc_user_minute -> gen_cc_user_minute FINAL
+== active generation: 0  (0 = nothing committed yet; every tier reads empty)
+== generation 1  (active is currently 0)  build db: gp_pin_bld_g1
+   [next]
+== 2/6  full rebuild into gp_pin_bld_g1 (tools/build-model.sh, unchanged)
+   ev_raw: 905558 rows
+== target: local
+== 0/6  policy (policy v1 (e965954b23d4) GAP_S=150 TAIL_S=60 UNCLOSED_PAUSE_TO_RUN_END=1 POINT_ACTIVITY_COUNTS=0)
+   policy v1 (e965954b23d4) applied
+== 1/6  session_intervals (gap + pause, ADR 0001/0007)
+   intervals: 30323 over 10866 sessions
+== 2/6  cc_user_minute (uniqExact per bucket, replaced not unioned — ADR 0016)
+   user-minute buckets: 91679
+== 3/6  cc_minute_delta (hour-clipped, ADR 0003)
+   delta rows: 28073  opens 20002  closes 16826
+== 4/6  cc_hour_agg (the hour tier, ADR 0003)
+   hour rows: 98  peak 2917
+== 5/6  views
+   ok
+== 6/6  normalisation UDFs + views (ADR 0011)
+   ok
+== reconcile: delta serving layer vs interval expansion, every minute
+   PASS  17030 minutes, peak 2917
+== reconcile: user tier vs interval expansion, every minute
+   PASS  3732 minutes, user peak 2844
+== reconcile: hour tier peak vs minute tier peak
+   PASS  hour tier peak 2917 = minute tier peak
+   [build]
+== 3/6  stage generation 1 into gp_pin (invisible: pointer still at 0)
+   staged: 30323intervals,28073deltas,26254hours,91679userbuckets
+   [stage]
+== 4/6  verify generation 1 as staged
+   row counts             PASS  176329 rows across 4 tiers
+   delta vs intervals     PASS  17030 minutes, peak 2917
+   hour vs minute peak    PASS  hour peak 2917 = minute peak
+   [verify]
+== 5/6  commit generation 1
+   active generation is now 1
+== 6/6  retire generations older than 0  (KEEP=2)
+== done. servinggeneration1
+
+== both databases now serve the same answer
+   gp_ctl   peak 2917  delta rows 28073
+   gp_pin   peak 2917  delta rows 28073

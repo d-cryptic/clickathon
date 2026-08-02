@@ -44,6 +44,17 @@ WITH
     -- trust it.
     (u, cdf) -> greatest(1, arrayFirstIndex(x -> x >= u, cdf)) AS PICK,
 
+    -- The MODEL's gap threshold, read from the one declaration (ADR 0032).
+    -- This generator synthesises "big gaps" as GAP_S + a lognormal excess, so
+    -- it manufactures exactly the silences the model is tuned to split on.
+    -- While that was a literal 150 here, the scale evidence could not detect a
+    -- GAP_S mismatch at all — the generator produced gap structure defined by
+    -- the same threshold the model was being tested against
+    -- (docs/DYNAMIC_PARAMS.md §D1). Sharing one declaration does not remove
+    -- the circularity, but it makes it a single visible fact instead of two
+    -- numbers that happen to agree.
+    (SELECT gap_s FROM v_model_policy) AS GAP_S,
+
     -- ---- fitted constants (provided-file measurement -> value) -------------
     3.4    AS BURST_MEAN,       -- 905,558 events over ~267k beats
     53.0   AS SESS_MEDIAN,      -- events per session, p50 = 53
@@ -189,7 +200,7 @@ FROM
                     -- generator is knowingly narrower than the real file.
                     arrayMap(x -> t0 + x, arrayCumSum(arrayMap(j -> if(j = 1, toUInt32(0),
                         if(U(number, 1000000 + j) < P_BIG_GAP,
-                           least(toUInt32(3600), toUInt32(150 + round(exp(log(BIG_GAP_MEDIAN) + (BIG_GAP_SIGMA * N01(number, 2000000 + j, 3000000 + j)))))),
+                           least(toUInt32(3600), toUInt32(GAP_S + round(exp(log(BIG_GAP_MEDIAN) + (BIG_GAP_SIGMA * N01(number, 2000000 + j, 3000000 + j)))))),
                            toUInt32(40 + floor(U(number, 4000000 + j) * 2)))
                         ), range(1, nb + 1)))) AS beat_ts,
 

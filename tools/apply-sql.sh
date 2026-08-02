@@ -202,7 +202,15 @@ if [ "$DB" = "$GRADED_DB" ] && [ "${APPLY_GRADED_DESTRUCTIVE:-}" != yes ]; then
     #      (`DROP/* x */TABLE`) -> both bypassed the collapse
     # So: strip block comments FIRST (they can span lines and sit between
     # keywords), then line comments, then flatten CR/LF/TAB, then squeeze.
-    NORM="$(perl -0pe 's{/\*.*?\*/}{ }gs' "$f" | sed -e 's/--.*//' | tr '\r\n\t' '   ' | tr -s ' ')"
+    # Fourth revision. Each Codex round found another ordinary way past this:
+    #   1. only DROP/TRUNCATE matched          -> six more forms
+    #   2. a newline after DROP                -> collapse whitespace
+    #   3. CRLF endings, /* */ between keywords -> strip blocks, flatten CR
+    #   4. `#` comments — ClickHouse supports them and the scanner did not
+    # Strip ALL THREE comment syntaxes ClickHouse accepts (`/* */`, `--`, `#`)
+    # before flattening. The pattern of these findings is the lesson: every
+    # bypass was ordinary SQL somebody would write, never anything exotic.
+    NORM="$(perl -0pe 's{/\*.*?\*/}{ }gs' "$f" | sed -e 's/--.*//' -e 's/#.*//' | tr '\r\n\t' '   ' | tr -s ' ')"
     if printf '%s' "$NORM" | grep -qiE '(^| |;)(DROP|TRUNCATE|DETACH|RENAME TABLE|EXCHANGE TABLES|REPLACE TABLE|DELETE FROM|OPTIMIZE) ' \
        || printf '%s' "$NORM" | grep -qiE 'ALTER TABLE[^;]*(DELETE|UPDATE|DROP (COLUMN|PARTITION)|CLEAR COLUMN|MOVE PARTITION|REPLACE PARTITION|MATERIALIZE TTL|MODIFY COLUMN)'; then
       die "$f contains DROP or TRUNCATE and '$DB' is the GRADED database.

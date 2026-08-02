@@ -264,10 +264,10 @@ done
 # (rightly) refuses a --database that contradicts an exported one. Clearing it
 # for these two calls is how you say "yes, the scratch database, on purpose".
 env -u CH_DATABASE TARGET=cloud tools/apply-sql.sh --database "$LIVE" \
-  sql/00_schema.sql sql/10_intervals.sql sql/12_publish.sql sql/20_views.sql \
+  sql/00_schema.sql sql/01_policy.sql sql/10_intervals.sql sql/12_publish.sql sql/20_views.sql \
   sql/45_user_concurrency.sql sql/50_hour_agg.sql >/dev/null
 env -u CH_DATABASE TARGET=cloud tools/apply-sql.sh --database "$CTL" \
-  sql/00_schema.sql sql/10_intervals.sql sql/20_views.sql \
+  sql/00_schema.sql sql/01_policy.sql sql/10_intervals.sql sql/20_views.sql \
   sql/45_user_concurrency.sql sql/50_hour_agg.sql >/dev/null
 say "  ${LIVE} has the publication layer (sql/12_publish.sql); ${CTL} does not — it is rebuilt."
 say "  BOTH have the user tier (45) and the hour/day cube (50) this time: their"

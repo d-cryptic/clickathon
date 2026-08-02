@@ -134,7 +134,7 @@ gate_verdict() {
   sysq "DROP DATABASE IF EXISTS ${GATE_DB}" >/dev/null
   sysq "CREATE DATABASE ${GATE_DB}" >/dev/null
   CH_DATABASE="$GATE_DB" TARGET=cloud tools/apply-sql.sh --database "$GATE_DB" \
-    sql/00_schema.sql sql/10_intervals.sql >>"$log" 2>&1 || { echo REFUSE; return; }
+    sql/00_schema.sql sql/01_policy.sql sql/10_intervals.sql >>"$log" 2>&1 || { echo REFUSE; return; }
   set +e
   CH_DATABASE="$GATE_DB" TARGET=cloud tools/load.sh --database "$GATE_DB" \
     "$csv" "$CONTENT" >>"$log" 2>&1
