@@ -46,6 +46,16 @@ WITH
     -- Sharing the CONSTANT is correct; sharing the IMPLEMENTATION would not be
     -- — truth is still derived from ev_raw with different code.
     1 AS UNCLOSED_PAUSE_TO_RUN_END,
+    -- MUST MATCH sql/30_build_intervals.sql — the third shared constant, and the
+    -- one that most needs to be shared, because the filter it controls lived in
+    -- BOTH files verbatim. That is why the gate could not see the defect ADR
+    -- 0031 fixes: model and gate dropped the same zero-length segments, agreed
+    -- perfectly, and the agreement proved nothing. Sharing the CONSTANT is
+    -- correct; sharing the IMPLEMENTATION is not, and truth below is still
+    -- derived from ev_raw with window functions rather than arraySplit.
+    -- Verified as a live tripwire, not a comment: model at 1 against gate at 0
+    -- gives 80 mismatched minutes, max_abs_diff 16.
+    0 AS POINT_ACTIVITY_COUNTS,
 
     -- ---------------------------------------------------------------- truth --
     -- DISTINCT first: the file contains duplicate events at identical
@@ -113,14 +123,21 @@ WITH
             -- Zero-length tie windows dropped, as in the model: they are absorbed
             -- correctly by the fold either way, but they split one interval into
             -- two abutting ones and an interval boundary carries meaning.
+            -- A window is HALF-OPEN [p, e): paused p+1 .. e-1, active at p and at
+            -- e. So e must be a real active instant — a resume inside the run —
+            -- and a pause nothing ever closed ends at r_end + 1 instead, saying
+            -- the viewer was still paused at the run's last instant. ADR 0031;
+            -- mirrors the arithmetic in sql/30_build_intervals.sql.
             arrayFilter(w -> w.2 > w.1, arraySort(arrayMap(
-                p -> (p, least(
-                        if(arrayFirst(x -> x >= p, p2.rs) = 0,
+                p -> (p,
+                        if((arrayFirst(x -> x >= p, p2.rs) != 0)
+                             AND (arrayFirst(x -> x >= p, p2.rs) <= r.r_end),
+                           toUInt32(arrayFirst(x -> x >= p, p2.rs)),
                            if(UNCLOSED_PAUSE_TO_RUN_END = 1,
-                              r.r_end,
-                              if(arrayFirst(x -> x > p, r.run_ts) = 0, r.r_end, arrayFirst(x -> x > p, r.run_ts))),
-                           arrayFirst(x -> x >= p, p2.rs)),
-                        r.r_end)),
+                              toUInt32(r.r_end + 1),
+                              if(arrayFirst(x -> x > p, r.run_ts) = 0,
+                                 toUInt32(r.r_end + 1),
+                                 toUInt32(arrayFirst(x -> x > p, r.run_ts)))))),
                 arrayFilter(p -> (p >= r.r_start) AND (p < r.r_end), p2.ps)
             ))) AS wins
         FROM runs AS r
@@ -131,7 +148,10 @@ WITH
         SELECT
             video_session_id, r_start, r_end,
             arrayFold(
-                (acc, w) -> (if(w.1 > acc.2, arrayPushBack(acc.1, (acc.2, w.1)), acc.1), greatest(acc.2, w.2)),
+                (acc, w) -> (
+                    if((w.1 > acc.2) OR ((POINT_ACTIVITY_COUNTS = 1) AND (w.1 = acc.2)),
+                       arrayPushBack(acc.1, (acc.2, w.1)), acc.1),
+                    greatest(acc.2, w.2)),
                 wins,
                 (CAST([], 'Array(Tuple(UInt32, UInt32))'), toUInt32(r_start))
             ) AS f
@@ -146,7 +166,8 @@ WITH
             seg.1 AS a,
             seg.2 + if(seg.2 = r_end, TAIL_S, 0) AS b
         FROM folded
-        ARRAY JOIN arrayFilter(x -> x.2 > x.1, arrayPushBack(f.1, (f.2, toUInt32(r_end)))) AS seg
+        ARRAY JOIN arrayFilter(x -> if(POINT_ACTIVITY_COUNTS = 1, x.2 >= x.1, x.2 > x.1),
+                               arrayPushBack(f.1, (f.2, toUInt32(r_end)))) AS seg
     ),
     -- Expanded to minutes ONCE (~147K rows), not CROSS JOINed per target.
     truth_min AS

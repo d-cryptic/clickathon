@@ -187,6 +187,15 @@ tail credit at explicit stops.
 changing one without the other makes the gate agree with a bug. That is a wave-2-style promotion, not
 a patch.
 
+> **✅ BOTH DONE — [ADR 0031](adr/0031-point-activity-user-attribution-and-the-densify-recipe.md),
+> 2026-08-02, branch `chore/y2-the-three-defects`.** Q35 is now the constant `POINT_ACTIVITY_COUNTS`,
+> shared by model and gate, **shipped at 0 (peak 2,917) and recommended at 1 (peak 2,927)** — the flip
+> is an **operator decision** and is the only change in that ADR that moves a submitted number.
+> Q34 is fixed by expanding merged runs (**82 → 1** violating cells; the last one is the data, not the
+> model — 9 sessions carry two `user_id`s). The "+5.0 h" above is superseded: our own pipeline measures
+> **+4.617 h / +16,620 s**; Codex's 18,127 s came from the independent spec interpreter, which agrees
+> exactly on the concurrency curve and differs only in interval packing. U3-F1 fixed in the same commit.
+
 ## 🔴 Q36–Q39 · Open from the two Codex audits (005 dev-audit, 006 unseen rehearsal)
 
 ### Q36 · Two more graded-write paths, both unguarded — **P0**

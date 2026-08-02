@@ -1,0 +1,85 @@
+==========================================================================
+ ADR 0031 — three defects only a shared-spec change can fix
+ local scratch, built from default.ev_raw (905,558 rows, the delivered file)
+ regenerate with tools/y2-evidence.sh
+==========================================================================
+
+## Q35 — zero-length segments erase point activity
+--------------------------------------------------------------------------
+Every segment the fold drops because its two endpoints coincide. The first
+three families are point ACTIVITY. The fourth is a viewer still PAUSED at
+the run's last instant and stays dropped at either value of the constant.
+
+  family                                          segments  sessions
+  A lone-instant run                                   182       175
+  B1 resume at run end                                  95        89
+  B2 paused through run end                           5699      5248
+  C  pause opening at the cursor                        53        45
+
+What the single event of a lone-instant run IS — why Q35 interacts with
+doubts/07 (tail credit at explicit stops):
+  VideoSessionEnd    VideoSessionEnd        125
+  VideoHeartbeat     network-activity       93
+  VideoHeartbeat     buffer-health          81
+  VideoSessionStart  VideoSessionStart      27
+  AppForegrounded    AppForegrounded        21
+  VideoError         VideoError             17
+
+End to end, same input, one constant apart:
+  y2_pac0  intervals=30323    hours=1978.0931  zero-duration-intervals=0
+  y2_pac1  intervals=30653    hours=1982.7097  zero-duration-intervals=53
+  y2_pac1 keys: rows=30653  distinct (session, interval_start)=30653  (no ReplacingMergeTree collision)
+
+The gate, against each build with the MATCHING constant:
+  =0  0	SUMMARY	minutes_compared=17028	mismatched=0	max_abs_diff=0	peak=2917	PASS
+  =1  0	SUMMARY	minutes_compared=17028	mismatched=0	max_abs_diff=0	peak=2927	PASS
+
+The tripwire — model at 1 against a gate still at 0. Before ADR 0031 both
+files carried the same filter, so this disagreement was unreachable:
+      0	SUMMARY	minutes_compared=17028	mismatched=80	max_abs_diff=16	peak=2917	MISMATCH
+
+
+## Q34 — user concurrency could exceed session concurrency
+--------------------------------------------------------------------------
+users <= sessions at the same minute and grain — true wherever a session
+belongs to one user, which is 91,670 of 91,679 cells but NOT all of them.
+                        cells  violating  worst  zero-session  minutes
+  per-interval (old)    91692         82      1            63       52
+  merged-run  (new)     91679          1      1             0        1
+
+The headline user curve must NOT move — a merged run covers exactly the
+minutes its intervals covered, so only the ATTRIBUTION changes:
+  peak distinct users 2844 @ 2026-07-26 10:56:00, over 3732 minutes
+
+The one residual cell is NOT a defect — the invariant's PREMISE is false.
+9 sessions in this file carry more than one user_id, and one of them has
+two users active in the SAME minute, so users=2 sessions=1 is a correct
+description of the data. Folding by session alone would 'fix' it by ERASING
+a real viewer (measured: 6 minutes under-counted by 1), which is why the
+user tier folds by (session, user_id):
+  sessions carrying >1 user_id: 9
+  residual cell  2026-07-26 10:33:00  SONY_ANDROID_TV  users=2 sessions=1
+
+And the user tier now agrees with a raw per-user interval expansion at
+EVERY minute — the check that catches an erased viewer:
+  user-tier gate  PASS  3732 minutes, peak users 2844
+
+
+## U3-F1 — the documented densify recipe invents viewers
+--------------------------------------------------------------------------
+Both recipes over the full delta range, against per-minute truth expanded
+from session_intervals:
+  fixed  WITH FILL(delta=0) + hour-partitioned running sum minutes=17030 wrong=0 phantom=0
+  naive  WITH FILL + INTERPOLATE(level)                    minutes=17030 wrong=10 phantom=10
+
+The ten phantom minutes, naive recipe (truth at every one of them is 0):
+  2026-07-24 13:00:00   naive says 1, truth 0
+  2026-07-24 13:01:00   naive says 1, truth 0
+  2026-07-24 13:02:00   naive says 1, truth 0
+  2026-07-24 13:03:00   naive says 1, truth 0
+  2026-07-24 13:04:00   naive says 1, truth 0
+  2026-07-24 13:05:00   naive says 1, truth 0
+  2026-07-24 13:06:00   naive says 1, truth 0
+  2026-07-24 13:07:00   naive says 1, truth 0
+  2026-07-24 13:08:00   naive says 1, truth 0
+  2026-07-24 13:09:00   naive says 1, truth 0

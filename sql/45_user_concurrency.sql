@@ -86,9 +86,50 @@ SETTINGS min_bytes_for_wide_part = 0;
 
 -- ---------------------------------------------------------------------------
 -- THE CANONICAL RE-DERIVATION. Recomputes every (minute, dims) bucket it can
--- see, from session_intervals FINAL — the same expansion shape as
--- v_concurrency_minute_intervals in 20_views.sql (row-level arrayJoin, no
--- cross-block state).
+-- see, from session_intervals FINAL.
+--
+-- IT EXPANDS MERGED RUNS, NOT RAW INTERVALS (ADR 0031). This used to be a
+-- row-level arrayJoin over session_intervals, which is the shape
+-- v_concurrency_minute_intervals uses — and it put this tier in DISAGREEMENT
+-- with the session tier about which (minute, dims) bucket a viewer belongs to.
+-- sql/40_deltas.sql merges each session's minute-adjacent intervals into one
+-- run and attributes the whole run to the dimensions of the interval that
+-- OPENED it (ADR 0012, first-wins). Expanding raw intervals here instead
+-- attributes each interval to its own dimensions. The two disagree exactly when
+-- a session changes a dimension mid-burst, and then a user lands in a bucket
+-- whose session deltas went somewhere else.
+--
+-- MEASURED on the delivered file, and identically on graded `sonyliv`
+-- (read-only, 2026-08-02): 82 of 91,692 (minute, platform, country, content_id)
+-- cells served MORE distinct users than distinct sessions, worst excess +1,
+-- and 63 of those served users against ZERO sessions. Worked example — one
+-- session, one viewer, two intervals:
+--
+--   28073…5930  ANDROID_PHONE  2026-07-25 20:16:59 -> 20:23:20
+--   28073…5930  ANDROID_TAB    2026-07-25 20:23:33 -> 20:30:36
+--
+-- The delta tier merges those (minute-adjacent) and books all of 20:16–20:30 to
+-- ANDROID_PHONE. The old expansion here booked 20:23–20:30 to ANDROID_TAB, so
+-- (20:23, ANDROID_TAB, india, 2078158496) served users=1, sessions=0.
+--
+-- SEVERITY IS LOW AND SHOULD NOT BE INFLATED: the excess is never more than 1,
+-- it never touches a headline — the all-dimensions pair is 2,844 users <= 2,917
+-- sessions and was already correct, and the invariant holds at the total grain
+-- with 0 violations. It is fixed because an invariant that mostly holds is not
+-- an invariant, and a judge who tests it finds it in one query.
+--
+-- 81 OF THE 82 ARE THIS DEFECT. THE LAST ONE IS THE DATA. "users <= sessions"
+-- is only unconditional while a session belongs to exactly ONE user, and 9
+-- sessions in the delivered file carry more than one user_id. In one of them —
+-- 75D96549…, SONY_ANDROID_TV/india/21321654 — two users are active in the SAME
+-- minute (2026-07-26 10:33), so `users=2, sessions=1` is a CORRECT description
+-- of the data, not a violation to engineer away. No attribution scheme removes
+-- it without deleting a real viewer, and the obvious attempt does exactly that:
+-- see the GROUP BY note on `merged` below.
+--
+-- Fixing it here rather than in 40_deltas.sql is deliberate: the session tier's
+-- numbers are the ones already served, benchmarked and submitted, and the user
+-- tier is the one that disagrees with them.
 --
 -- Two branches, one job each:
 --   * "new coverage"     — who is actually active in each bucket now. These
@@ -117,15 +158,107 @@ SETTINGS min_bytes_for_wide_part = 0;
 --
 -- Anchor lines (sed-templated by tools/publish.sh; template_or_die asserts the
 -- injected markers, so a drifted anchor is a hard stop, not a silent full
--- recompute):
---   'FROM session_intervals FINAL'          -> event-window prefilter
---   'WHERE 1 /* publish: new coverage */'   -> minute scope, branch 1
---   'WHERE 1 /* publish: existing buckets */' -> minute scope, branch 2
+-- recompute). The patterns are whole-line and indentation-exact:
+--   '        FROM session_intervals FINAL'  -> event-window prefilter
+--   '    WHERE 1 /* publish: new coverage */'   -> minute scope, branch 1
+--   '    WHERE 1 /* publish: existing buckets */' -> minute scope, branch 2
+--
+-- THE PREFILTER NOW SELECTS SESSIONS, NOT INTERVALS, AND THAT IS LOAD-BEARING.
+-- The publisher narrows it by a TIME WINDOW (interval_end >= LO - 300s AND
+-- interval_start <= HI + 300s), not by session id the way it scopes
+-- sql/40_deltas.sql. A merge fold cannot run on a time-clipped slice of a
+-- session: it would take "first-wins" from the first interval INSIDE THE
+-- WINDOW, so the publisher and a full rebuild would attribute the same viewer
+-- differently and the tier would stop being idempotent. So the templated line
+-- lives in `in_scope`, where it picks WHICH SESSIONS are in play, and `merged`
+-- below then reads those sessions' intervals IN FULL. `merged` deliberately
+-- writes `FROM session_intervals AS si FINAL` so it cannot collide with the
+-- anchor — sed rewrites every matching line, not just the first.
 --
 -- PUBLISH_EXTRACT_BEGIN:user — tools/publish.sh and tools/publish-test.sh cut
 -- the single statement between these two markers to run it over HTTP. Keep the
 -- markers immediately around ONE statement.
 INSERT INTO cc_user_minute (minute, platform, country, content_id, active_state)
+WITH
+    -- Which SESSIONS are in play. This is the line tools/publish.sh narrows;
+    -- see "THE PREFILTER NOW SELECTS SESSIONS" above for why it must be this
+    -- one and not the read inside `merged`.
+    in_scope AS
+    (
+        SELECT DISTINCT video_session_id
+        FROM session_intervals FINAL
+    ),
+
+    -- ---- THE MERGE. A VERBATIM SHARED SPEC WITH sql/40_deltas.sql ----------
+    -- Same fold, same predicate (`x.1 > acc.2 + 60` — disjoint at minute
+    -- grain), same first-wins resolution, and crucially the SAME SORT KEY. The
+    -- fold input is arraySort(groupArray(tuple)), so the tuple's slot order
+    -- decides which interval wins a tie — two intervals of one session with the
+    -- same start and end minute are ordered by their dimensions. Slots .1-.9
+    -- are therefore byte-identical to 40_deltas.sql's, in the same order, even
+    -- though this tier keys on only three of them: reordering or dropping one
+    -- would let the two tiers break a tie differently and re-open the very
+    -- disagreement this change closes. user_id is APPENDED at slot .10, where
+    -- it can only further determine an order 40_deltas.sql leaves free.
+    --
+    -- Duplicating a 30-line fold across two files is a real shared-spec debt —
+    -- larger than the GAP_S / TAIL_S / UNCLOSED_PAUSE_TO_RUN_END constants the
+    -- repo already shares this way. The right shape is one `v_session_runs`
+    -- view both tiers read; that needs an edit to 40_deltas.sql, which is
+    -- outside ADR 0031's ownership. Recorded there as the follow-up.
+    --
+    -- GROUPED BY (session, user_id) — NOT by session alone, and this is the one
+    -- place this tier MUST diverge from 40_deltas.sql. First-wins is correct for
+    -- a DIMENSION, which is a display property of the run; `user_id` is an
+    -- IDENTITY. 9 sessions in the delivered file carry more than one user_id,
+    -- and folding them by session alone handed every minute of the run to the
+    -- FIRST user and erased the second — measured: 6 minutes under-counted by 1
+    -- across 2026-07-26 10:33-10:39, e.g. session 75D96549… where user 79BE1B7C…
+    -- vanished into 4CE58A95… because their intervals are minute-adjacent.
+    -- That is a silent under-count, and it would have satisfied the users <=
+    -- sessions invariant by LOSING viewers, which is the wrong way to hold an
+    -- invariant. Grouping by the pair keeps each user's coverage exact and still
+    -- resolves dimensions first-wins within that user's own run.
+    merged AS
+    (
+        SELECT
+            video_session_id,
+            arrayFold(
+                (acc, x) -> if(
+                    (length(acc.1) = 0) OR (x.1 > (acc.2 + 60)),
+                    (arrayPushBack(acc.1, x), x.2),
+                    (arrayConcat(
+                        arraySlice(acc.1, 1, length(acc.1) - 1),
+                        [(acc.1[length(acc.1)].1,
+                          greatest(acc.2, x.2),
+                          acc.1[length(acc.1)].3,
+                          acc.1[length(acc.1)].4,
+                          acc.1[length(acc.1)].5,
+                          acc.1[length(acc.1)].6,
+                          acc.1[length(acc.1)].7,
+                          acc.1[length(acc.1)].8,
+                          acc.1[length(acc.1)].9,
+                          tupleElement(acc.1[length(acc.1)], 10))]
+                     ), greatest(acc.2, x.2))
+                ),
+                arraySort(groupArray((
+                    toUInt32(toStartOfMinute(interval_start)),
+                    toUInt32(toStartOfMinute(interval_end)),
+                    toString(app_version),
+                    toString(audio_language),
+                    toString(subtitle_language),
+                    toString(player_version),
+                    toString(platform),
+                    toString(country),
+                    content_id,
+                    toString(user_id)
+                ))),
+                (CAST([], 'Array(Tuple(UInt32, UInt32, String, String, String, String, String, String, Int64, String))'), toUInt32(0))
+            ).1 AS runs
+        FROM session_intervals AS si FINAL
+        WHERE si.video_session_id IN (SELECT video_session_id FROM in_scope)
+        GROUP BY video_session_id, user_id
+    )
 SELECT
     minute,
     platform,
@@ -143,14 +276,16 @@ FROM
         1 AS covered
     FROM
     (
+        -- r.1 / r.2 are ALREADY minute-truncated by the merge, so the expansion
+        -- is the same `range(start, end + 1, 60)` the raw-interval version used.
         SELECT
-            user_id, platform, country, content_id,
-            arrayJoin(range(
-                toUInt32(toStartOfMinute(interval_start)),
-                toUInt32(toStartOfMinute(interval_end)) + 1,
-                60
-            )) AS m
-        FROM session_intervals FINAL
+            tupleElement(r, 10) AS user_id,
+            tupleElement(r, 7)  AS platform,
+            tupleElement(r, 8)  AS country,
+            tupleElement(r, 9)  AS content_id,
+            arrayJoin(range(tupleElement(r, 1), tupleElement(r, 2) + 1, 60)) AS m
+        FROM merged
+        ARRAY JOIN runs AS r
     )
     WHERE 1 /* publish: new coverage */
 
