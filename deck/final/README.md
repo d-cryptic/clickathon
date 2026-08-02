@@ -44,3 +44,16 @@ breaks one slide per page. The earlier checkpoint deck lives in `deck/checkpoint
 Every figure is from the pipeline with a `query_id` in `system.query_log` — see
 `evidence/submission/results-matrix.txt`. Nothing on these slides is hand-computed. Full detail
 behind the deck: `docs/artifacts/2026-08-02-solution-atlas.html`.
+
+## Editing notes
+
+**The problem statement is deliberately not explained.** The judges wrote the brief; narrating it
+back costs presenter time and tells them nothing. The deck opens on what we built and what it
+measures. The one piece of problem framing that survives is slide 02 — and it survives because it is
+*our measurement*, not the brief: heartbeats survive a pause at 0.756/min, which is why gap
+detection alone cannot work and why there are two signals rather than one.
+
+**Slide 10 is scale.** Measured at 1×/10×/100× from `evidence/scale.txt`: serving latency is flat
+(2.1–17.2 ms at every scale, because hour-clipping makes reads window-bound), while the interval
+build is what strains — at 100× it failed at default settings and needed spill plus two threads.
+Naming what breaks first, with numbers, is stronger than claiming nothing does.

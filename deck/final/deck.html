@@ -7,7 +7,7 @@
 <meta name="cc-project" content="clickathon-sonyliv">
 <meta name="cc-date"    content="2026-08-02">
 <meta name="cc-title"   content="Foreground-only concurrency — submission deck">
-<meta name="cc-summary" content="12-slide animated presentation deck with a live dashboard demo cue, 2–5 minutes.">
+<meta name="cc-summary" content="11-slide animated deck: what we built, what it measures, and a live dashboard demo. Assumes the audience knows the brief.">
 <meta name="cc-tags"    content="deck,presentation,clickhouse,concurrency,sonyliv,clickstack">
 <title>Foreground-only concurrency — submission deck</title>
 <style>
@@ -159,64 +159,11 @@ footer{padding:60px 7vw;color:var(--faint);font-family:var(--mono);font-size:12p
   <div class="time">scroll or press <b>↓</b> · 2–5 min</div>
 </section>
 
-<!-- ══════ 2 · THE PROBLEM ══════ -->
-<section class="slide">
-  <div class="num">02 / 12</div>
-  <div class="kick">the problem</div>
-  <h2>A session being open is not<br>a person watching.</h2>
-  <svg viewBox="0 0 900 250" role="img" aria-label="One session read two ways: naive counts backgrounded and paused time; the model excludes both.">
-    <text class="lbl-s" x="20" y="40">events</text>
-    <g fill="#c9b07e">
-      <rect x="110" y="28" width="3" height="18" style="animation:tick 2s infinite"/>
-      <rect x="134" y="28" width="3" height="18" style="animation:tick 2s .1s infinite"/>
-      <rect x="158" y="28" width="3" height="18" style="animation:tick 2s .2s infinite"/>
-      <rect x="182" y="28" width="3" height="18" style="animation:tick 2s .3s infinite"/>
-      <rect x="206" y="28" width="3" height="18" style="animation:tick 2s .4s infinite"/>
-      <rect x="230" y="28" width="3" height="18" style="animation:tick 2s .5s infinite"/>
-      <rect x="470" y="28" width="3" height="18" style="animation:tick 2s .2s infinite"/>
-      <rect x="494" y="28" width="3" height="18" style="animation:tick 2s .3s infinite"/>
-      <rect x="518" y="28" width="3" height="18" style="animation:tick 2s .4s infinite"/>
-      <rect x="570" y="28" width="3" height="18" opacity=".45"/>
-      <rect x="620" y="28" width="3" height="18" opacity=".45"/>
-      <rect x="670" y="28" width="3" height="18" opacity=".45"/>
-      <rect x="730" y="28" width="3" height="18" style="animation:tick 2s .1s infinite"/>
-      <rect x="754" y="28" width="3" height="18" style="animation:tick 2s .2s infinite"/>
-      <rect x="778" y="28" width="3" height="18" style="animation:tick 2s .3s infinite"/>
-    </g>
-    <text class="lbl-s" x="290" y="42" fill="#b06a6a">heartbeats STOP — backgrounded</text>
-    <text class="lbl-s" x="566" y="20" fill="#b06a6a">heartbeats CONTINUE — paused</text>
-
-    <text class="lbl" x="20" y="104">NAIVE</text>
-    <rect x="110" y="86" width="680" height="30" fill="#b06a6a" opacity=".5"
-      style="transform-origin:110px 0;animation:barIn 1.8s both"/>
-    <text class="lbl-s" x="122" y="105" fill="#f2f2f2">counted continuously — including every minute nobody was looking</text>
-
-    <text class="lbl" x="20" y="176">MODEL</text>
-    <rect x="110" y="158" width="150" height="30" fill="#6f9d7f" style="transform-origin:110px 0;animation:barIn .6s .3s both"/>
-    <rect x="470" y="158" width="80"  height="30" fill="#6f9d7f" style="transform-origin:470px 0;animation:barIn .6s .8s both"/>
-    <rect x="720" y="158" width="70"  height="30" fill="#6f9d7f" style="transform-origin:720px 0;animation:barIn .6s 1.3s both"/>
-    <rect x="260" y="158" width="210" height="30" fill="#b06a6a" opacity=".15"/>
-    <rect x="550" y="158" width="170" height="30" fill="#b06a6a" opacity=".15"/>
-    <text class="lbl-s" x="288" y="177" fill="#b06a6a">excluded: gap</text>
-    <text class="lbl-s" x="566" y="177" fill="#b06a6a">excluded: explicit pause</text>
-
-    <g style="animation:breathe 3.4s infinite">
-      <circle class="blip" cx="300" cy="224" r="4" fill="#6f9d7f"/>
-      <text class="lbl-s" x="316" y="228" fill="#a8c8a4">gap → backgrounded</text>
-    </g>
-    <g style="animation:breathe 3.4s 1.7s infinite">
-      <circle class="blip" cx="580" cy="224" r="4" fill="#c9b07e"/>
-      <text class="lbl-s" x="596" y="228" fill="#c9b07e">explicit event → paused</text>
-    </g>
-  </svg>
-  <div class="time">~25s</div>
-</section>
-
 <!-- ══════ 3 · THE INSIGHT ══════ -->
 <section class="slide">
-  <div class="num">03 / 12</div>
-  <div class="kick">the insight — why one signal is not enough</div>
-  <h2>Heartbeats stop when you background.<br>They <em style="color:var(--tan);font-style:normal">survive</em> a pause.</h2>
+  <div class="num">02 / 12</div>
+  <div class="kick">what we measured — and what it forced</div>
+  <h2>Heartbeats <em style="color:var(--tan);font-style:normal">survive</em> a pause.<br>That one fact drove the design.</h2>
   <div class="bars">
     <div class="lab">active</div>
     <div class="track"><div class="bar" style="width:100%;background:var(--green)">
@@ -229,15 +176,16 @@ footer{padding:60px 7vw;color:var(--faint);font-family:var(--mono);font-size:12p
       <span class="v">0.047 / min — silent</span></div></div>
   </div>
   <p class="say" style="max-width:62ch">
-    A model built on gaps alone <b>counts every paused viewer as watching</b> — silently, while
-    looking perfectly healthy. Pause has to be excluded explicitly. That is the whole design.
+    So gap detection — the obvious mechanism — <b>cannot see a paused viewer at all</b>, and a
+    model built on it counts them as watching while looking perfectly healthy. We exclude pause
+    explicitly, on a second signal. <b>This is the measurement, not an assumption.</b>
   </p>
-  <div class="time">~30s</div>
+  <div class="time">~20s</div>
 </section>
 
 <!-- ══════ 4 · THE MODEL ══════ -->
 <section class="slide">
-  <div class="num">04 / 12</div>
+  <div class="num">03 / 12</div>
   <div class="kick">the model</div>
   <h2>Two numbers per interval,<br>clipped to every hour it touches.</h2>
   <svg viewBox="0 0 900 230" role="img" aria-label="An interval spanning three hours is clipped so each hour's running sum starts at zero and is absolute.">
@@ -281,7 +229,7 @@ footer{padding:60px 7vw;color:var(--faint);font-family:var(--mono);font-size:12p
 
 <!-- ══════ 5 · LINEAGE ══════ -->
 <section class="slide">
-  <div class="num">05 / 12</div>
+  <div class="num">04 / 12</div>
   <div class="kick">architecture</div>
   <h2>Every number traces to a raw event.</h2>
   <svg viewBox="0 0 980 300" role="img" aria-label="Lineage from CSV through landing, typed events, intervals and deltas to serving, with an independent gate reading raw.">
@@ -328,7 +276,7 @@ footer{padding:60px 7vw;color:var(--faint);font-family:var(--mono);font-size:12p
 
 <!-- ══════ 6 · THE GATE ══════ -->
 <section class="slide">
-  <div class="num">06 / 12</div>
+  <div class="num">05 / 12</div>
   <div class="kick">how we know it is right</div>
   <h2>The gate will not agree with itself.</h2>
   <div class="big">0</div>
@@ -348,7 +296,7 @@ footer{padding:60px 7vw;color:var(--faint);font-family:var(--mono);font-size:12p
 
 <!-- ══════ 7 · THE NUMBERS ══════ -->
 <section class="slide">
-  <div class="num">07 / 12</div>
+  <div class="num">06 / 12</div>
   <div class="kick">the result · unseen day 2026-07-31 UTC</div>
   <h2>23,324 at 11:17.</h2>
   <div class="statrow">
@@ -375,7 +323,7 @@ footer{padding:60px 7vw;color:var(--faint);font-family:var(--mono);font-size:12p
 
 <!-- ══════ 8 · LIVE DEMO ══════ -->
 <section class="slide">
-  <div class="num">08 / 12</div>
+  <div class="num">07 / 12</div>
   <div class="kick" style="color:var(--tan)">▸ live demo — switch to the dashboard now</div>
   <h2>The curve, and filters that<br>actually move it.</h2>
   <div class="demo">
@@ -398,7 +346,7 @@ footer{padding:60px 7vw;color:var(--faint);font-family:var(--mono);font-size:12p
 
 <!-- ══════ 9 · DIMENSIONS ══════ -->
 <section class="slide">
-  <div class="num">09 / 12</div>
+  <div class="num">08 / 12</div>
   <div class="kick">new dimensions, same day</div>
   <h2>An unknown column becomes<br>a filter with no migration.</h2>
   <div class="bars">
@@ -417,6 +365,42 @@ footer{padding:60px 7vw;color:var(--faint);font-family:var(--mono);font-size:12p
     Unknown columns land in a <span class="m">Map</span> and stay queryable. We show the
     fallback's cost rather than hide it — <b>that is what "handles new dimensions" means today.</b>
   </p>
+  <div class="time">~30s</div>
+</section>
+
+<!-- ══════ SCALE ══════ -->
+<section class="slide">
+  <div class="num">09 / 12</div>
+  <div class="kick">scale — measured at 1× / 10× / 100×</div>
+  <h2>At 100× the build strains.<br>Serving does not move.</h2>
+  <div class="bars">
+    <div class="lab">serving · 1×</div>
+    <div class="track"><div class="bar" style="width:9%;background:var(--green)"><span class="v">2–17 ms</span></div></div>
+    <div class="lab">serving · 10×</div>
+    <div class="track"><div class="bar" style="width:9%;background:var(--green);animation-delay:.12s"><span class="v">2–17 ms</span></div></div>
+    <div class="lab">serving · 100×</div>
+    <div class="track"><div class="bar" style="width:9.5%;background:var(--live);animation-delay:.24s"><span class="v">2.1–17.2 ms &nbsp;— <b style="color:var(--live)">flat</b></span></div></div>
+    <div class="lab">interval build · 100×</div>
+    <div class="track"><div class="bar" style="width:100%;background:var(--maroon);animation-delay:.36s"><span class="v in">122 s · 3.57 GiB · spilled to disk</span></div></div>
+  </div>
+  <p class="say" style="max-width:70ch">
+    <b>89,850,838 events. 1.09 million sessions.</b> Query latency is unchanged because the delta
+    phases are <b>window-bound by design</b> — hour-clipping means a query reads one hour, whatever
+    the history behind it.
+  </p>
+  <div class="cols">
+    <div class="r1"><h4>what breaks first — named, not guessed</h4>
+      <p>Interval derivation <b>memory</b>. At 100× it failed at default settings; spill alone did
+      not rescue it; <b>spill + 2 threads</b> did. Dictionary memory stayed flat at 17 MiB — it keys
+      on the catalogue, not the audience.</p></div>
+    <div class="r2"><h4>optimisations in place</h4>
+      <p>Hour-clipped deltas (flat reads) · promoted cubes per dimension subset ·
+      <span class="m">uniqExact</span> state merge instead of re-scan · chunked backfill under the
+      partition cap · dictionary join on the catalogue.</p></div>
+    <div class="r3"><h4>the honest limit</h4>
+      <p>28 parts, 930 merges, slowest merge 36 s at 100×. Nothing wedged, but the build is where
+      the next engineering goes — <b>not</b> the query path.</p></div>
+  </div>
   <div class="time">~30s</div>
 </section>
 
