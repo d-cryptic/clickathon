@@ -38,6 +38,7 @@ done
 # name | script | slow? | what it proves
 SUITES=$(cat <<'LIST'
 go-unit|make test|0|Go: the reconcile parser, config resolution, OTLP emitter, pipeline health
+evt-semantics|tools/event-semantics.sh --check|0|model and gate compile the SAME 47-pair contract and the SAME liveness policy (ADR 0033)
 golden|tools/golden-gen.sh|0|11 cohorts whose answers are computed OUTSIDE the pipeline
 property|PROP_COMPAT=1 tools/property-test.sh|0|random sessions vs an independent reference interpreter; batch invariance
 edge|tools/edge-test.sh|0|26 hand-derived boundary fixtures, each sabotage-checked

@@ -1,0 +1,48 @@
+event_type	event	class	action	note
+AppBackgrounded	AppBackgrounded	app_state	none	viewer left the foreground. NOT used as a state gate: bg/fg do not pair (14,700 vs 14,321) — ADR 0001. The foreground gate is doubts/10, unbuilt.
+AppForegrounded	AppForegrounded	app_state	none	viewer returned to the foreground. See AppBackgrounded.
+VideoError	VideoError	error	none	playback failed. 293 events / 293 sessions. Bridges exactly 2 gaps in the delivered file (evidence/liveness).
+VideoHeartbeat	AdBufferEnd	playback	none	ad buffering ended.
+VideoHeartbeat	AdBufferStart	playback	none	ad buffering started.
+VideoHeartbeat	AdClick	playback	none	viewer clicked the ad.
+VideoHeartbeat	AdPause	playback	none	ad paused. NOT action=pause — the shipped model pauses on event='pause' only. Open question, unmeasured: ADR 0033 §open.
+VideoHeartbeat	AdResume	playback	none	ad resumed. NOT action=resume — see AdPause.
+VideoHeartbeat	AdSkipTrueView	playback	none	viewer skipped a skippable ad.
+VideoHeartbeat	BufferEnd	playback	none	rebuffering ended.
+VideoHeartbeat	BufferStart	playback	none	rebuffering started.
+VideoHeartbeat	Seek	playback	none	viewer scrubbed the timeline.
+VideoHeartbeat	audio-language	playback	none	audio track changed.
+VideoHeartbeat	buffer-health	playback	none	passive telemetry. One of the three high-volume metronomes (DATA_DICTIONARY trap 6).
+VideoHeartbeat	chromecast_clicked	ui	none	cast button pressed. Playback may be moving to another device.
+VideoHeartbeat	chromecast_started	ui	none	casting started. Playback may no longer be on this device.
+VideoHeartbeat	download_asset_play_stop	download	none	offline asset playback stopped.
+VideoHeartbeat	download_asset_played	download	none	offline asset played. Offline playback is not this stream's playback.
+VideoHeartbeat	download_completed	download	none	background download finished. No viewer implied.
+VideoHeartbeat	download_deleted	download	none	downloaded asset removed. No viewer implied.
+VideoHeartbeat	download_initiated	download	none	background download started. No viewer implied.
+VideoHeartbeat	download_resumed	download	none	background download resumed. No viewer implied.
+VideoHeartbeat	downshift	playback	none	ABR stepped the bitrate down.
+VideoHeartbeat	dropped-frames	playback	none	renderer dropped frames — the renderer is running.
+VideoHeartbeat	go_live_click	playback	none	viewer jumped to the live edge.
+VideoHeartbeat	golive	playback	none	player reached the live edge.
+VideoHeartbeat	network-activity	playback	none	passive telemetry. Highest-volume pair (177,485 events, 19.6%).
+VideoHeartbeat	network-bandwidth	playback	none	passive telemetry.
+VideoHeartbeat	network-change	playback	none	network transport changed.
+VideoHeartbeat	next_video_click	playback	none	viewer advanced to the next title.
+VideoHeartbeat	pause	playback	pause	THE pause marker. Opens a paused window — ADR 0007, gate 2.
+VideoHeartbeat	preroll-disabled	playback	none	pre-roll suppressed for this play.
+VideoHeartbeat	preview_watched	playback	none	preview/trailer watched.
+VideoHeartbeat	resume	playback	resume	THE resume marker. Closes a paused window — ADR 0007. Lookup is >=, ADR 0009.
+VideoHeartbeat	speed-change	playback	none	playback rate changed.
+VideoHeartbeat	speed-pause	playback	none	rate-control pause. NOT action=pause — see AdPause.
+VideoHeartbeat	speed-resume	playback	none	rate-control resume. NOT action=resume — see AdPause.
+VideoHeartbeat	subtitle-language	playback	none	subtitle track changed.
+VideoHeartbeat	upshift	playback	none	ABR stepped the bitrate up.
+VideoHeartbeat	video-resize	playback	none	passive telemetry. One of the three high-volume metronomes.
+VideoHeartbeat	video_forward	playback	none	viewer skipped forward.
+VideoHeartbeat	video_rewind	playback	none	viewer skipped backward.
+VideoHeartbeat	video_quality_change	playback	none	viewer picked a different quality.
+VideoHeartbeat	premium_button_click	ui	none	upsell button pressed. A store interaction, not playback.
+VideoPlay	Play	playback	none	playback started or restarted.
+VideoSessionEnd	VideoSessionEnd	lifecycle	end	session closed by the client. Marks is_open=0. NOT terminal for activity — doubts/07, worth -119 peak if it were.
+VideoSessionStart	VideoSessionStart	lifecycle	none	session opened by the client. The model derives starts from event timestamps, not from this event.

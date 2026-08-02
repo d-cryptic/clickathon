@@ -460,6 +460,15 @@ inherits that. The reconcile gate CANNOT catch this class — it compares our
 model against our own re-derivation, so a file-level fault makes both wrong
 together and both agree.
 
+ONE EXCEPTION, and it is the FAIL most likely to appear on an unseen day:
+probe 8, 'undeclared (event_type, event) pair'. Since ADR 0033 an undeclared
+pair renews NO liveness, so nothing is corrupt and the answer is already in the
+safe (under-counting) direction. The note gives you the size of it — the pair,
+its count, and how many of its events have no declared event within 150s. Either
+classify it in contracts/event_semantics.tsv and run
+tools/event-semantics.sh --write, or acknowledge and proceed. See
+docs/RUNBOOK_UNSEEN.md step 0.
+
 If you have read the verdict and decided to proceed anyway:
   UNSEEN_ACK_CONTRACT=1 $0 $*"
     fi

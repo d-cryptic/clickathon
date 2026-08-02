@@ -36,6 +36,71 @@
 -- ============================================================================
 
 WITH
+    -- >>> BEGIN GENERATED from contracts/event_semantics.tsv — tools/event-semantics.sh --write
+    [('AppBackgrounded','AppBackgrounded','app_state'),
+     ('AppForegrounded','AppForegrounded','app_state'),
+     ('VideoError','VideoError','error'),
+     ('VideoHeartbeat','AdBufferEnd','playback'),
+     ('VideoHeartbeat','AdBufferStart','playback'),
+     ('VideoHeartbeat','AdClick','playback'),
+     ('VideoHeartbeat','AdPause','playback'),
+     ('VideoHeartbeat','AdResume','playback'),
+     ('VideoHeartbeat','AdSkipTrueView','playback'),
+     ('VideoHeartbeat','BufferEnd','playback'),
+     ('VideoHeartbeat','BufferStart','playback'),
+     ('VideoHeartbeat','Seek','playback'),
+     ('VideoHeartbeat','audio-language','playback'),
+     ('VideoHeartbeat','buffer-health','playback'),
+     ('VideoHeartbeat','chromecast_clicked','ui'),
+     ('VideoHeartbeat','chromecast_started','ui'),
+     ('VideoHeartbeat','download_asset_play_stop','download'),
+     ('VideoHeartbeat','download_asset_played','download'),
+     ('VideoHeartbeat','download_completed','download'),
+     ('VideoHeartbeat','download_deleted','download'),
+     ('VideoHeartbeat','download_initiated','download'),
+     ('VideoHeartbeat','download_resumed','download'),
+     ('VideoHeartbeat','downshift','playback'),
+     ('VideoHeartbeat','dropped-frames','playback'),
+     ('VideoHeartbeat','go_live_click','playback'),
+     ('VideoHeartbeat','golive','playback'),
+     ('VideoHeartbeat','network-activity','playback'),
+     ('VideoHeartbeat','network-bandwidth','playback'),
+     ('VideoHeartbeat','network-change','playback'),
+     ('VideoHeartbeat','next_video_click','playback'),
+     ('VideoHeartbeat','pause','playback'),
+     ('VideoHeartbeat','preroll-disabled','playback'),
+     ('VideoHeartbeat','preview_watched','playback'),
+     ('VideoHeartbeat','resume','playback'),
+     ('VideoHeartbeat','speed-change','playback'),
+     ('VideoHeartbeat','speed-pause','playback'),
+     ('VideoHeartbeat','speed-resume','playback'),
+     ('VideoHeartbeat','subtitle-language','playback'),
+     ('VideoHeartbeat','upshift','playback'),
+     ('VideoHeartbeat','video-resize','playback'),
+     ('VideoHeartbeat','video_forward','playback'),
+     ('VideoHeartbeat','video_rewind','playback'),
+     ('VideoHeartbeat','video_quality_change','playback'),
+     ('VideoHeartbeat','premium_button_click','ui'),
+     ('VideoPlay','Play','playback'),
+     ('VideoSessionEnd','VideoSessionEnd','lifecycle'),
+     ('VideoSessionStart','VideoSessionStart','lifecycle')] AS EVENT_SEMANTICS,
+    ['pause'] AS PAUSE_EVENTS,
+    ['resume'] AS RESUME_EVENTS,
+    ['VideoSessionEnd'] AS END_TYPES,
+    -- <<< END GENERATED
+    -- MUST MATCH sql/30_build_intervals.sql — the FOURTH shared declaration, and
+    -- the one this gate is structurally worst at policing (ADR 0033). The other
+    -- three are constants the gate can disagree about; a vocabulary it SHARES it
+    -- cannot disagree about, because truth below reads the same ev_raw with the
+    -- same idea of which events count. That is exactly doubts/11's finding: 17,028
+    -- green minutes said nothing about whether the RIGHT events granted liveness.
+    -- So the sharing is policed OUT OF BAND instead:
+    --   drift between the two files -> tools/event-semantics.sh --check (in the suite)
+    --   a pair neither file declares -> probe 8 of the source-contract gate, at load
+    -- The block above is generated; the policy line below is hand-edited and the
+    -- --check refuses to let the two files carry different hand-edits.
+    ['playback','lifecycle','app_state','error','download','ui'] AS LIVENESS_CLASSES,
+    arrayMap(x -> (x.1, x.2), arrayFilter(x -> has(LIVENESS_CLASSES, x.3), EVENT_SEMANTICS)) AS LIVENESS_PAIRS,
     150 AS GAP_S,
     60  AS TAIL_S,
     -- MUST MATCH sql/30_build_intervals.sql. Changing one without the other is
@@ -65,8 +130,13 @@ WITH
     -- differently and run boundaries land in the wrong places.
     distinct_ts AS
     (
+        -- Only DECLARED pairs are instants here, matching the model's `ts`
+        -- (ADR 0033). An undeclared pair is not an instant on either side, so
+        -- the gate keeps comparing like with like — and the load-time probe,
+        -- not this query, is what notices the pair exists at all.
         SELECT DISTINCT video_session_id, toUInt32(event_timestamp) AS ts
         FROM ev_raw
+        WHERE has(LIVENESS_PAIRS, (toString(event_type), toString(event)))
     ),
     numbered AS
     (
@@ -97,8 +167,12 @@ WITH
     (
         SELECT
             video_session_id,
-            arraySort(groupArrayIf(toUInt32(event_timestamp), event = 'pause'))  AS ps,
-            arraySort(groupArrayIf(toUInt32(event_timestamp), event = 'resume')) AS rs
+            -- Markers by declared NAME, matching sql/30_build_intervals.sql and
+            -- for the reason given there: liveness fails closed, markers must
+            -- fail in the same (shortening) direction, so `pause` keeps matching
+            -- whatever event_type carries it.
+            arraySort(groupArrayIf(toUInt32(event_timestamp), has(PAUSE_EVENTS,  toString(event)))) AS ps,
+            arraySort(groupArrayIf(toUInt32(event_timestamp), has(RESUME_EVENTS, toString(event)))) AS rs
         FROM ev_raw
         GROUP BY video_session_id
     ),

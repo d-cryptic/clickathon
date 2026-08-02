@@ -120,7 +120,21 @@ carry the rest. Dossier: [doubts/10](../../doubts/10-fail-closed-state-gates.md)
 Every variant peaks at the same minute, 2026-07-26 10:56 — consistent with the adversarial audit:
 conventions move the peak's value, never its location, on this file.
 
-## The proposed defence (not implemented): a liveness allow-list that alerts
+## The proposed defence — **IMPLEMENTED 2026-08-02, ADR 0033**
+
+The proposal below was taken up and went further than proposed: rather than the loader comparing
+against a TSV, the TSV became the **contract the model itself compiles against**
+([`contracts/event_semantics.tsv`](../../contracts/event_semantics.tsv), 47 pairs with a class and an
+action per pair), and the default for an undeclared pair is **grant no liveness** rather than
+fail-open-with-a-warning. Probe 8 of the source-contract gate is now a **FAIL**, not a WARN, and
+reports how many undeclared events sit alone in a >150 s gap. Cost on this file: **zero** — peak
+2,917, boundaries bit-identical. Value: an undeclared `AppKeepalive/tick` would have taken the old
+model to peak 5,004 (+71.5%). Ledger: [evidence/event-semantics/](../event-semantics/README.md); the
+Q1 ladder here is reproduced there to the interval by an independent expression.
+
+The original proposal, unedited:
+
+
 
 **What:** commit [vocabulary.tsv](vocabulary.tsv) as the known-event contract. At load time (both
 `tools/load.sh` and the unseen-day path in `tools/unseen-run.sh`), one query compares the incoming

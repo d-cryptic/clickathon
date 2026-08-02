@@ -43,13 +43,25 @@ derivation (`sql/30_build_intervals.sql`): exact lowercase `pause`/`resume` sub-
 `VideoSessionEnd` (solely to set `is_open`). `VideoSessionStart`, `VideoPlay`, `AppBackgrounded`,
 `AppForegrounded` and `VideoError` participate **only as generic timestamps** in the gap arithmetic —
 there is no branch on any of them. That means an observed `AppBackgrounded` does not itself close
-active state (it can even renew a run and earn tail grace), and an unknown new `event_type` on the
-unseen day silently becomes a generic activity timestamp rather than failing for review. Deliberate
+active state (it can even renew a run and earn tail grace). Deliberate
 (bg/fg are not guaranteed to pair — trap 1), but it is a modeling *policy*; whether the private truth
 expects immediate inactivity at a background event is an open mentor question
 ([codex-validation/002.md](codex-validation/002.md) §4). Of `VideoHeartbeat`'s 41 sub-event names,
 only `pause` (27,340 rows) and `resume` (31,780) are matched; look-alikes such as `speed-pause`,
 `AdPause` and `download_resumed` are intentionally not.
+
+**Which events count is now DECLARED, and an unknown one no longer counts
+([ADR 0033](adr/0033-event-semantics-are-declared-and-unknown-events-fail-closed.md)).** Until
+2026-08-02 an event value we had never seen silently became a generic activity timestamp — bridging
+gaps, extending runs, earning tail — rather than failing for review. All 47 `(event_type, event)`
+pairs are now declared in [`contracts/event_semantics.tsv`](../contracts/event_semantics.tsv), and a
+pair that is **not** declared renews nothing: it can only shorten the answer, never lengthen it.
+`tools/validate-source-contract.sh` probe 8 **FAILs** at load on any undeclared pair and reports how
+many of its events sit alone in a >150 s gap, so the unseen day surfaces new vocabulary loudly. On the
+delivered file this changed **nothing** — peak 2,917, bit-identical intervals — while an undeclared
+`AppKeepalive/tick` would have taken the old model to peak 5,004 (+71.5%). The paragraph above still
+describes which *declared* events carry branch semantics; the classification of the other 44 is
+[doubts/11](../doubts/11-liveness-allow-list-unknown-events.md), still open and worth −1.3% of peak.
 
 ## Content dimension — `content_dim`
 

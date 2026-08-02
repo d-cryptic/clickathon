@@ -33,6 +33,7 @@ what is verified, what is broken, and what is still missing, in one page.
 | Understand the concurrency model and why | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | **Answer "what about sessions that are still open?"** | [docs/LIVE_INTERVALS.md](docs/LIVE_INTERVALS.md) — the live edge under-reports **−14.8%** and is exact beyond **240 s**; labelling proposal in [ADR 0029](docs/adr/0029-provisional-and-final-buckets-labelled-off-the-watermark.md) |
 | Know the field names / event types / data shape | [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) |
+| **Know what an event MEANS — and what happens to one we have never seen** | [contracts/event_semantics.tsv](contracts/event_semantics.tsv) — all 47 pairs declared; an undeclared pair **fails closed** and the loader FAILs on it ([ADR 0033](docs/adr/0033-event-semantics-are-declared-and-unknown-events-fail-closed.md)). Edit the TSV, then `tools/event-semantics.sh --write` |
 | Write SQL the way this repo writes SQL | [docs/CONVENTIONS.md](docs/CONVENTIONS.md) |
 | **Set up the Go toolchain / write Go here** | [docs/GO.md](docs/GO.md) — `direnv allow`, then `make ci` |
 | Know what is tested and what to avoid | [docs/TESTS.md](docs/TESTS.md) |

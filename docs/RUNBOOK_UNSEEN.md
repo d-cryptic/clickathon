@@ -71,9 +71,23 @@ three questions in [`evidence/source-contract/README.md`](../evidence/source-con
 
 - **FAIL** → stop. The file is not the protocol we modeled (wrong timestamp units, missing column,
   empty identity, new `event_type`). Fix the understanding, not the gate.
-- **WARN new vs baseline** → proceed with eyes open. **Vocabulary drift is the one that silently
-  inflates the answer** — unknown events fail open in the model and no other gate can see them
-  (doubts/11); a non-zero drift row goes next to the submitted number.
+- **FAIL on probe 8, `undeclared (event_type, event) pair`** → the one FAIL that is *expected* on an
+  unseen day, and the only one with a two-minute fix. Since
+  [ADR 0033](adr/0033-event-semantics-are-declared-and-unknown-events-fail-closed.md) an undeclared
+  pair **renews no liveness**, so the pipeline is already in the safe (under-counting) direction and
+  nothing is corrupt. The probe's note tells you the size of the decision: the pair, its event count,
+  and how many of those events have **no declared event within 150 s** (`solo`) — those are the only
+  instants where the two readings differ. Then either:
+    1. **Classify it** (preferred, ~2 min): add the row to
+       [`contracts/event_semantics.tsv`](../contracts/event_semantics.tsv) with a `class` and an
+       `action`, run `tools/event-semantics.sh --write`, re-run the gate. Beware: **volume is not
+       weight** — on the delivered file the three highest-volume pairs (53.7% of all events) are worth
+       ≤2 peak each, while a 3.4% pair is worth 131 (`evidence/event-semantics/` §3). Judge by `solo`,
+       not by count.
+    2. **Proceed deliberately**: `UNSEEN_ACK_CONTRACT=1 tools/unseen-run.sh …`. The answer will
+       under-count by at most the `solo` instants. Put the probe-8 line next to the submitted number.
+- **WARN new vs baseline** → proceed with eyes open; a non-zero drift row goes next to the submitted
+  number.
 - The gate **changes nothing** — treatment of bad rows stays with `sql/15_normalise.sql` (§5.6) and
   the loader's own guards. If content metadata was not re-delivered, run with the raw CSV only: the
   gate reports every id as unresolved, which is exactly what serving would do (A9/R10).

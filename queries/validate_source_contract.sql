@@ -32,10 +32,40 @@ WITH
     ) AS actual_cols,
     arrayFilter(c -> NOT has(actual_cols, c), expected_cols) AS missing_cols,
     arrayFilter(c -> NOT has(expected_cols, c), actual_cols) AS extra_cols,
-    -- The 47-pair vocabulary contract (doubts/11), rendered from
-    -- evidence/liveness/vocabulary.tsv by the runner.
+    -- The 47-pair event-semantics contract (ADR 0033), rendered from
+    -- contracts/event_semantics.tsv by the runner. THE SAME FILE the model and
+    -- the gate compile their liveness set from — one contract, three consumers,
+    -- so "known here" and "counts there" cannot drift apart.
     [__VOCAB_PAIRS__] AS known_pairs,
     arrayDistinct(arrayMap(p -> tupleElement(p, 1), known_pairs)) AS known_types,
+    -- ADR 0033 BLAST RADIUS. Since the model went fail-closed, an undeclared
+    -- pair no longer inflates the answer — it is simply not counted. That is the
+    -- safe direction, but it is still a decision someone has to make, so probe 8
+    -- has to say HOW MUCH is at stake rather than just "new pair seen".
+    -- `solo` is the number the operator actually needs: undeclared events with
+    -- NO declared event within GAP_S either side. Those are the instants where
+    -- the two readings genuinely differ — everywhere else the run covers the
+    -- instant regardless. GAP_S is 150 to match sql/30_build_intervals.sql.
+    -- Cost: one pass, and the arrayCount only runs for sessions that carry an
+    -- undeclared pair. Measured 0.14 s on the 905,558-row file (zero unknowns)
+    -- and 0.20 s on a 955,614-row file carrying 50,056 of them.
+    unknown_reach AS
+    (
+        SELECT
+            sum(length(u))          AS unknown_events,
+            countIf(length(u) > 0)  AS unknown_sessions,
+            sum(arrayCount(x -> NOT arrayExists(k -> abs(toInt64(k) - toInt64(x)) <= 150, d), u)) AS solo_events
+        FROM
+        (
+            SELECT
+                arraySort(groupArrayIf(toUInt32(event_timestamp),
+                    has(known_pairs, (toString(event_type), toString(event))))) AS d,
+                arraySort(groupArrayIf(toUInt32(event_timestamp),
+                    NOT has(known_pairs, (toString(event_type), toString(event))))) AS u
+            FROM ev_raw
+            GROUP BY video_session_id
+        )
+    ),
     (
         SELECT arrayFilter(x -> x != '',
             [if(count() > 0 AND countIf(platform = '')          = count(), 'platform', ''),
@@ -108,17 +138,30 @@ FROM
         if(length(extra_cols) = 0, '', concat(arrayStringConcat(extra_cols, ', '),
             ' — DDL drift vs sql/00_schema.sql; CSV-header shape is the loader''s phase-0 check (T1)'))
     UNION ALL
-    SELECT 8, 'WARN', 'vocabulary drift: unknown event values',
+    -- PROMOTED WARN -> FAIL BY ADR 0033, and widened from "unknown event value
+    -- under a known type" to "any pair the contract does not declare" (probe 5
+    -- still reports the unknown-TYPE case separately, because a new type is a
+    -- bigger event than a new sub-value). FAIL is not "the load is unsafe" —
+    -- under fail-closed the load is the SAFE direction, and the note says so.
+    -- FAIL is "a human owes this file a semantic ruling before the number is
+    -- submitted", which is exactly the thing doubts/11 found nothing was
+    -- forcing. A WARN in a 25-row report at 2am is not forcing anything.
+    SELECT 8, 'FAIL', 'undeclared (event_type, event) pair',
         (SELECT count() FROM ev_raw
-         WHERE has(known_types, toString(event_type))
-           AND NOT has(known_pairs, (toString(event_type), toString(event)))),
+         WHERE NOT has(known_pairs, (toString(event_type), toString(event)))),
         (SELECT if(count() = 0, '', concat(toString(count()), ' new pair(s), top: ',
-                arrayStringConcat(groupArray(5)(concat(t, '/', e, 'x', toString(c))), ', '),
-                ' — unknown events FAIL OPEN and extend activity (doubts/11)'))
+                arrayStringConcat(groupArray(5)(concat(t, '/', e, ' x', toString(c))), ', '),
+                ' — GRANTS NO LIVENESS (ADR 0033 fail-closed), so the answer can only be',
+                ' UNDER-counted; ',
+                toString((SELECT solo_events FROM unknown_reach)), ' of ',
+                toString((SELECT unknown_events FROM unknown_reach)), ' such events across ',
+                toString((SELECT unknown_sessions FROM unknown_reach)), ' sessions have no declared',
+                ' event within 150s, i.e. that many instants where the two readings differ.',
+                ' Classify each pair in contracts/event_semantics.tsv, run',
+                ' tools/event-semantics.sh --write, rebuild.'))
          FROM (SELECT toString(event_type) AS t, toString(event) AS e, count() AS c
                FROM ev_raw
-               WHERE has(known_types, toString(event_type))
-                 AND NOT has(known_pairs, (toString(event_type), toString(event)))
+               WHERE NOT has(known_pairs, (toString(event_type), toString(event)))
                GROUP BY event_type, event ORDER BY c DESC))
     UNION ALL
     SELECT 9, 'WARN', 'reused video_session_id (>1 session_start_epoch)',

@@ -10,7 +10,10 @@
 > vocabulary contract ([evidence/liveness/vocabulary.tsv](../evidence/liveness/vocabulary.tsv), 47
 > pairs, enumerated for the first time) that the loader checks, alerting on anything new.
 
-**Status:** open · **Evidence measured:** 2026-08-01/02, scratch `liv_q28`
+**Status:** **PARTLY ANSWERED** — the unknown-event default is decided and applied
+([ADR 0033](../docs/adr/0033-event-semantics-are-declared-and-unknown-events-fail-closed.md),
+cost zero on this file); the known-event allow-list (−1.3%) is still open. See **Answer** below ·
+**Evidence measured:** 2026-08-01/02, scratch `liv_q28` and `evsem_q33`
 ([evidence/liveness/](../evidence/liveness/README.md)); baseline reproduces the graded
 2,917 / 1,978.1 h exactly.
 
@@ -102,9 +105,42 @@ bake-off already voted to cherry-pick (§5.2a) — this supplies the concrete co
 
 ## Our current assumption
 
-Every event renews liveness; unknown events fail open. Shipped in model and gate; documented as
-policy in `docs/DATA_DICTIONARY.md`; vocabulary now enumerated in `evidence/liveness/vocabulary.tsv`.
+Every **declared** event renews liveness; **undeclared events now fail CLOSED**
+([ADR 0033](../docs/adr/0033-event-semantics-are-declared-and-unknown-events-fail-closed.md), applied
+2026-08-02). Shipped in model and gate; the contract is
+[`contracts/event_semantics.tsv`](../contracts/event_semantics.tsv), derived pair-for-pair from
+`evidence/liveness/vocabulary.tsv`.
 
 ## Answer
 
-_unrecorded_
+**Half of this question no longer needs a mentor — it is answered and applied. Half still does.**
+
+**ANSWERED (ADR 0033, 2026-08-02): the unknown-event default.** Undeclared pairs renew nothing. The
+rule is *an event we have not declared may only shorten the answer, never lengthen it* — so liveness
+is fail-closed by pair, while `pause` stays matched by declared NAME so an undeclared `AdBreak/pause`
+still stops the clock. `tools/validate-source-contract.sh` probe 8 was promoted **WARN → FAIL** and
+now reports, for each undeclared pair, how many of its events have no declared event within 150 s.
+
+Measured cost of that flip on the delivered file: **zero.** 30,323 intervals · 1,978.1 h · peak
+**2,917 @ 2026-07-26 10:56**, interval boundaries bit-identical to the pre-0033 build, gate green over
+17,028 minutes. Measured value: an undeclared `AppKeepalive/tick` every 30 s for 30 min past each
+session's last event takes the fail-open peak to **5,004 (+71.5%)** and moves the peak minute; two
+other plausible injections move it *down* by 29 and 52 — **the sign is not predictable**, which is a
+stronger argument than the "silently inflates" framing above. Ledger:
+[evidence/event-semantics/](../evidence/event-semantics/README.md).
+
+**STILL OPEN: which of the events we HAVE seen prove watching.** That is the −1.3% in the tables
+above, it moves a submitted number, and it is an operator/mentor call. It is now a one-word edit —
+the `LIVENESS_CLASSES` line in `sql/30_build_intervals.sql` and `sql/90_reconcile.sql` — with the full
+ladder measured and committed beside it:
+
+```
+ playback lifecycle app_state error download ui   30,323  1,978.1 h  2,917  <- ships
+ playback lifecycle download ui                   29,659  1,987.0 h  2,905
+ playback lifecycle                               29,659  1,987.0 h  2,904
+ playback download ui                             29,343  1,961.5 h  2,880   (= the allow-list row above)
+ playback                                         29,340  1,961.5 h  2,879
+```
+
+Ask the mentor question at the top of this file unchanged, minus its last sentence about unseen event
+types — that half is closed.

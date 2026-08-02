@@ -12,8 +12,12 @@
 #   tools/validate-source-contract.sh -c --database liv_x   # any database on cloud
 #
 # Exit codes: 0 = CLEAN or WARN-only (the verdict line says which), 1 = FAIL,
-# 2 = could not run. The vocabulary contract is evidence/liveness/vocabulary.tsv
-# (doubts/11), rendered into the query at run time; this script dies without it.
+# 2 = could not run. The vocabulary contract is contracts/event_semantics.tsv
+# (ADR 0033) — the SAME file sql/30_build_intervals.sql and sql/90_reconcile.sql
+# compile their liveness set from — rendered into the query at run time by
+# tools/event-semantics.sh --pairs; this script dies without it. It used to read
+# evidence/liveness/vocabulary.tsv, which is the MEASUREMENT that produced the
+# contract and stays where it is as evidence; the contract is what governs.
 # Origin: feat/problem-space-research (design-bakeoff cherry-pick #1), adapted.
 set -euo pipefail
 
@@ -34,9 +38,11 @@ done
 case "$TARGET_ARG" in local|cloud) ;; *) die "TARGET='$TARGET_ARG' is not a target — 'local' or 'cloud' (ADR 0018)" ;; esac
 
 SQL_FILE="$ROOT/queries/validate_source_contract.sql"
-VOCAB="$ROOT/evidence/liveness/vocabulary.tsv"
+VOCAB="$ROOT/contracts/event_semantics.tsv"
+RENDER="$ROOT/tools/event-semantics.sh"
 [ -f "$SQL_FILE" ] || die "missing $SQL_FILE"
-[ -f "$VOCAB" ] || die "missing $VOCAB — the vocabulary contract is half the gate (doubts/11)"
+[ -f "$VOCAB" ] || die "missing $VOCAB — the event-semantics contract is half the gate (ADR 0033)"
+[ -x "$RENDER" ] || die "missing or non-executable $RENDER"
 
 # The gate is read-only BY DESIGN. Refuse to run if the query file ever grows a
 # write, so a future edit cannot quietly turn a report into a mutation.
@@ -45,14 +51,11 @@ if perl -pe 's/--.*$//' "$SQL_FILE" | grep -Eiqw 'insert|alter|drop|truncate|opt
   die "$SQL_FILE contains a write keyword — the gate is read-only (ADR 0026); refusing to run"
 fi
 
-# Render the vocabulary contract into the query: TSV -> ('type','event'),...
-# perl, not sed — BSD sed burned us before (RUNBOOK R1).
-PAIRS=$(perl -ne '
-  next if $. == 1; s/\r?\n$//;
-  my @f = split /\t/; next unless defined $f[1] && length $f[0];
-  for (@f[0,1]) { s/\x27/\x27\x27/g }
-  push @p, "(\x27$f[0]\x27,\x27$f[1]\x27)";
-  END { print join(",", @p) }' "$VOCAB")
+# Render the contract into the query: TSV -> ('type','event'),...
+# Through tools/event-semantics.sh, NOT a second copy of the parser here — the
+# whole point of ADR 0033 is that one file has one reader, so the gate cannot
+# come to a different view of the vocabulary than the model compiled against.
+PAIRS=$("$RENDER" --pairs)
 [ -n "$PAIRS" ] || die "$VOCAB rendered an empty pair list"
 Q=$(PAIRS="$PAIRS" perl -pe 's/__VOCAB_PAIRS__/$ENV{PAIRS}/' "$SQL_FILE")
 

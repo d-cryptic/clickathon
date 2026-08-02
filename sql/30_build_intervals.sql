@@ -16,6 +16,28 @@
 --                    counts paused time as watching, which the statement
 --                    forbids. This is the correction ADR 0007 mandates.
 --
+-- WHICH EVENTS MEAN WHAT IS DECLARED, NOT ASSUMED (ADR 0033). Until 0033 this
+-- file said "a run of events" and meant EVERY row of ev_raw: 44 of the file's
+-- 47 (event_type, event) pairs participated as anonymous timestamps that bridge
+-- gaps and earn TAIL_S, and an event value WE HAVE NEVER SEEN inherited that
+-- power silently. The contract below — contracts/event_semantics.tsv, rendered
+-- in by tools/event-semantics.sh — names all 47 and closes the set:
+--
+--   DECLARED pair    -> renews liveness iff its class is in LIVENESS_CLASSES
+--   UNDECLARED pair  -> renews NOTHING. It is still a dimension observation
+--                       (dim_events below reads every row), it just cannot
+--                       lengthen a run, bridge a gap, or mint a tail.
+--
+-- The default is FAIL-CLOSED because unknown vocabulary may only SHORTEN the
+-- answer, never lengthen it. Measured cost of the flip on the delivered file:
+-- ZERO — 30,323 intervals, 1,978.1 h, PEAK 2,917 @ 2026-07-26 10:56, and the
+-- interval boundaries are bit-identical to the pre-0033 build (0 rows differ).
+-- Measured value: an undeclared `AppKeepalive/tick` every 30 s for 30 min after
+-- each session's last event — an entirely plausible client event — takes the
+-- fail-open peak to 5,004 (+71.5%) and MOVES THE PEAK MINUTE to 11:15. Under
+-- this contract the same file yields 2,917 @ 10:56, bit-identical.
+-- Full ledger: evidence/event-semantics/README.md.
+--
 -- Re-running is safe: session_intervals is a ReplacingMergeTree keyed on
 -- (video_session_id, interval_start), versioned on build_version, so the newest
 -- derivation always wins — whether the interval grew OR SHRANK. It used to be
@@ -72,6 +94,84 @@ INSERT INTO session_intervals
      app_version, audio_language, subtitle_language, player_version,
      interval_start, interval_end, is_open, build_version)
 WITH
+    -- >>> BEGIN GENERATED from contracts/event_semantics.tsv — tools/event-semantics.sh --write
+    [('AppBackgrounded','AppBackgrounded','app_state'),
+     ('AppForegrounded','AppForegrounded','app_state'),
+     ('VideoError','VideoError','error'),
+     ('VideoHeartbeat','AdBufferEnd','playback'),
+     ('VideoHeartbeat','AdBufferStart','playback'),
+     ('VideoHeartbeat','AdClick','playback'),
+     ('VideoHeartbeat','AdPause','playback'),
+     ('VideoHeartbeat','AdResume','playback'),
+     ('VideoHeartbeat','AdSkipTrueView','playback'),
+     ('VideoHeartbeat','BufferEnd','playback'),
+     ('VideoHeartbeat','BufferStart','playback'),
+     ('VideoHeartbeat','Seek','playback'),
+     ('VideoHeartbeat','audio-language','playback'),
+     ('VideoHeartbeat','buffer-health','playback'),
+     ('VideoHeartbeat','chromecast_clicked','ui'),
+     ('VideoHeartbeat','chromecast_started','ui'),
+     ('VideoHeartbeat','download_asset_play_stop','download'),
+     ('VideoHeartbeat','download_asset_played','download'),
+     ('VideoHeartbeat','download_completed','download'),
+     ('VideoHeartbeat','download_deleted','download'),
+     ('VideoHeartbeat','download_initiated','download'),
+     ('VideoHeartbeat','download_resumed','download'),
+     ('VideoHeartbeat','downshift','playback'),
+     ('VideoHeartbeat','dropped-frames','playback'),
+     ('VideoHeartbeat','go_live_click','playback'),
+     ('VideoHeartbeat','golive','playback'),
+     ('VideoHeartbeat','network-activity','playback'),
+     ('VideoHeartbeat','network-bandwidth','playback'),
+     ('VideoHeartbeat','network-change','playback'),
+     ('VideoHeartbeat','next_video_click','playback'),
+     ('VideoHeartbeat','pause','playback'),
+     ('VideoHeartbeat','preroll-disabled','playback'),
+     ('VideoHeartbeat','preview_watched','playback'),
+     ('VideoHeartbeat','resume','playback'),
+     ('VideoHeartbeat','speed-change','playback'),
+     ('VideoHeartbeat','speed-pause','playback'),
+     ('VideoHeartbeat','speed-resume','playback'),
+     ('VideoHeartbeat','subtitle-language','playback'),
+     ('VideoHeartbeat','upshift','playback'),
+     ('VideoHeartbeat','video-resize','playback'),
+     ('VideoHeartbeat','video_forward','playback'),
+     ('VideoHeartbeat','video_rewind','playback'),
+     ('VideoHeartbeat','video_quality_change','playback'),
+     ('VideoHeartbeat','premium_button_click','ui'),
+     ('VideoPlay','Play','playback'),
+     ('VideoSessionEnd','VideoSessionEnd','lifecycle'),
+     ('VideoSessionStart','VideoSessionStart','lifecycle')] AS EVENT_SEMANTICS,
+    ['pause'] AS PAUSE_EVENTS,
+    ['resume'] AS RESUME_EVENTS,
+    ['VideoSessionEnd'] AS END_TYPES,
+    -- <<< END GENERATED
+    -- THE LIVENESS POLICY. Hand-edited — this is the operator's lever, and it
+    -- MUST be the same edit in sql/90_reconcile.sql (tools/event-semantics.sh
+    -- --check fails the suite if the two ever differ). Every value MEASURED end
+    -- to end on the delivered file, local scratch `evsem_q33`, gate green at
+    -- each (evidence/event-semantics/README.md):
+    --
+    --   classes kept                                intervals   hours    PEAK
+    --   playback lifecycle app_state error dl ui      30,323  1,978.1   2,917  <- ships
+    --   playback lifecycle download ui                29,659  1,987.0   2,905
+    --   playback lifecycle                            29,659  1,987.0   2,904
+    --   playback download ui                          29,343  1,961.5   2,880
+    --   playback                                      29,340  1,961.5   2,879
+    --
+    -- Rows 2 and 4 reproduce evidence/liveness/README.md Q1's `nobgfgerr` and
+    -- `allowhb` EXACTLY (29,659/1,987.0/2,905 and 29,343/1,961.5/2,880), from an
+    -- independent expression — which is what licenses this file to claim the
+    -- other three. Every one peaks at the same minute, 2026-07-26 10:56.
+    --
+    -- DEFAULT = every declared class, i.e. exactly what shipped before ADR 0033.
+    -- NOT because it is the better reading — doubts/11 argues a narrower list is
+    -- and puts the strict reading at -1.3% of PEAK — but because narrowing it
+    -- moves a number we have already submitted, and that is an operator's call,
+    -- not a build's. The unknown-event default is a different question and IS
+    -- decided here; see the header. Same discipline as POINT_ACTIVITY_COUNTS.
+    ['playback','lifecycle','app_state','error','download','ui'] AS LIVENESS_CLASSES,
+    arrayMap(x -> (x.1, x.2), arrayFilter(x -> has(LIVENESS_CLASSES, x.3), EVENT_SEMANTICS)) AS LIVENESS_PAIRS,
     -- Tunables. GAP_S is now derived from the MEASURED inter-arrival p99 of 49s
     -- (ADR 0007), not from the "60s cadence" that the data disproved. 150s is
     -- ~3x p99 — wide enough to survive a burst pause, tight enough to catch a
@@ -134,7 +234,11 @@ WITH
     per_session AS (
         SELECT
             video_session_id,
-            arraySort(groupArray(toUnixTimestamp(event_timestamp)))                    AS ts,
+            -- ONLY DECLARED PAIRS RENEW LIVENESS (ADR 0033). An undeclared pair
+            -- contributes no timestamp here, so it cannot bridge a gap, extend a
+            -- run or earn TAIL_S. It still reaches dim_events below.
+            arraySort(groupArrayIf(toUnixTimestamp(event_timestamp),
+                has(LIVENESS_PAIRS, (toString(event_type), toString(event)))))   AS ts,
             -- ALL SEVEN raw dimensions, carried as (ts, value…) tuples so they can
             -- be attributed PER INTERVAL below rather than collapsed to one value
             -- per session. Deliberately a SECOND array rather than a widened `ts`:
@@ -166,12 +270,31 @@ WITH
                 app_version, audio_language, subtitle_language, player_version,
                 user_id, content_id, platform, country
             ))) AS dim_events,
-            arraySort(groupArrayIf(toUnixTimestamp(event_timestamp), event = 'pause'))  AS pauses,
-            arraySort(groupArrayIf(toUnixTimestamp(event_timestamp), event = 'resume')) AS resumes,
+            -- MARKERS ARE MATCHED BY NAME, NOT BY PAIR, AND THAT ASYMMETRY IS
+            -- DELIBERATE (ADR 0033). Liveness above is fail-CLOSED: an unknown
+            -- pair grants nothing, so it can only shorten the answer. A marker
+            -- must fail in the SAME direction, and for `pause` that means the
+            -- opposite mechanism — an undeclared `AdBreak/pause` arriving on the
+            -- unseen day should still STOP the clock. Matching the declared NAME
+            -- rather than the declared pair is what keeps it doing so. A genuinely
+            -- new name (`unpause`) is undeclared under either rule and leaves the
+            -- pause open to the run end, which is also the shortening direction.
+            -- The one residual: an undeclared type emitting a KNOWN `resume` name
+            -- closes a pause window early and so lengthens. It needs a matching
+            -- `pause` to have any effect at all, and probe 8 of the source-contract
+            -- gate fires on the pair before the load. Byte-for-byte identical to
+            -- the old `event = 'pause'` on the delivered file: PAUSE_EVENTS is
+            -- ['pause'] and no other event_type carries that value.
+            arraySort(groupArrayIf(toUnixTimestamp(event_timestamp), has(PAUSE_EVENTS,  toString(event)))) AS pauses,
+            arraySort(groupArrayIf(toUnixTimestamp(event_timestamp), has(RESUME_EVENTS, toString(event)))) AS resumes,
             -- No VideoSessionEnd at build time => still open. 2.2% of sessions
             -- emit events up to 2,081s AFTER their end event (ADR 0007), so
             -- "ended" is not the same as "sealed".
-            countIf(event_type = 'VideoSessionEnd') = 0 AS is_open
+            -- END_TYPES is declared by the contract (action=end) and matched on
+            -- event_type, as before. Fail-closed here also shortens nothing and
+            -- inflates nothing: an unrecognised end marker leaves is_open = 1, so
+            -- the session stays correctable instead of being sealed early.
+            countIf(has(END_TYPES, toString(event_type))) = 0 AS is_open
         FROM ev_raw
         GROUP BY video_session_id
     ),
