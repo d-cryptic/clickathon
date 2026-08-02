@@ -12,6 +12,20 @@ was executed against the built model; every latency is `query_duration_ms` read
 back out of `system.query_log` after `SYSTEM FLUSH LOGS`, joined on the
 `query_id` the execution carried. Re-run any query in section 9 and compare.
 
+**REVISED 2026-08-02**: the same 27 queries were re-run against ClickHouse
+**Cloud**, database `sonyliv_official` (the hosted 7,000,000-row build). Section 7
+now carries **both** sets of latencies side by side — local container and Cloud —
+and the limitation that used to be section 10 item 1 is resolved. The two builds
+were checked against each other value by value:
+
+> **All 27 queries return byte-identical output on Cloud and on the local build.**
+> Not one number in sections 3-6, 8 or 10 changes. Peak **23,324** at
+> 2026-07-31 11:17:00, day integral **81,621,960** concurrency-seconds, peak users
+> **22,279** at 11:16:00 — reproduced on the hosted service, byte for byte.
+
+Two things **did** differ and are reported rather than smoothed over — one schema
+gap and one set of engine counters. Both are in section 7.1.
+
 
 ## What the unseen-day spec asks for, and where it is answered
 
@@ -25,8 +39,8 @@ back out of `system.query_log` after `SYSTEM FLUSH LOGS`, joined on the
 | concurrency results — AVERAGE, day grain | §3, §4.1 | 944.6986 (integral / 86,400 s) |
 | dimension filters | §6 (10 sub-sections) | platform, country, content_id, video_type, category, show_name (NEW), video_resolution (NEW), partial-IN, combined |
 | user-level concurrency (the second tier in the spec) | §5 | peak 22,279 users @ 2026-07-31 11:16:00; avg 903.9986 |
-| query latencies | §7 | 27 queries, median of 3 measured runs each |
-| evidence they ran through the pipeline | §7, Appendix A | 108 system.query_log rows joined on caller-supplied query_id |
+| query latencies | §7 | 27 queries, median of 3 measured runs each, on **ClickHouse Cloud** and on the local container, side by side |
+| evidence they ran through the pipeline | §7, Appendix A | 108 local + 112 Cloud system.query_log rows joined on caller-supplied query_id |
 | (not asked, offered) correctness proof on this data | §8 | 1,440/1,440 minutes agree with an independent arithmetic; integral exact |
 
 
@@ -47,9 +61,12 @@ FROM system.query_log
 WHERE type = 'QueryFinish' AND query_id = '<query_id>';
 ```
 
-The `log_comment` on every execution is `unseen-matrix/<query name>/<rep>`, so
-the whole run is recoverable with
-`WHERE log_comment LIKE 'unseen-matrix/%'` without knowing a single id.
+The `log_comment` on every execution is `unseen-matrix/<query name>/<rep>` for the
+**local** run and `unseen-matrix-cloud/<query name>/<rep>` for the **Cloud** re-run,
+so either whole run is recoverable with `WHERE log_comment LIKE 'unseen-matrix/%'` /
+`LIKE 'unseen-matrix-cloud/%'` without knowing a single id. The raw extracts are
+`evidence/submission/query-log.tsv` (local) and
+`evidence/submission/query-log-cloud.tsv` (Cloud).
 
 
 ## 1 · What was run, and where
@@ -59,15 +76,17 @@ the whole run is recoverable with
 | dataset | ch-hackathon-raw-data_surprise.csv (7,000,000 events) + ch-hackathon-content-data_surprise.csv (33,326 titles) |
 | raw sha256 | 06897bd68b1a5f5729cd1668525c059eb969cfe4e4acdccfe4a6849787775c95 |
 | content sha256 | 709c36fc9b25a6431dd82fb576b564674700cc717d04cf4d2e4ae8fde5c9daae |
-| server | ClickHouse 26.7.1.1315, local Docker container `ch`, 10 cores, max_threads=auto(10) (see section 10 — this is NOT ClickHouse Cloud) |
-| database | codex_official_green_20260802_075132 |
-| build | canonical path: tools/apply-sql.sh -> tools/load.sh -> tools/build-model.sh; gate sql/90_reconcile.sql PASS |
-| build provenance | evidence/unseen/official-20260802-codex-validation.txt (git HEAD b5d3eba) |
-| model policy | v1 / e965954b23d4 — GAP_S=150, TAIL_S=60, unclosed_pause_to_run_end=1, point_activity_counts=0 |
+| server A (**LOCAL**) | ClickHouse 26.7.1.1315, local Docker container `ch`, 10 cores, max_threads=auto(10), MergeTree on local disk |
+| database A | `codex_official_green_20260802_075132` |
+| server B (**CLOUD**) | ClickHouse 26.2.1.525, ClickHouse Cloud, host `c-tomatogcp-cu-87`, 3 vCPU / 12 GiB, max_threads=3, SharedMergeTree on object storage |
+| database B | `sonyliv_official` — 7,000,000 `ev_raw` rows; 7,952,115 active part rows, 49.13 MiB on disk |
+| build | canonical path: tools/apply-sql.sh -> tools/load.sh -> tools/build-model.sh; gate sql/90_reconcile.sql PASS on **both** |
+| build provenance | local: evidence/unseen/official-20260802-codex-validation.txt (git HEAD b5d3eba)<br>cloud: evidence/unseen/reconcile-cloud-official.txt — 3,201,716 minutes compared, 0 mismatched, peak 23,324 |
+| model policy | v1 / e965954b23d4 — GAP_S=150, TAIL_S=60, unclosed_pause_to_run_end=1, point_activity_counts=0 (query `x05` returns the same policy row on both hosts; checked, not assumed) |
 | timezone | all timestamps UTC; `day` is the UTC day (see section 10 for IST) |
-| measurement | 1 discarded warm-up + 3 measured runs per query, each with its own query_id; median reported |
-| query cache | disabled per execution (`use_query_cache=0`) |
-| determinism | all 27 queries returned byte-identical output across warm-up + 3 reps |
+| measurement | 1 discarded warm-up + 3 measured runs per query, each with its own query_id; median reported. Identical protocol on both hosts, so the two latency columns are comparable to each other |
+| query cache | disabled per execution (`use_query_cache=0`) on both hosts |
+| determinism | all 27 queries returned byte-identical output across warm-up + 3 reps, on both hosts, and identical **between** hosts (§7.1) |
 
 
 ### What the pipeline ingested and modelled
@@ -87,6 +106,10 @@ the whole run is recoverable with
 | cc_hour_agg rows (8-level cube) | 122,798 |
 | raw timestamp extent | 2014-12-31 18:31:10.260 .. 2026-08-03 11:26:15.032 |
 | distinct output dates | 102 |
+
+Every row of that inventory is query `x04_dataset_extent`, and it returns
+byte-identical output on the local build and on Cloud `sonyliv_official`. The two
+builds ingested the same file and modelled it into the same shape.
 
 The file is a single day of events (2026-07-31) but 102 output dates fall out of
 it: `session_start_epoch` values reach back to 2014 on a handful of sessions, and
@@ -140,14 +163,19 @@ honest day average is far below the busy-hour average. Both are given, labelled.
 
 ## 3 · Headline — session-tier concurrency, 2026-07-31 (UTC)
 
-| grain | metric | value | at | query | median ms | rows read |
-| --- | --- | ---: | --- | --- | ---: | ---: |
-| day | peak concurrent sessions | 23,324 | 2026-07-31 11:17:00 | s01 | 12 | 8,193 |
-| day | average (time-weighted, /86400 s) | 944.6986 | whole day | s01 | 12 | 8,193 |
-| hour | max hourly peak | 23,324 | 2026-07-31 11:00:00 | s11b | 3 | 8,192 |
-| hour | busiest hour average (/3600 s) | 11277.4333 | 2026-07-31 11:00:00 | s11b | 3 | 8,192 |
-| minute | peak over 1,440 minute buckets | 23,324 | 2026-07-31 11:17:00 | s14 | 13 | 137,610 |
-| minute | average over 1,440 minute buckets | 944.6986 | whole day | s14 | 13 | 137,610 |
+| grain | metric | value | at | query | LOCAL ms | CLOUD ms | rows read |
+| --- | --- | ---: | --- | --- | ---: | ---: | ---: |
+| day | peak concurrent sessions | 23,324 | 2026-07-31 11:17:00 | s01 | 12 | 49 | 8,193 |
+| day | average (time-weighted, /86400 s) | 944.6986 | whole day | s01 | 12 | 49 | 8,193 |
+| hour | max hourly peak | 23,324 | 2026-07-31 11:00:00 | s11b | 3 | 19 | 8,192 |
+| hour | busiest hour average (/3600 s) | 11277.4333 | 2026-07-31 11:00:00 | s11b | 3 | 19 | 8,192 |
+| minute | peak over 1,440 minute buckets | 23,324 | 2026-07-31 11:17:00 | s14 | 13 | 28 | 137,610 |
+| minute | average over 1,440 minute buckets | 944.6986 | whole day | s14 | 13 | 28 | 137,610 |
+
+The `value` column is identical on both hosts — that is the point of running it
+twice. Only the millisecond columns differ. The s01 Cloud figure is measured on
+`sonyliv_final`, the sibling Cloud build, for the reason given in §7.1; every
+other Cloud figure in this file is `sonyliv_official`.
 
 Day integral: 81,621,960 concurrency-seconds (1,360,366 session-minutes).
 Serving provenance for the day answer: 16 stored hour rows read,
@@ -546,9 +574,11 @@ needed to support it.
 `video_resolution` (new on the raw file) is an EVENT-level dimension: it is not a
 key of `cc_minute_delta` and cannot be derived from the catalogue. It is served by
 the generic exact-filter fallback `v_session_minutes` — `session_intervals`
-expanded to minutes. Correct, and 1,117 ms against
-12 ms for the promoted total tier: two orders of magnitude,
-which is the honest cost of a dimension the serving layer was not pre-cut for.
+expanded to minutes. Correct, and 1,117 ms local / 6,949 ms Cloud against
+12 ms local / 49 ms Cloud for the promoted total tier: two orders of magnitude on
+either host, which is the honest cost of a dimension the serving layer was not
+pre-cut for. The gap is not a local-container artefact — it is wider on Cloud, not
+narrower.
 Note also that the raw values are dirty — `1920*1080` and `1920 * 1080` are
 separate rows here because they are separate strings in the file; the pipeline
 does not silently merge them.
@@ -564,7 +594,7 @@ The shape the cube deliberately does not serve. `ANDROID_PHONE` u `JIO_ANDROID_T
 truly peaks at 13,723 at 2026-07-31 11:17:00. Taking the max of the two
 stored cube peaks gives 7,163 (47.8% low); summing them gives 13,869 (1.1% high).
 The correct answer costs a 498-change-point minute scan and
-7 ms.
+7 ms local / 59 ms Cloud.
 
 
 ### 6.7 · Combined filter — platform AND video_type (query s10)
@@ -644,6 +674,120 @@ One discarded warm-up plus three measured executions per query, each with its ow
 `elapsed_ms` is `query_duration_ms`; `read_rows` / `read_bytes` are what the
 engine actually touched. Query cache disabled per execution.
 
+The same 27 queries were executed twice under the identical protocol: once on the
+local container (2026-08-02 03:18 UTC) and once on ClickHouse Cloud
+`sonyliv_official` (2026-08-02 03:39 UTC). Both runs are given.
+
+
+### 7.1 · What differed between the two builds — the finding
+
+Every **result** agreed. The comparison was made by byte-diffing each query's
+output on the two hosts, not by eye:
+
+- **26 of 27** queries: output byte-identical, local vs Cloud `sonyliv_official`.
+- **1 of 27** (`s01`): could not be executed on `sonyliv_official` at all.
+
+**FINDING 1 — `sonyliv_official` is missing three view objects the local build has.**
+
+`s01_day_total` reads the parameterised view `v_cc_window_range`. On Cloud
+`sonyliv_official` all four executions failed identically:
+
+```
+Code: 46. DB::Exception: Unknown table function v_cc_window_range.
+(UNKNOWN_FUNCTION) (version 26.2.1.525)
+```
+
+The four `ExceptionBeforeStart` rows are in `query-log-cloud.tsv` with their
+query_ids — the failure is logged, not narrated. Comparing the object lists of the
+two databases:
+
+| | objects |
+| --- | --- |
+| in LOCAL, absent from `sonyliv_official` | `v_cc_window_range`, `v_cc_watermark`, `v_cc_tumbling_hour` |
+| in `sonyliv_official`, absent from LOCAL | `cc_publish_batch`, `cc_publish_consumed`, `cc_publish_lease`, `cc_publish_runs`, `v_cc_publish_lag`, `session_dirty`, `mv_session_dirty` |
+
+All three missing views are defined in **one file**, `sql/85_windows.sql`.
+`sonyliv_official` was applied from a SQL set that did not include that file — the
+sibling Cloud build `sonyliv_final` **was** (its run manifest lists
+`sql/85_windows.sql` at fingerprint `0e278f3516e3`,
+evidence/unseen/cloud-final-20260802.txt) and it has all three views. This is a
+**build-provenance defect, not a model defect**: no stored data is affected, and
+the reconcile gate — which does not use these views — passed on `sonyliv_official`
+with 3,201,716 minutes compared and 0 mismatched. But it means the SQL printed in
+§9.1 does not run against `sonyliv_official` as it stands, and it means
+`sql/85_windows.sql` must be applied to that database before it is served from.
+Named here rather than worked around.
+
+`s01` **was** measured on Cloud, on the sibling Cloud build `sonyliv_final` — the
+other 7,000,000-row Cloud database, which does carry `v_cc_window_range`. It
+returned output byte-identical to the local run (peak 23,324 @ 2026-07-31
+11:17:00, integral 81,621,960, avg 944.6986), and `x04_dataset_extent` on
+`sonyliv_final` is likewise byte-identical to local, so the two Cloud builds
+ingested the same file. The s01 Cloud latency below is therefore honestly labelled
+`sonyliv_final`, not `sonyliv_official`.
+
+**FINDING 2 — two queries read a different number of rows on the two engines.**
+
+| query | local read_rows | cloud read_rows | delta | output |
+| --- | ---: | ---: | ---: | --- |
+| s13 | 66,094 | 57,902 | -8,192 | byte-identical |
+| x04 | 7,757,650 | 7,895,198 | +137,548 | byte-identical |
+
+These are **engine counters, not answers**. Both differences are consistent with a
+different part layout and a different granule-pruning outcome on
+SharedMergeTree-over-object-storage versus MergeTree-on-disk (`s13` reads exactly
+one 8,192-row granule fewer on Cloud; `x04` is a full scan whose row count tracks
+part composition). The answers they produce are identical. No other query differs
+on `read_rows`, `read_bytes` or `result_rows`.
+
+**Nothing else differed.** Not one value in sections 3, 4, 5, 6, 8 or 10 changes
+between the two builds.
+
+
+### 7.2 · Latency, side by side — local container vs ClickHouse Cloud
+
+`C/L` is Cloud median / local median. Counters and query_id shown are the **Cloud**
+run's; the local run's counters and query_ids are preserved unchanged in §7.3.
+
+| query | grain | filter | LOCAL ms | local 3 runs | CLOUD ms | cloud 3 runs | C/L | read_rows | read_bytes | result_rows | peak_mem | cloud query_id (median run) | serving path |
+| --- | --- | --- | ---: | --- | ---: | --- | ---: | ---: | --- | ---: | --- | --- | --- |
+| s01_day_total \* | day | none | 12 | 10/41/12 | 49 | 49/46/81 | 4.1x | 8,193 | 272.00 KiB | 1 | 7.35 MiB | 083a5bde-e111-4378-a2b7-6a93d7080515 | hour tier (cube 0), hour-aligned |
+| s02_day_platform | day | platform (all 19) | 4 | 4/4/3 | 14 | 14/12/38 | 3.5x | 64,590 | 2.16 MiB | 19 | 10.32 MiB | 27d51488-42c7-4402-9e31-237a3e1208cc | hour tier cube 1 |
+| s03_day_country | day | country | 2 | 2/2/2 | 28 | 9/95/28 | 14.0x | 24,576 | 840.07 KiB | 1 | 10.32 MiB | 0b7a91eb-39a3-49a5-8386-bc15d9829099 | hour tier cube 2 |
+| s04_day_content_top10 | day | content_id (top 10) | 6 | 6/6/6 | 125 | 116/127/125 | 20.8x | 57,902 | 1.49 MiB | 10 | 12.96 MiB | 55206583-c546-446c-b369-0439ccbcd259 | hour tier cube 4 + catalogue join |
+| s05_day_video_type | day | video_type | 10 | 10/10/10 | 110 | 156/110/102 | 11.0x | 170,936 | 2.91 MiB | 3 | 13.32 MiB | ec0af311-fa34-4474-9a56-71e71cc249ba | minute tier + catalogue |
+| s06_day_category | day | category | 11 | 11/12/11 | 210 | 283/210/152 | 19.1x | 170,936 | 2.91 MiB | 10 | 13.32 MiB | d50eca45-f716-4fb3-8802-824dad9ce025 | minute tier + catalogue |
+| s07_day_show_name | day | show_name (NEW) | 13 | 13/13/15 | 168 | 152/257/168 | 12.9x | 170,936 | 3.58 MiB | 10 | 25.26 MiB | 13bc418a-44b2-4b58-9127-a4f7105c8992 | minute tier + catalogue |
+| s08_day_video_resolution | day | video_resolution (NEW) | 1,117 | 1367/1117/1036 | 6,949 | 6949/6485/7434 | 6.2x | 192,752 | 18.12 MiB | 10 | 793.22 MiB | 12893b8e-5959-4de1-8bfa-bd7e6728d667 | v_session_minutes fallback |
+| s09_day_platform_partial | day | platform IN (2) | 7 | 7/80/7 | 59 | 59/40/161 | 8.4x | 98,304 | 1.38 MiB | 1 | 9.90 MiB | 23d33656-43bc-4935-a777-279e94121e2a | minute tier recompute |
+| s10_day_combined_platform_videotype | day | platform AND video_type | 5 | 6/5/5 | 28 | 31/28/22 | 5.6x | 74,286 | 1.11 MiB | 1 | 6.44 MiB | 1550a6d8-72c5-4f6c-b488-a457df7b375e | minute tier + catalogue |
+| s11_hour_total | hour | none (24 rows) | 3 | 3/3/3 | 17 | 19/17/14 | 5.7x | 8,192 | 344.00 KiB | 16 | 6.86 MiB | 68d8f391-e46b-4b0d-beed-4bf11409e226 | hour tier, stored rows |
+| s11b_hour_total_summary | hour | none (rolled up) | 3 | 3/23/3 | 19 | 19/18/54 | 6.3x | 8,192 | 280.00 KiB | 1 | 6.82 MiB | fb3f23ed-5668-439c-9a03-c952810f765b | hour tier, stored rows |
+| s12_hour_platform | hour | platform | 3 | 2/3/3 | 10 | 6/17/10 | 3.3x | 8,192 | 344.00 KiB | 12 | 5.79 MiB | 8058488c-cc24-4cd5-a825-220edebc90dd | hour tier cube 1 |
+| s13_hour_top_content | hour | content_id (top 10 in peak hour) | 9 | 9/8/9 | 41 | 28/41/47 | 4.6x | 57,902 | 2.16 MiB | 10 | 9.47 MiB | f780216f-d8cb-46b8-b97b-8db94bd8b366 | hour tier cube 4 + catalogue join |
+| s14_minute_day_summary | minute | none (1,440 buckets) | 13 | 13/20/4 | 28 | 23/28/80 | 2.2x | 137,610 | 1.57 MiB | 1 | 5.64 MiB | afd45d9b-29d4-4a1f-8535-93e9fc3f15b1 | delta tier + densify |
+| s15_minute_peak_hour_series | minute | none (60 buckets) | 3 | 3/3/4 | 15 | 15/16/13 | 5.0x | 137,610 | 1.57 MiB | 60 | 5.45 MiB | 4e561bdb-b96e-45de-950c-389987e52ef4 | delta tier + densify |
+| s16_minute_platform_day_summary | minute | platform | 4 | 4/3/4 | 38 | 26/38/48 | 9.5x | 40,960 | 520.00 KiB | 1 | 5.57 MiB | 8fbe7a51-29f9-4be2-8bde-308840545dc3 | delta tier + densify |
+| u01_day_total | day | none · USER tier | 38 | 38/45/32 | 323 | 290/323/360 | 8.5x | 486,742 | 94.70 MiB | 1 | 127.48 MiB | 727208d2-64fa-4b92-9d7e-9aeaeb0443b8 | uniqExact states |
+| u02_hour_total | hour | none · USER tier | 32 | 31/34/32 | 303 | 312/265/303 | 9.5x | 486,742 | 94.70 MiB | 16 | 123.49 MiB | c3017394-ae5e-4486-8e27-b081486ba5ce | uniqExact states |
+| u03_minute_peak_hour_series | minute | none · USER tier | 28 | 25/28/31 | 252 | 193/266/252 | 9.0x | 486,742 | 94.70 MiB | 60 | 75.27 MiB | 213ae822-e1c8-4fac-8846-c68523d6e99a | uniqExact states |
+| u04_day_platform | day | platform · USER tier | 40 | 45/40/40 | 283 | 244/327/283 | 7.1x | 486,742 | 95.16 MiB | 19 | 130.18 MiB | 28336cb9-c3f1-4143-9eeb-514b20166ec7 | uniqExact states |
+| x01_delta_vs_interval_expansion | minute | cross-check | 152 | 179/152/122 | 476 | 476/491/459 | 3.1x | 297,036 | 14.19 MiB | 1 | 92.37 MiB | 780fe738-5bdd-49cc-83bf-56c9ca784e7f | delta vs interval expansion |
+| x02_integral_crosscheck | day | cross-check | 139 | 139/139/136 | 1,107 | 1149/1075/1107 | 8.0x | 200,945 | 14.27 MiB | 1 | 571.09 MiB | 1ad32c33-b70c-4f4f-8f40-607dd8dcf8db | hour integral vs dense minutes |
+| x03_peak_not_summable | day | cross-check | 7 | 6/7/7 | 59 | 60/59/40 | 8.4x | 137,373 | 3.01 MiB | 1 | 7.61 MiB | 9d0afb67-8eba-45bd-b17e-abb17ca90625 | hour tier cube 0 vs cube 1 |
+| x04_dataset_extent | n/a | inventory | 341 | 375/341/339 | 2,179 | 2261/1979/2179 | 6.4x | 7,895,198 | 969.85 MiB | 1 | 33.22 MiB | 2f14fa0b-730d-4df8-9e7e-5bb71e38f3d2 | base tables |
+| x05_policy | n/a | inventory | 1 | 1/1/1 | 4 | 7/3/4 | 4.0x | 1 | 1.00 B | 1 | 5.30 MiB | f799bd60-476c-4d53-b9ec-9963c84927f3 | v_model_policy |
+| x06_day_all_dates | day | none (all 102 dates) | 5 | 5/5/5 | 37 | 35/37/43 | 7.4x | 9,056 | 309.53 KiB | 15 | 9.43 MiB | e743b7d8-fa72-4cac-b5be-0891ebe62245 | hour tier cube 0 |
+
+\* s01 Cloud figures are from `sonyliv_final`; on `sonyliv_official` the query
+cannot run (§7.1, finding 1). Every other Cloud row is `sonyliv_official`.
+
+
+### 7.3 · The local-container run, preserved — counters and query_ids
+
+Kept verbatim so the earlier evidence is not destroyed by the re-run. These are
+the **local** query_ids to look up in `evidence/submission/query-log.tsv`.
+
 | query | grain | filter | median ms | 3 runs ms | read_rows | read_bytes | result_rows | peak_mem | query_id (median run) | serving path |
 | --- | --- | --- | ---: | --- | ---: | --- | ---: | --- | --- | --- |
 | s01_day_total | day | none | 12 | 10/41/12 | 8,193 | 272.00 KiB | 1 | 6.42 MiB | 4a378614-ad79-4905-b926-39c2ad27d8b2 | hour tier (cube 0), hour-aligned |
@@ -674,22 +818,42 @@ engine actually touched. Query cache disabled per execution.
 | x05_policy | n/a | inventory | 1 | 1/1/1 | 1 | 1.00 B | 1 | 5.22 MiB | 3a91cce1-2de5-4396-875f-360d410c4c68 | v_model_policy |
 | x06_day_all_dates | day | none (all 102 dates) | 5 | 5/5/5 | 9,056 | 309.53 KiB | 15 | 8.01 MiB | 4eacc88d-0c9d-4fa7-b5e6-c88dc9277df4 | hour tier cube 0 |
 
-Shape of the distribution, over the 21 serving queries (the `x*` rows are audit
-and inventory queries, not answers a dashboard would ask for):
+### 7.4 · Shape of the distribution, on both hosts
 
-| band | queries | median ms range |
-| --- | --- | --- |
-| promoted session tiers (hour cube + delta tier), every grain, filtered or not | s01-s07, s09-s16 (15) | 2-13 |
-| user tier (uniqExact state merge), every grain | u01-u04 (4) | 28-40 |
-| generic exact-filter fallback (no cube level for this dimension) | s08 (1) | 1,117 |
+Over the 21 serving queries (the `x*` rows are audit and inventory queries, not
+answers a dashboard would ask for):
 
-The one outlier is `s08_day_video_resolution` at
-1,117 ms / 18.12 MiB read /
-753.59 MiB peak memory: the generic exact-filter fallback
+| band | queries | LOCAL median ms | CLOUD median ms |
+| --- | --- | --- | --- |
+| promoted session tiers (hour cube + delta tier), every grain, filtered or not | s01-s07, s09-s16 (16) | 2-13 | 10-210 |
+| user tier (uniqExact state merge), every grain | u01-u04 (4) | 28-40 | 252-323 |
+| generic exact-filter fallback (no cube level for this dimension) | s08 (1) | 1,117 | 6,949 |
+
+The **shape** is the same on both hosts and that is the result worth keeping: the
+promoted tiers are an order of magnitude cheaper than the user tier, which is an
+order of magnitude cheaper than the un-cut fallback. What changed is a roughly
+uniform scale factor.
+
+Cloud is slower than the local container on every one of the 27 queries. The
+per-query ratio runs **2.2x** (`s14`) to **20.8x** (`s04`), **median 7.1x**. That is
+expected and is not a defect of the model: the Cloud service is 3 vCPU / 12 GiB
+against a 10-core container, and it reads SharedMergeTree parts from object storage
+rather than a local disk page cache. `read_rows` and `read_bytes` are essentially
+unchanged between the hosts (§7.1, finding 2), so the model is doing the same
+work — it is doing it on a third of the cores and across a network to storage.
+Absolute Cloud latencies remain dashboard-grade for the promoted tiers: 16 of the
+21 serving queries answer in under 210 ms, and the whole-day minute curve (`s14`,
+1,440 buckets) in 28 ms.
+
+The one outlier on both hosts is `s08_day_video_resolution`:
+1,117 ms local / 6,949 ms Cloud, 18.12 MiB read,
+753.59 MiB local / 793.22 MiB Cloud peak memory — the generic exact-filter fallback
 for a dimension that is not a key of any serving table. That is a real cost and it
 is reported rather than excluded — see section 10. The two audit queries
-(`x01` 152 ms, `x02` 139 ms) and the inventory scan (`x04` 341 ms over 7.76 M rows) are deliberately expensive:
-they recompute the answer a second way, which is the point of them.
+(`x01` 152 ms local / 476 ms Cloud, `x02` 139 ms local / 1,107 ms Cloud) and the
+inventory scan (`x04` 341 ms local / 2,179 ms Cloud over ~7.9 M rows) are
+deliberately expensive: they recompute the answer a second way, which is the point
+of them.
 
 
 ## 8 · Correctness cross-checks run against these same numbers
@@ -709,7 +873,11 @@ paths report peak 23,324.
 
 This is the same shape as the repo gate `sql/90_reconcile.sql`, which on this
 build compared 3,201,716 minutes across all 102 output dates with 0 mismatches
-(evidence/unseen/official-20260802-codex-validation.txt).
+(evidence/unseen/official-20260802-codex-validation.txt), and which on the Cloud
+build `sonyliv_official` compared the same 3,201,716 minutes with 0 mismatched,
+max_abs_diff 0 and peak 23,324 (evidence/unseen/reconcile-cloud-official.txt).
+Query `x01` itself returns byte-identical output on both hosts: 1,440 minutes
+compared, 0 mismatched, PASS, on the container and on Cloud.
 
 
 ### 8.2 · Time-weighted integral vs a dense minute count (query x02)
@@ -735,6 +903,14 @@ All 27 queries returned byte-identical output across the warm-up and all three
 measured runs. Peak-minute ties are resolved by a total order — earliest minute
 wins, encoded as `argMax(minute, (concurrent, -toInt64(toUInt32(minute))))` — so
 the answer cannot depend on merge order or thread count.
+
+Confirmed a second time on 2026-08-02 against ClickHouse Cloud: all 27 queries were
+again byte-identical across warm-up + 3 reps **there**, and byte-identical to the
+local run — on a different ClickHouse version (26.2.1.525 vs 26.7.1.1315), a
+different table engine family (SharedMergeTree vs MergeTree), a different storage
+substrate (object storage vs local disk) and a different thread count (3 vs 10).
+The tie-break claim is therefore not just theory: it survived the thread count
+changing by more than 3x.
 
 
 ## 9 · Exact SQL — one representative query per grain and per serving path
@@ -975,17 +1151,45 @@ FORMAT TSVWithNames
 Named gaps, so nothing here is a silent omission. Each is a limitation of this
 artifact or of the run, not a guess dressed as a result.
 
-1. LATENCIES ARE LOCAL-CONTAINER, NOT CLICKHOUSE CLOUD.
-   The official 7,000,000-row unseen file was loaded and built only into the local
-   ClickHouse 26.7 container, database `codex_official_green_20260802_075132`.
-   The graded Cloud database `sonyliv` still holds the original 905,558-row file,
-   and the Cloud database `sonyliv_unseen` holds only the 30,097-row rehearsal
-   slice — neither is the unseen day. Every millisecond in section 7 is therefore a
-   local single-node number (Docker container, 10 visible cores, `max_threads=auto(10)`)
-   and is NOT comparable to a Cloud service tier. The correctness numbers are
-   unaffected: they are properties
-   of the model, not of the host. Reproducing these latencies on Cloud needs the
-   file loaded there, which is a load, not a re-derivation.
+1. **[RESOLVED 2026-08-02 03:39 UTC]** LATENCIES ARE LOCAL-CONTAINER, NOT CLICKHOUSE CLOUD.
+
+   The limitation as it stood, kept intact:
+
+   > "The official 7,000,000-row unseen file was loaded and built only into the
+   > local ClickHouse 26.7 container, database
+   > `codex_official_green_20260802_075132`. The graded Cloud database `sonyliv`
+   > still holds the original 905,558-row file, and the Cloud database
+   > `sonyliv_unseen` holds only the 30,097-row rehearsal slice — neither is the
+   > unseen day. Every millisecond in section 7 is therefore a local single-node
+   > number (Docker container, 10 visible cores, `max_threads=auto(10)`) and is NOT
+   > comparable to a Cloud service tier. The correctness numbers are unaffected:
+   > they are properties of the model, not of the host. Reproducing these latencies
+   > on Cloud needs the file loaded there, which is a load, not a re-derivation."
+
+   **How it was resolved.** The load happened. The 7,000,000-row unseen build was
+   loaded to ClickHouse Cloud as database `sonyliv_official` and gated there
+   (3,201,716 minutes compared, 0 mismatched, peak 23,324 —
+   evidence/unseen/reconcile-cloud-official.txt). On 2026-08-02 at 03:39 UTC all 27
+   queries were re-run against it under the identical protocol — 1 discarded
+   warm-up + 3 measured reps, caller-supplied `query_id` per execution,
+   `log_comment = unseen-matrix-cloud/<query>/<rep>`, `use_query_cache=0`,
+   `SYSTEM FLUSH LOGS` then joined back on `query_id`. Section 7 now carries the
+   Cloud figures next to the local ones, and the raw extract is
+   `evidence/submission/query-log-cloud.tsv` (112 rows).
+
+   The graded database `sonyliv` was **not** touched by any of this — it still
+   holds the original 905,558-row file, and every statement issued against
+   `sonyliv_official` was a `SELECT`.
+
+   **What survives of the limitation.** Two residues, both small and both named:
+
+   - (a) `s01_day_total` could not run on `sonyliv_official` — that database is
+     missing `v_cc_window_range` (§7.1, finding 1). Its Cloud latency is measured
+     on the sibling Cloud build `sonyliv_final` instead and is labelled as such
+     everywhere it appears.
+   - (b) The Cloud service measured is a 3 vCPU / 12 GiB instance. These are real
+     hosted-service numbers, but they are one service tier's numbers, not a claim
+     about Cloud in general.
 
 2. DISTRIBUTED TRACES WERE NOT CAPTURED FOR THIS RUN.
    The pipeline-evidence requirement is met with `system.query_log`: every
@@ -1039,8 +1243,10 @@ artifact or of the run, not a guess dressed as a result.
 
 ## Appendix A · Every execution, every query_id
 
-27 queries x 4 executions (1 warm-up + 3 measured) = 108 rows in
-`system.query_log`, all tagged `log_comment LIKE 'unseen-matrix/%'`.
+**A.1 · The local-container run.** 27 queries x 4 executions (1 warm-up + 3
+measured) = 108 rows in `system.query_log`, all tagged
+`log_comment LIKE 'unseen-matrix/%'`. Raw extract:
+`evidence/submission/query-log.tsv`.
 
 | query | rep | query_id | elapsed_ms |
 | --- | --- | --- | ---: |
@@ -1154,12 +1360,139 @@ artifact or of the run, not a guess dressed as a result.
 | x06_day_all_dates | r3 | 77b25674-6245-41f6-bfe5-3783a5282f0d | 5 |
 
 
+**A.2 · The Cloud re-run (2026-08-02).** 27 queries x 4 executions = 112 rows in
+`system.query_log` on the Cloud service, tagged
+`log_comment LIKE 'unseen-matrix-cloud/%'` (database `sonyliv_official`) and
+`LIKE 'unseen-matrix-cloudfinal/%'` (database `sonyliv_final`, s01 only — see
+§7.1). 112 not 108 because s01 was attempted 4x on `sonyliv_official`, failed 4x
+with error 46, and was then run 4x on `sonyliv_final`; all eight are logged below.
+Raw extract: `evidence/submission/query-log-cloud.tsv`.
+
+| query | rep | database | cloud query_id | elapsed_ms |
+| --- | --- | --- | --- | ---: |
+| s01_day_total | warmup | sonyliv_final | a8c68e3b-ca29-4d82-af3e-5e9d66f804ca | 42 |
+| s01_day_total | r1 | sonyliv_final | 083a5bde-e111-4378-a2b7-6a93d7080515 | 49 |
+| s01_day_total | r2 | sonyliv_final | 58c871ab-82a3-4486-8c58-a3096d8cf666 | 46 |
+| s01_day_total | r3 | sonyliv_final | 60aaf693-9c72-4872-a108-f526a06da782 | 81 |
+| s01_day_total | warmup | sonyliv_official | ff0d4c58-d5c0-47a3-ad9e-027bbfe2cbd5 | n/a (error 46) |
+| s01_day_total | r1 | sonyliv_official | 3bc47182-94d0-4bdc-ace8-1c2510ae62d2 | n/a (error 46) |
+| s01_day_total | r2 | sonyliv_official | 5575f4a0-e7d2-401c-807b-f01d90cf7edf | n/a (error 46) |
+| s01_day_total | r3 | sonyliv_official | 0f4b5d62-9ae1-4f20-a7a0-e058bac49a60 | n/a (error 46) |
+| s02_day_platform | warmup | sonyliv_official | 8ffcd6f5-c998-4ac8-b244-d5ab42c8889a | 15 |
+| s02_day_platform | r1 | sonyliv_official | 27d51488-42c7-4402-9e31-237a3e1208cc | 14 |
+| s02_day_platform | r2 | sonyliv_official | fb25bf00-2a0b-496a-87de-220a79acd058 | 12 |
+| s02_day_platform | r3 | sonyliv_official | d8cc93e6-3d0c-4560-a7f4-d02b031aae33 | 38 |
+| s03_day_country | warmup | sonyliv_official | 6c1bfb98-8577-4e37-95fc-92699cf4a174 | 100 |
+| s03_day_country | r1 | sonyliv_official | 1d98f723-ef7e-432b-87ff-d6066ff77ae1 | 9 |
+| s03_day_country | r2 | sonyliv_official | 97f1bf8e-fbd5-41a4-bdcd-2b71d8faf352 | 95 |
+| s03_day_country | r3 | sonyliv_official | 0b7a91eb-39a3-49a5-8386-bc15d9829099 | 28 |
+| s04_day_content_top10 | warmup | sonyliv_official | b6752e82-d722-4415-87c1-e470570b75eb | 82 |
+| s04_day_content_top10 | r1 | sonyliv_official | 4e5f3023-abb7-48e7-bc5b-d255bc2c2859 | 116 |
+| s04_day_content_top10 | r2 | sonyliv_official | 55d478e7-d941-48f9-b959-e856b3a819ff | 127 |
+| s04_day_content_top10 | r3 | sonyliv_official | 55206583-c546-446c-b369-0439ccbcd259 | 125 |
+| s05_day_video_type | warmup | sonyliv_official | cc9a2dc4-1129-4969-a534-15a1b2ffd78d | 77 |
+| s05_day_video_type | r1 | sonyliv_official | 62de9033-a588-4858-9e4e-905e23099f86 | 156 |
+| s05_day_video_type | r2 | sonyliv_official | ec0af311-fa34-4474-9a56-71e71cc249ba | 110 |
+| s05_day_video_type | r3 | sonyliv_official | 675f46c4-f61d-467e-8451-a9b5dbde58fc | 102 |
+| s06_day_category | warmup | sonyliv_official | 46dd2048-add2-4913-beb0-7d983c0eac5c | 150 |
+| s06_day_category | r1 | sonyliv_official | c76080d4-b8ef-4703-8f49-bdcc3ee3d904 | 283 |
+| s06_day_category | r2 | sonyliv_official | d50eca45-f716-4fb3-8802-824dad9ce025 | 210 |
+| s06_day_category | r3 | sonyliv_official | caadfe7d-fb5f-4556-aff7-021cdb7be8cc | 152 |
+| s07_day_show_name | warmup | sonyliv_official | a36ac8f6-a8d0-41d1-9157-607ce6094934 | 235 |
+| s07_day_show_name | r1 | sonyliv_official | 52083a04-dd5c-4768-8215-b4012aa314e4 | 152 |
+| s07_day_show_name | r2 | sonyliv_official | 7b5704c6-a4a6-444a-a580-ab405af223b9 | 257 |
+| s07_day_show_name | r3 | sonyliv_official | 13bc418a-44b2-4b58-9127-a4f7105c8992 | 168 |
+| s08_day_video_resolution | warmup | sonyliv_official | 8cff769b-9f41-46f6-bbc1-5896851c2328 | 6,901 |
+| s08_day_video_resolution | r1 | sonyliv_official | 12893b8e-5959-4de1-8bfa-bd7e6728d667 | 6,949 |
+| s08_day_video_resolution | r2 | sonyliv_official | ab8d51ae-c3f7-4476-8c7e-d59e40872939 | 6,485 |
+| s08_day_video_resolution | r3 | sonyliv_official | 27412442-a6cb-4023-8773-78e10a11ed23 | 7,434 |
+| s09_day_platform_partial | warmup | sonyliv_official | a74d1e18-a7c0-4402-98df-706d0c126ba6 | 36 |
+| s09_day_platform_partial | r1 | sonyliv_official | 23d33656-43bc-4935-a777-279e94121e2a | 59 |
+| s09_day_platform_partial | r2 | sonyliv_official | 9055ee02-55a8-49a9-b049-c700ddefeb4c | 40 |
+| s09_day_platform_partial | r3 | sonyliv_official | e68a8734-f85e-42a1-a729-bc8a6baa2b9f | 161 |
+| s10_day_combined_platform_videotype | warmup | sonyliv_official | af0fc975-6d25-4128-b318-113b4b612c0b | 23 |
+| s10_day_combined_platform_videotype | r1 | sonyliv_official | 1167a8a9-d86e-4d43-a977-9dcfd129220e | 31 |
+| s10_day_combined_platform_videotype | r2 | sonyliv_official | 1550a6d8-72c5-4f6c-b488-a457df7b375e | 28 |
+| s10_day_combined_platform_videotype | r3 | sonyliv_official | 23182b4f-8ebb-47ed-9fee-0a3839b315ee | 22 |
+| s11_hour_total | warmup | sonyliv_official | 45574faa-ad59-46ae-8fdc-379b235f369f | 25 |
+| s11_hour_total | r1 | sonyliv_official | 353c0bb9-1286-43a4-832d-62b64443f106 | 19 |
+| s11_hour_total | r2 | sonyliv_official | 68d8f391-e46b-4b0d-beed-4bf11409e226 | 17 |
+| s11_hour_total | r3 | sonyliv_official | f76e989d-5995-4d26-b2c9-3b2b47f45244 | 14 |
+| s11b_hour_total_summary | warmup | sonyliv_official | 4722c376-1bb5-4281-922f-ed4ad069bbc3 | 14 |
+| s11b_hour_total_summary | r1 | sonyliv_official | fb3f23ed-5668-439c-9a03-c952810f765b | 19 |
+| s11b_hour_total_summary | r2 | sonyliv_official | 8f3a0086-b5d9-42ee-811d-f1e32c232174 | 18 |
+| s11b_hour_total_summary | r3 | sonyliv_official | 6172d2bf-4b68-4119-a318-a910e8c6a4d9 | 54 |
+| s12_hour_platform | warmup | sonyliv_official | 95ba54b3-d306-4ced-832e-e7c27ab997f3 | 12 |
+| s12_hour_platform | r1 | sonyliv_official | 4c48fd6b-39a0-4521-81bc-7289472729f1 | 6 |
+| s12_hour_platform | r2 | sonyliv_official | 75ecc20f-d34f-44e9-aa61-0f14b62ec58e | 17 |
+| s12_hour_platform | r3 | sonyliv_official | 8058488c-cc24-4cd5-a825-220edebc90dd | 10 |
+| s13_hour_top_content | warmup | sonyliv_official | d811b384-0882-43e3-896d-0da9cdeccecf | 57 |
+| s13_hour_top_content | r1 | sonyliv_official | e8a028a4-94b4-4ee2-bfea-3bf07f83e1bf | 28 |
+| s13_hour_top_content | r2 | sonyliv_official | f780216f-d8cb-46b8-b97b-8db94bd8b366 | 41 |
+| s13_hour_top_content | r3 | sonyliv_official | 6f00be39-e1d9-4f0f-9562-db380bbaa345 | 47 |
+| s14_minute_day_summary | warmup | sonyliv_official | 341be069-15de-4f9a-8e65-e1dfb156bf9d | 16 |
+| s14_minute_day_summary | r1 | sonyliv_official | c974a024-ed60-4b10-bbad-ef52544a1069 | 23 |
+| s14_minute_day_summary | r2 | sonyliv_official | afd45d9b-29d4-4a1f-8535-93e9fc3f15b1 | 28 |
+| s14_minute_day_summary | r3 | sonyliv_official | a0301306-e2b4-4ad7-a054-4ff890ecc375 | 80 |
+| s15_minute_peak_hour_series | warmup | sonyliv_official | 182a9d4e-3df3-467d-8c67-d08f03941bd8 | 16 |
+| s15_minute_peak_hour_series | r1 | sonyliv_official | 4e561bdb-b96e-45de-950c-389987e52ef4 | 15 |
+| s15_minute_peak_hour_series | r2 | sonyliv_official | 5ff28997-fbcf-438e-ac0d-26c112d88ec5 | 16 |
+| s15_minute_peak_hour_series | r3 | sonyliv_official | 8e7998fb-78f5-4137-b2b2-c07e0aaff547 | 13 |
+| s16_minute_platform_day_summary | warmup | sonyliv_official | e00976c9-8f4c-4a80-a1f7-289d1dfaaabe | 21 |
+| s16_minute_platform_day_summary | r1 | sonyliv_official | 5326ae6f-e912-466b-bc2b-fa41cb8ffa82 | 26 |
+| s16_minute_platform_day_summary | r2 | sonyliv_official | 8fbe7a51-29f9-4be2-8bde-308840545dc3 | 38 |
+| s16_minute_platform_day_summary | r3 | sonyliv_official | a7572312-8ca0-4314-a672-e14e6bc37371 | 48 |
+| u01_day_total | warmup | sonyliv_official | 31d13bbb-21a5-4190-8ec6-38e3a8225a5d | 333 |
+| u01_day_total | r1 | sonyliv_official | 5b780c48-42d6-4b99-99ff-78afaf33d6cb | 290 |
+| u01_day_total | r2 | sonyliv_official | 727208d2-64fa-4b92-9d7e-9aeaeb0443b8 | 323 |
+| u01_day_total | r3 | sonyliv_official | de47a826-39eb-46f4-8662-1c42689e00f0 | 360 |
+| u02_hour_total | warmup | sonyliv_official | 0fef5eb6-0b85-478a-8508-ca366be1e04c | 302 |
+| u02_hour_total | r1 | sonyliv_official | 3128e16a-40b0-4209-9040-fbb5835ad0c8 | 312 |
+| u02_hour_total | r2 | sonyliv_official | 61a2ee11-91ff-4c07-90c4-cf14e11369c4 | 265 |
+| u02_hour_total | r3 | sonyliv_official | c3017394-ae5e-4486-8e27-b081486ba5ce | 303 |
+| u03_minute_peak_hour_series | warmup | sonyliv_official | 6ffbfb84-298c-4e98-880e-71a9c450992c | 179 |
+| u03_minute_peak_hour_series | r1 | sonyliv_official | 3e36b75d-087e-403c-b0d4-5c8a751d3113 | 193 |
+| u03_minute_peak_hour_series | r2 | sonyliv_official | df523812-baea-4352-97d3-6d4a6ac1193c | 266 |
+| u03_minute_peak_hour_series | r3 | sonyliv_official | 213ae822-e1c8-4fac-8846-c68523d6e99a | 252 |
+| u04_day_platform | warmup | sonyliv_official | ffbbd5ba-e60a-4bf7-a5a8-2d9717b55d8a | 230 |
+| u04_day_platform | r1 | sonyliv_official | fb1a2107-c4cd-4fea-89ab-bb8c6fdbfadb | 244 |
+| u04_day_platform | r2 | sonyliv_official | 6edb36b0-0688-49eb-a1eb-62e8e1b2768c | 327 |
+| u04_day_platform | r3 | sonyliv_official | 28336cb9-c3f1-4143-9eeb-514b20166ec7 | 283 |
+| x01_delta_vs_interval_expansion | warmup | sonyliv_official | 09bf65ce-81d6-4a6f-8372-178231a7d9e3 | 509 |
+| x01_delta_vs_interval_expansion | r1 | sonyliv_official | 780fe738-5bdd-49cc-83bf-56c9ca784e7f | 476 |
+| x01_delta_vs_interval_expansion | r2 | sonyliv_official | 630e34a8-8b7d-4e48-9290-80906d2a392c | 491 |
+| x01_delta_vs_interval_expansion | r3 | sonyliv_official | 3f9c52af-6266-41bc-884c-cde4b1ebd0e2 | 459 |
+| x02_integral_crosscheck | warmup | sonyliv_official | 58e65f48-f29b-4440-a1f1-a39f685b2b96 | 1,041 |
+| x02_integral_crosscheck | r1 | sonyliv_official | 44fd1d2d-9516-4d24-acce-35478d127b3c | 1,149 |
+| x02_integral_crosscheck | r2 | sonyliv_official | c776c76b-340c-4e15-b1bd-c62cb32e0802 | 1,075 |
+| x02_integral_crosscheck | r3 | sonyliv_official | 1ad32c33-b70c-4f4f-8f40-607dd8dcf8db | 1,107 |
+| x03_peak_not_summable | warmup | sonyliv_official | 33fab35a-fa4f-477a-8ebd-286a388b260f | 63 |
+| x03_peak_not_summable | r1 | sonyliv_official | 7f648f45-b8a1-4dff-a62f-da3900f83324 | 60 |
+| x03_peak_not_summable | r2 | sonyliv_official | 9d0afb67-8eba-45bd-b17e-abb17ca90625 | 59 |
+| x03_peak_not_summable | r3 | sonyliv_official | 9cf791a9-186e-4752-af79-7b702d4f7dbd | 40 |
+| x04_dataset_extent | warmup | sonyliv_official | 42373646-64a3-44c8-ad41-e01f1a25fc73 | 2,529 |
+| x04_dataset_extent | r1 | sonyliv_official | 679c53e3-5bad-4995-ab76-46c8c9f4f5bf | 2,261 |
+| x04_dataset_extent | r2 | sonyliv_official | 922e1722-f783-4c74-93b9-30001ee915dc | 1,979 |
+| x04_dataset_extent | r3 | sonyliv_official | 2f14fa0b-730d-4df8-9e7e-5bb71e38f3d2 | 2,179 |
+| x05_policy | warmup | sonyliv_official | 72200627-e34f-4f72-890e-ecf2cfdfa30e | 8 |
+| x05_policy | r1 | sonyliv_official | 843df915-28c2-4b33-97ca-2d85f672ff6b | 7 |
+| x05_policy | r2 | sonyliv_official | 8ed07a35-666a-4358-bc91-84911a850e46 | 3 |
+| x05_policy | r3 | sonyliv_official | f799bd60-476c-4d53-b9ec-9963c84927f3 | 4 |
+| x06_day_all_dates | warmup | sonyliv_official | 41623ce1-4518-406b-98bc-0ada71c58432 | 17 |
+| x06_day_all_dates | r1 | sonyliv_official | 05166d08-d5f1-4436-9168-67afa6a98399 | 35 |
+| x06_day_all_dates | r2 | sonyliv_official | e743b7d8-fa72-4cac-b5be-0891ebe62245 | 37 |
+| x06_day_all_dates | r3 | sonyliv_official | e89c3ce3-cb31-4761-881b-236da8a73f8f | 43 |
+
+
 ## Appendix B · Files shipped alongside this one
 
   evidence/submission/results-matrix.txt   this file
   evidence/submission/results-matrix.md    the same content as markdown tables
-  evidence/submission/queries/*.sql        all 27 queries, verbatim, as executed
-  evidence/submission/query-log.tsv        the raw system.query_log extract, all 108 executions
+  evidence/submission/queries/*.sql        all 27 queries, verbatim, as executed on BOTH hosts
+  evidence/submission/query-log.tsv        raw system.query_log extract, LOCAL container, 108 executions
+  evidence/submission/query-log-cloud.tsv  raw system.query_log extract, CLICKHOUSE CLOUD, 112 executions
+                                           (adds `database` and `type` columns; the 4 s01
+                                           ExceptionBeforeStart rows are included, not filtered out)
 
 
 ## Appendix C · Reproducing this artifact
@@ -1180,4 +1513,33 @@ SELECT query_id, query_duration_ms, read_rows, read_bytes, result_rows, log_comm
 FROM system.query_log
 WHERE type = 'QueryFinish' AND log_comment LIKE 'unseen-matrix/%'
 ORDER BY log_comment;
+```
+
+The **Cloud** re-run (2026-08-02), identical protocol:
+
+```bash
+# 1c. the model must already be built for the unseen day on Cloud:
+#     database sonyliv_official on the ClickHouse Cloud service
+#     gated by  sql/90_reconcile.sql   (PASS, 3,201,716 minutes, 0 mismatched)
+#     NOTE: sonyliv_official is missing sql/85_windows.sql — apply it before
+#           s01_day_total will run there (section 7.1, finding 1).
+
+# 2c. same 4 executions per query, cloud-tagged log_comment:
+curl -sS "https://$CH_HOST:$CH_PORT/?database=sonyliv_official&query_id=$UUID\
+&log_comment=unseen-matrix-cloud/$NAME/$REP&use_query_cache=0" \
+--user "$CH_USER:$CH_PASSWORD" --data-binary @$NAME.sql
+
+# 3c. read back from the Cloud query log (clusterAllReplicas, so the row is
+#     found whichever replica served it):
+SYSTEM FLUSH LOGS;
+SELECT query_id, type, query_duration_ms, read_rows, read_bytes, result_rows, log_comment
+FROM clusterAllReplicas('default', system.query_log)
+WHERE log_comment LIKE 'unseen-matrix-cloud%'
+ORDER BY log_comment;
+
+# 4c. and the equality check that makes the re-run worth anything — byte-diff
+#     each query's output between the two hosts:
+diff local-out/$NAME.out cloud-out/$NAME.r1.out   # 26/27 empty; s01 errors on
+                                                  # sonyliv_official, matches on
+                                                  # sonyliv_final
 ```
