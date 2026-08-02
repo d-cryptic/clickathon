@@ -24,18 +24,41 @@ esac
 
 # Overrides: basename -> path. Applied in place of sql/<basename>.
 OVERRIDES=("$@")
-resolve() {  # resolve <sql/NAME.sql> -> the file to actually apply
+# Which overrides were actually consumed. An override that matches nothing is a
+# HARD ERROR at the end of the run, not a shrug: matching is by basename, so
+# `--override /tmp/30.sql` does NOT match `sql/30_build_intervals.sql`, and the
+# build silently applied the COMMITTED file while still calling itself a
+# variant. That produced an ADR 0031 draft whose Q35 numbers described two
+# identical builds (both 30,323 intervals). A variant harness that cannot tell
+# you it built the baseline is worse than no harness.
+#
+# resolve() sets the global RESOLVED rather than echoing, because `$(resolve …)`
+# would run it in a SUBSHELL and the USED bookkeeping below would be discarded
+# — the assertion would then pass vacuously, which is the same silent failure it
+# exists to catch.
+USED=""
+RESOLVED=""
+resolve() {  # resolve <sql/NAME.sql> -> RESOLVED = the file to actually apply
   local want; want="$(basename "$1")"
   local o
   for o in ${OVERRIDES+"${OVERRIDES[@]}"}; do
-    [ "$(basename "$o")" = "$want" ] && { echo "$o"; return; }
+    if [ "$(basename "$o")" = "$want" ]; then USED="$USED $o "; RESOLVED="$o"; return; fi
   done
-  echo "$1"
+  RESOLVED="$1"
+}
+assert_overrides_used() {
+  local o
+  for o in ${OVERRIDES+"${OVERRIDES[@]}"}; do
+    case "$USED" in
+      *" $o "*) ;;
+      *) echo "y2-scratch: override '$o' matched NO applied file — its basename must equal a file in sql/ (e.g. 30_build_intervals.sql, not 30.sql). Refusing to call $DB a variant." >&2; exit 3 ;;
+    esac
+  done
 }
 
 q() { tools/ch "$1"; }             # against CH_DATABASE_LOCAL (default)
 qdb() { CH_DATABASE_LOCAL="$DB" tools/ch "$1"; }
-apply() { tools/apply-sql.sh --database "$DB" "$(resolve "$1")" >/dev/null; }
+apply() { resolve "$1"; tools/apply-sql.sh --database "$DB" "$RESOLVED" >/dev/null; }
 
 echo "== y2-scratch: $DB"
 q "CREATE DATABASE IF NOT EXISTS $DB" >/dev/null
@@ -54,6 +77,12 @@ apply sql/10_intervals.sql
 qdb "TRUNCATE TABLE IF EXISTS session_intervals" >/dev/null
 apply sql/30_build_intervals.sql
 
+# TRUNCATE before the user tier, for the reason ADR 0012 exists: cc_user_minute
+# is keyed by (minute, dims), so a rebuild that changes ATTRIBUTION leaves the
+# old bucket's row behind — it is never overwritten, only out-voted. Without
+# this, re-running the harness compares a new model against a union of every
+# model it has ever built, and the drift is always upward.
+qdb "TRUNCATE TABLE IF EXISTS cc_user_minute" >/dev/null
 apply sql/45_user_concurrency.sql
 
 qdb "TRUNCATE TABLE IF EXISTS cc_minute_delta" >/dev/null
@@ -63,6 +92,8 @@ qdb "TRUNCATE TABLE IF EXISTS cc_hour_agg" >/dev/null
 apply sql/50_hour_agg.sql
 
 apply sql/20_views.sql
+
+assert_overrides_used
 
 printf '   intervals=%s  hours=%s\n' \
   "$(qdb "SELECT count() FROM session_intervals FINAL")" \

@@ -115,10 +115,17 @@ SETTINGS min_bytes_for_wide_part = 0;
 -- SEVERITY IS LOW AND SHOULD NOT BE INFLATED: the excess is never more than 1,
 -- it never touches a headline — the all-dimensions pair is 2,844 users <= 2,917
 -- sessions and was already correct, and the invariant holds at the total grain
--- with 0 violations. It is fixed because "users <= sessions at the same minute
--- and grain" is UNCONDITIONAL — one viewer may hold many sessions, never the
--- reverse — and an invariant that mostly holds is not an invariant. A judge who
--- tests it finds it in one query.
+-- with 0 violations. It is fixed because an invariant that mostly holds is not
+-- an invariant, and a judge who tests it finds it in one query.
+--
+-- 81 OF THE 82 ARE THIS DEFECT. THE LAST ONE IS THE DATA. "users <= sessions"
+-- is only unconditional while a session belongs to exactly ONE user, and 9
+-- sessions in the delivered file carry more than one user_id. In one of them —
+-- 75D96549…, SONY_ANDROID_TV/india/21321654 — two users are active in the SAME
+-- minute (2026-07-26 10:33), so `users=2, sessions=1` is a CORRECT description
+-- of the data, not a violation to engineer away. No attribution scheme removes
+-- it without deleting a real viewer, and the obvious attempt does exactly that:
+-- see the GROUP BY note on `merged` below.
 --
 -- Fixing it here rather than in 40_deltas.sql is deliberate: the session tier's
 -- numbers are the ones already served, benchmarked and submitted, and the user
@@ -199,6 +206,19 @@ WITH
     -- repo already shares this way. The right shape is one `v_session_runs`
     -- view both tiers read; that needs an edit to 40_deltas.sql, which is
     -- outside ADR 0031's ownership. Recorded there as the follow-up.
+    --
+    -- GROUPED BY (session, user_id) — NOT by session alone, and this is the one
+    -- place this tier MUST diverge from 40_deltas.sql. First-wins is correct for
+    -- a DIMENSION, which is a display property of the run; `user_id` is an
+    -- IDENTITY. 9 sessions in the delivered file carry more than one user_id,
+    -- and folding them by session alone handed every minute of the run to the
+    -- FIRST user and erased the second — measured: 6 minutes under-counted by 1
+    -- across 2026-07-26 10:33-10:39, e.g. session 75D96549… where user 79BE1B7C…
+    -- vanished into 4CE58A95… because their intervals are minute-adjacent.
+    -- That is a silent under-count, and it would have satisfied the users <=
+    -- sessions invariant by LOSING viewers, which is the wrong way to hold an
+    -- invariant. Grouping by the pair keeps each user's coverage exact and still
+    -- resolves dimensions first-wins within that user's own run.
     merged AS
     (
         SELECT
@@ -237,7 +257,7 @@ WITH
             ).1 AS runs
         FROM session_intervals AS si FINAL
         WHERE si.video_session_id IN (SELECT video_session_id FROM in_scope)
-        GROUP BY video_session_id
+        GROUP BY video_session_id, user_id
     )
 SELECT
     minute,

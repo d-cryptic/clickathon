@@ -56,6 +56,8 @@ that is what check 5 is for, and it has now been proven necessary twice.
    enforces it — written after six were batch-closed on a per-batch check, and after one agent's
    session ended with 808 uncommitted insertions on disk.
 4. **Size a finding before prioritising it.** Q34 looked like an invariant violation and is worth
-   ±1 on 28 cells; Q35 looked minor and moves the peak by 10. Neither was obvious from its title.
+   ±1 on 82 cells; Q35 looked minor and moves the peak by 10. Neither was obvious from its title.
+   The 28 first published for Q34 was itself a mis-sizing — a dense table inner-joined to a sparse
+   one — so *check how a finding was sized* before trusting the size (ADR 0031).
 5. **A refusal is the process working.** W1 refused twice and was right twice; both Codex validators
    returned DO NOT PROMOTE and both were right. Do not weaken a check to make a promotion pass.

@@ -182,17 +182,46 @@ echo "== 6/6  normalisation UDFs + views (ADR 0011)"
 TARGET="$TARGET" APPLY_GRADED_DESTRUCTIVE="${REBUILD_GRADED:-}" tools/apply-sql.sh sql/15_normalise.sql >/dev/null
 echo "   ok"
 
+# This gate was BLIND to the defect it exists to catch (ADR 0031, U3-F1). It
+# densified the LEVEL with `WITH FILL … INTERPOLATE`, which carries a level
+# across an hour boundary even though deltas are hour-clipped (ADR 0003) — 10
+# phantom viewer-minutes on the delivered file. It then INNER JOINed to the
+# interval expansion, and a phantom minute has NO interval row, so the join
+# dropped exactly the rows that were wrong: measured on local scratch, the old
+# form reported `PASS 3732 minutes` while its dense side was wrong at 10.
+#
+# Two changes, both load-bearing, both measured on y2_pac0:
+#   * densify the DELTA on an explicit spine, then take the hour-partitioned
+#     running sum — the only correct recipe (docs/CONVENTIONS.md). A `range()`
+#     spine rather than WITH FILL, because `FILL FROM` rejects a scalar subquery
+#     and the bounds here are derived, not literal.
+#   * FULL OUTER, not INNER, for the same reason the user-tier gate below is
+#     already FULL OUTER: a minute present on only one side is precisely the
+#     failure, and an inner join hides it.
+# After: `PASS 17030 minutes, peak 2917` — and swapping only the dense side back
+# to the naive recipe makes it `FAIL 10 of 17030`, so it now sees U3-F1.
 echo "== reconcile: delta serving layer vs interval expansion, every minute"
 gate "
-WITH dense AS (
-  SELECT minute, concurrent FROM v_concurrency_minute_delta_total
-  ORDER BY minute WITH FILL STEP toIntervalSecond(60) INTERPOLATE (concurrent AS concurrent)
-)
+WITH
+  bounds AS (SELECT min(minute) AS lo, max(minute) AS hi FROM cc_minute_delta),
+  spine AS (
+    SELECT toDateTime(arrayJoin(range(
+             toUInt32((SELECT lo FROM bounds)),
+             toUInt32((SELECT hi FROM bounds)) + 60, 60))) AS minute
+  ),
+  d AS (SELECT minute, sum(delta) AS dd FROM cc_minute_delta GROUP BY minute),
+  dense AS (
+    SELECT s.minute AS minute,
+           toInt64(sum(coalesce(d.dd, 0)) OVER (
+             PARTITION BY toStartOfHour(s.minute) ORDER BY s.minute
+             ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)) AS concurrent
+    FROM spine AS s LEFT JOIN d USING (minute)
+  )
 SELECT if(countIf(dense.concurrent != i.concurrent) = 0,
           concat('   PASS  ', toString(count()), ' minutes, peak ', toString(max(i.concurrent))),
           concat('   FAIL  ', toString(countIf(dense.concurrent != i.concurrent)), ' of ',
                  toString(count()), ' minutes disagree'))
-FROM dense INNER JOIN v_concurrency_minute_intervals i USING (minute) FORMAT TSVRaw"
+FROM dense FULL OUTER JOIN v_concurrency_minute_intervals i USING (minute) FORMAT TSVRaw"
 
 # ---------------------------------------------------------------------------
 # USER TIER GATE. The check that would have caught ADR 0012's defect the day it
