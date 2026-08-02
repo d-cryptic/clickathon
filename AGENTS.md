@@ -16,6 +16,9 @@ released in the final hours. Full statement: [docs/PROBLEM.md](docs/PROBLEM.md).
 
 ## Where to go
 
+**What is actually left? [REMAINING.md](REMAINING.md)** — verified against the live system, not
+remembered. Most of `TODOS.md` is stale.
+
 **Just waking up, or picking this up cold? Read [HANDOFF.md](HANDOFF.md) first** — what is blocked,
 what only a human can do, and where the promotion gate stands.
 
