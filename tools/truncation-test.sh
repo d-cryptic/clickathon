@@ -75,7 +75,7 @@ run_file() {
 build_intervals() {
   local args=(
     -e "s|^INSERT INTO session_intervals|INSERT INTO $1|"
-    -e "s|^        FROM ev_raw\$|        FROM $2 ${3:-}|"
+    -e "s|^        FROM v_ev_model_input\$|        FROM $2 ${3:-}|"
   )
   if [ -n "${4:-}" ]; then
     args+=(-e "s|^        toUInt64(toUnixTimestamp(now())) AS build_version,\$|        toUInt64($4) AS build_version,|")
@@ -124,11 +124,20 @@ say "PHASE 0 — reset the test database (never touches ${PROD})"
 # depending on an apply-sql.sh someone remembered to run first.
 reset_scratch_db
 run_file sql/70_truncation_test.sql >/dev/null
+# ADR 0032: sql/30 reads GAP_S/TAIL_S from v_model_policy rather than carrying
+# them as literals, so a scratch database that lacks the view cannot build the
+# model at all. Apply it here for the same reason sql/70 is applied here — the
+# test is self-contained rather than depending on a prereq someone remembered.
+run_file sql/01_policy.sql >/dev/null
 say "  ${DB} dropped, recreated and schema reapplied from sql/70_truncation_test.sql"
+say "  policy view applied from sql/01_policy.sql ($(tools/policy.sh stamp 2>/dev/null || echo unstamped))"
 
 say ""
 say "PHASE 1 — load the truncated slice: event_timestamp < ${CUT}"
 q "INSERT INTO ${DB}.ev_raw
+     (content_id, video_session_id, user_id, event_type, event, event_timestamp,
+      platform, app_version, country, audio_language, subtitle_language,
+      player_version, session_start_epoch)
    SELECT content_id, video_session_id, user_id, event_type, event, event_timestamp,
           platform, app_version, country, audio_language, subtitle_language,
           player_version, session_start_epoch
@@ -156,6 +165,9 @@ say "  stump concurrency  @10:56 = $(cc $DB cc_minute_delta '2026-07-26 10:56:00
 say ""
 say "PHASE 3 — the late arrival: insert every event >= ${CUT}"
 q "INSERT INTO ${DB}.ev_raw
+     (content_id, video_session_id, user_id, event_type, event, event_timestamp,
+      platform, app_version, country, audio_language, subtitle_language,
+      player_version, session_start_epoch)
    SELECT content_id, video_session_id, user_id, event_type, event, event_timestamp,
           platform, app_version, country, audio_language, subtitle_language,
           player_version, session_start_epoch
@@ -168,8 +180,12 @@ say "PHASE 4 — absorb INCREMENTALLY (ADR 0006). cc_minute_delta is never trunc
 say "          never mutated, never rebuilt. Only appended to."
 say "  4a  snapshot the OLD derivation for the touched sessions"
 q "INSERT INTO ${DB}.session_intervals_prev
+     (video_session_id, user_id, content_id, platform, country,
+      app_version, audio_language, subtitle_language, player_version,
+      extra_dimensions, interval_start, interval_end, is_open, build_version)
    SELECT video_session_id, user_id, content_id, platform, country,
           app_version, audio_language, subtitle_language, player_version,
+          extra_dimensions,
           interval_start, interval_end, is_open, build_version
    FROM ${DB}.session_intervals FINAL ${TOUCHED}"
 say "      $(qr "SELECT concat(toString(count()),' old intervals over ',
@@ -310,7 +326,13 @@ build_intervals "${DB}.session_intervals_fix" "${DB}.ev_raw" \
   "WHERE event_timestamp < toDateTime64('${CUT}',3)" 1
 build_deltas "${DB}.cc_minute_delta_fix" "${DB}.session_intervals_fix" "FINAL"
 q "INSERT INTO ${DB}.session_intervals_fix_prev
-   SELECT * FROM ${DB}.session_intervals_fix FINAL ${TOUCHED}"
+     (video_session_id, user_id, content_id, platform, country,
+      app_version, audio_language, subtitle_language, player_version,
+      extra_dimensions, interval_start, interval_end, is_open, build_version)
+   SELECT video_session_id, user_id, content_id, platform, country,
+      app_version, audio_language, subtitle_language, player_version,
+      extra_dimensions, interval_start, interval_end, is_open, build_version
+   FROM ${DB}.session_intervals_fix FINAL ${TOUCHED}"
 build_deltas "${DB}.cc_minute_delta_fix" "${DB}.session_intervals_fix_prev" "" "" "-"
 build_intervals "${DB}.session_intervals_fix" "${DB}.ev_raw" "$TOUCHED" 2
 build_deltas "${DB}.cc_minute_delta_fix" "${DB}.session_intervals_fix" "FINAL" "$TOUCHED" "+"

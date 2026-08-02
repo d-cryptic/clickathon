@@ -48,6 +48,11 @@ CREATE TABLE IF NOT EXISTS sonyliv_trunc.ev_raw
     subtitle_language   LowCardinality(String),
     player_version      LowCardinality(String),
     session_start_epoch DateTime64(3),
+    -- ADR 0024's unknown-column Map. DEFAULT map() so the explicit-column
+    -- INSERTs above still work, and so this mirror is valid whether or not
+    -- the graded ev_raw has adopted the column yet — it has not, as of
+    -- 2026-08-02, which is recorded in REMAINING.md.
+    extra             Map(LowCardinality(String), String) DEFAULT map(),
     INDEX idx_content content_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_ts      event_timestamp TYPE minmax GRANULARITY 1
 )
@@ -75,6 +80,7 @@ CREATE TABLE IF NOT EXISTS sonyliv_trunc.session_intervals
     audio_language    LowCardinality(String),
     subtitle_language LowCardinality(String),
     player_version    LowCardinality(String),
+    extra_dimensions  Map(LowCardinality(String), String) DEFAULT map(),
     interval_start   DateTime64(3),
     interval_end     DateTime64(3),
     is_open          UInt8,
@@ -129,6 +135,7 @@ CREATE TABLE IF NOT EXISTS sonyliv_trunc.session_intervals_prev
     audio_language    LowCardinality(String),
     subtitle_language LowCardinality(String),
     player_version    LowCardinality(String),
+    extra_dimensions  Map(LowCardinality(String), String) DEFAULT map(),
     interval_start   DateTime64(3),
     interval_end     DateTime64(3),
     is_open          UInt8,
@@ -176,6 +183,7 @@ CREATE TABLE IF NOT EXISTS sonyliv_trunc.session_intervals_control
     audio_language    LowCardinality(String),
     subtitle_language LowCardinality(String),
     player_version    LowCardinality(String),
+    extra_dimensions  Map(LowCardinality(String), String) DEFAULT map(),
     interval_start   DateTime64(3),
     interval_end     DateTime64(3),
     is_open          UInt8,
@@ -256,6 +264,7 @@ CREATE TABLE IF NOT EXISTS sonyliv_trunc.session_intervals_fix
     audio_language    LowCardinality(String),
     subtitle_language LowCardinality(String),
     player_version    LowCardinality(String),
+    extra_dimensions  Map(LowCardinality(String), String) DEFAULT map(),
     interval_start   DateTime64(3),
     interval_end     DateTime64(3),
     is_open          UInt8,
@@ -279,6 +288,7 @@ CREATE TABLE IF NOT EXISTS sonyliv_trunc.session_intervals_fix_prev
     audio_language    LowCardinality(String),
     subtitle_language LowCardinality(String),
     player_version    LowCardinality(String),
+    extra_dimensions  Map(LowCardinality(String), String) DEFAULT map(),
     interval_start   DateTime64(3),
     interval_end     DateTime64(3),
     is_open          UInt8,
