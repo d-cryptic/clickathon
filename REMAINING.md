@@ -1,23 +1,23 @@
 # REMAINING — what is actually left, verified rather than remembered
 
 > **Summary:** Checked every open item in `TODOS.md`, `v2.todo.md` and `docs/WORKTREE_QUEUE.md`
-> against the live system on 2026-08-02. **Most were stale — done, decided or declined, and never
-> struck.** What genuinely remains is small: **two administrative blockers only a human can clear**
-> (the repo is private, no Team Captain), **one open decision** (Q35 — adopt peak 2,927 or keep
-> 2,917), **one local-only defect** (Q30), and **independent validation of `main` as a whole**, which
-> is running. Everything else on those lists is finished. If you read one section, read §1.
+> against the live system and the released unseen/submission contracts on 2026-08-02. The old
+> “private repo” and “Team Captain” blockers were not in the official rules and are retired. The
+> real P0s are the hosted demo, 2–3 minute video, self-contained team folder/PR, final unseen
+> query-log evidence, and ClickStack-specific wiring plus a live walkthrough. Q35 remains an open
+> semantic choice; current-model validation and deployment evidence remain separate gates.
 
 **Verified:** 2026-08-02, against `main` at the merge of all 234 commits. Gate PASSED — 17,028
 minutes, 0 mismatched, peak 2,917. `make ci` green.
 
 ---
 
-## 1 · Only a human can do these — and two are disqualification-level
+## 1 · Final submission work that cannot be inferred from the code
 
 | # | Item | Why blocked |
 |---|---|---|
-| **A1** | **The repo is PRIVATE.** Submission requires public. | Owner-only. Pre-publication checklist in [`SUBMISSION.md`](SUBMISSION.md) — note the Cloud **hostname** appears in `evidence/load-guard.txt` and in history at `6355048`. A hostname grants no access; decide deliberately rather than by default. |
-| **A2** | **No Team Captain is named.** | Only the Captain can submit. |
+| **A1** | **Hosted demo and 2–3 minute video are not packaged.** | Both must show the curve, all applicable filters and ClickStack working live. Screenshots alone are not proof. |
+| **A2** | **The self-contained official team folder and PR are not assembled.** | Include source, README, architecture, pitch PDF, video/demo links, ClickStack deployment/OTel wiring, redacted `.env.example`, destination service/tables and dashboard/search captures; open `[Submission] Team Name`. |
 | **A3** | **Q35 — adopt peak 2,927, or keep 2,917?** | A **decision**, not a bug. A run of one event yields a zero-length segment dropped before `TAIL_S` applies, so 182 runs earn nothing. Keeping them moves the peak **2,917 → 2,927** (+5.0 h; Codex confirmed 80 changed minutes, +18,127 s). We answer "not at all" **by accident, not by choice**. ADR 0031 is being written to present both readings; the signature is yours. |
 
 ## 1b · Newly unblocked — the publisher can now safely run on the graded database
@@ -95,17 +95,29 @@ in `SETTINGS` fails with a 452 — the override is not a fix, it is a second, un
 agent added exactly that line to `sql/40_deltas.sql` and `sql/45_user_concurrency.sql`; it was reverted
 before it could turn a working build into a guaranteed one. **Do not reintroduce it.**
 
-The risk is nonetheless real for a "more real and cruel" unseen file. Today's data is nowhere near it —
-7 distinct dates, 7 active partitions, `ev_raw` spanning 2026-07-14..2026-07-26 — and the "102 calendar
-dates" figure that motivated the bad fix came from `tools/timespan-gen.sh`'s synthetic long-span
-fixture, not from the real file. Two fixes do work on Cloud:
+**CORRECTION, same day.** An earlier version of this entry said the "102 calendar dates" figure was
+unsupported and came from `tools/timespan-gen.sh`'s synthetic fixture. **That was wrong, and the
+correction was the error.** The figure is real and measured from the **official unseen file**, which
+has since been released: 7,000,000 rows whose derived intervals span **102 distinct dates**, from
+2021-01-27 to 2026-08-03, despite the file being described as a single day
+([009 §3](codex-validation/009-official-unseen-schema-evolution-and-submission-readiness.md)). I
+measured the *old* 7-day sample, found 7 dates, and called a correct claim unsupported. The agent that
+raised it had the premise right and only the fix wrong.
 
-- **(a) chunk the INSERT in the driver** so no block spans >100 days. A `tools/` change, no schema
-  change, needs no authorisation. This is the safe one.
-- **(b) `PARTITION BY toYYYYMM(minute)`** — 102 days becomes 4 partitions. Strictly better, and daily
-  partitioning over a 7-day dataset is over-partitioned to begin with (see the vendored ClickHouse
-  partitioning guidance). But it is a **schema change**, so per the standing instruction it is an
-  **operator decision**, not a task an agent may take.
+**This is therefore a P0, not a hypothetical.** The official unseen build **fails today** — the user
+stage dies with `TOO_MANY_PARTS`. There is no unseen answer to submit until it is fixed. Two fixes work
+on Cloud:
+
+- **(a) bounded date-chunk build** — drive each tier in slices of well under 100 dates. A `tools/`
+  change, no schema change, needs no authorisation. 009 §9 calls this "the safe deadline option" and
+  reports it in validation. **This is the one to land.**
+- **(b) `PARTITION BY toYYYYMM(minute)`** — 102 days becomes 6 partitions. Strictly better long-term,
+  and daily partitioning is over-granular regardless (see the vendored ClickHouse partitioning
+  guidance). But it is a **schema change**, so per the standing instruction it is an **operator
+  decision**, not a task an agent may take.
+
+Whichever lands must prove **curve equivalence to the unchunked build**, not merely that the INSERT
+succeeded. A chunked build that silently drops a boundary minute is worse than one that fails loudly.
 
 **Independent validation of `main`.** 234 commits landed at once and **nothing reached `main` through
 the six-check gate** — seven attempts, seven rejections, all correct. A Codex audit of `main` as a
@@ -135,9 +147,10 @@ it hides the four that are real. This file exists because the queue stopped bein
   they add real value". The detector and its three-way classification are built; an LLM adds nothing
   to detection and something only to phrasing. A well-argued "we chose not to" is a stronger answer
   than a bolted-on call.
-- **Langfuse emitter** — the spec requires *one* of ClickStack/Langfuse/LibreChat. ClickStack is done
-  properly, including our own pipeline emitting OTLP.
-- **LibreChat conversational layer** — optional; the integration requirement is already met.
+- **Langfuse emitter** — optional. ClickStack is the selected integration; adding a second tool does
+  not close the missing ClickStack screenshots, hosted-demo walkthrough or video walkthrough.
+- **LibreChat conversational layer** — optional for the same reason. The ClickStack code path is
+  implemented, but official judge-facing evidence remains incomplete until §1 is closed.
 - **Tombstones instead of the per-run interval `DELETE`** — right in principle (ClickHouse's
   avoid-mutations guidance), measured at 1.4 s per run, not worth destabilising a passing pipeline
   before a deadline.
