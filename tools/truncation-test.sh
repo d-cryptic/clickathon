@@ -24,7 +24,11 @@ cd "$(dirname "$0")/.."
 [ -f .env ] && set -a && . ./.env && set +a
 
 CUT="${CUT:-2026-07-26 10:56:00}"
-DB=sonyliv_trunc
+# Fixed scratch name, overridable. Two agents running this at once against one
+# shared database corrupt each other and produce spurious verdicts — the same
+# trap tools/property-test.sh has with prop_t6. Pass TRUNC_DB=<name> to run in
+# parallel. sql/70 hardcodes the database, so it is rewritten below to match.
+DB="${TRUNC_DB:-sonyliv_trunc}"
 PROD=sonyliv                    # READ-ONLY. Never a write target.
 OUT=evidence/truncation.txt
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
@@ -75,12 +79,38 @@ run_file() {
 build_intervals() {
   local args=(
     -e "s|^INSERT INTO session_intervals|INSERT INTO $1|"
-    -e "s|^        FROM v_ev_model_input\$|        FROM $2 ${3:-}|"
+    -e "s|^        FROM ev_raw\$|        FROM $2 ${3:-}|"
   )
   if [ -n "${4:-}" ]; then
     args+=(-e "s|^        toUInt64(toUnixTimestamp(now())) AS build_version,\$|        toUInt64($4) AS build_version,|")
   fi
   sed "${args[@]}" sql/30_build_intervals.sql > "$TMP/bi.sql"
+  # A sed that matches NOTHING is silent, and silence here does not fail the
+  # test — it DISARMS it. The source stays bare `ev_raw`, run_file's --database
+  # still resolves it inside the scratch database, and the run looks green. But
+  # the WHERE passed as $3 is dropped, so every "incremental" build at lines
+  # 199/325/337 becomes a FULL REBUILD. The test then compares a full rebuild
+  # against a from-scratch rebuild and converges by construction: it cannot
+  # fail, and cannot detect the bug it exists to detect.
+  #
+  # This is not hypothetical. It shipped in 82382be, when this template was
+  # changed to `FROM v_ev_model_input` — a table sql/30 does not name — and the
+  # suite reported CONVERGES on every minute with the sabotage half silent.
+  # Assert the substitution instead of hoping for it.
+  if ! grep -q "^        FROM $2" "$TMP/bi.sql"; then
+    echo "FATAL: the source template did not match sql/30_build_intervals.sql." >&2
+    echo "       Expected a line '        FROM ev_raw'; sql/30 now reads:" >&2
+    grep -nE '^\s+FROM [a-z_]+$' sql/30_build_intervals.sql | sed 's/^/         /' >&2
+    echo "       Fix the sed in build_intervals() IN THE SAME COMMIT that renames" >&2
+    echo "       the source in sql/30, or the incremental builds silently become" >&2
+    echo "       full rebuilds and this suite passes without testing anything." >&2
+    exit 1
+  fi
+  if [ -n "${3:-}" ] && ! grep -q "^        FROM $2 ${3:-}" "$TMP/bi.sql"; then
+    echo "FATAL: a WHERE clause was passed but did not survive substitution —" >&2
+    echo "       this build would be a full rebuild masquerading as incremental." >&2
+    exit 1
+  fi
   run_file "$TMP/bi.sql"
 }
 
@@ -123,7 +153,8 @@ say "PHASE 0 — reset the test database (never touches ${PROD})"
 # then reapplied from sql/70, so this script is self-contained rather than
 # depending on an apply-sql.sh someone remembered to run first.
 reset_scratch_db
-run_file sql/70_truncation_test.sql >/dev/null
+sed "s/sonyliv_trunc/${DB}/g" sql/70_truncation_test.sql > "$TMP/schema.sql"
+run_file "$TMP/schema.sql" >/dev/null
 # ADR 0032: sql/30 reads GAP_S/TAIL_S from v_model_policy rather than carrying
 # them as literals, so a scratch database that lacks the view cannot build the
 # model at all. Apply it here for the same reason sql/70 is applied here — the
