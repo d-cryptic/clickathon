@@ -117,6 +117,43 @@ EOF
   fi
 fi
 
+# A BUILD THAT DIES MID-WAY LEAVES A SILENTLY-WRONG MODEL. Say so, loudly.
+#
+# On 2026-08-02 a build died at stage 4/6 on a missing cube_level column, AFTER
+# the delta insert. `set -e` aborted immediately and correctly returned non-zero
+# — but the database was left with a doubled cc_minute_delta (56,146 rows, peak
+# 5,834 against a true 2,917) and NOTHING said the model was half-built. The
+# script's own end-of-run reconcile, which would have caught it instantly, was
+# never reached. An external audit found it hours later.
+#
+# The exit code is not enough: nobody reads it when the failure text scrolls past.
+# This trap makes the consequence impossible to miss and names the fix.
+BUILD_COMPLETE=0
+on_exit() {
+  local rc=$?
+  if [ "$rc" -ne 0 ] && [ "$BUILD_COMPLETE" -eq 0 ]; then
+    cat >&2 <<EOF
+
+##########################################################################
+# BUILD FAILED PART-WAY — THE MODEL IN '${TARGET_DB:-$TARGET}' IS NOW HALF-BUILT
+#
+#   Some tiers were rebuilt and some were not. cc_minute_delta is an
+#   AggregatingMergeTree of SUMS: if its insert ran, a re-run without the
+#   truncate DOUBLES every number and the result looks entirely plausible.
+#
+#   DO NOT SERVE FROM IT and do not assume a re-run is safe on its own.
+#   Re-run this script to completion, then confirm:
+#
+#     tools/reconcile.sh    (TARGET=$TARGET)   must report 0 mismatched
+#
+#   This exact failure produced a doubled graded tier on 2026-08-02.
+##########################################################################
+EOF
+  fi
+  exit $rc
+}
+trap on_exit EXIT
+
 echo "== target: $TARGET"
 
 echo "== 1/6  session_intervals (gap + pause, ADR 0001/0007)"
@@ -286,6 +323,7 @@ FROM (
          (SELECT max(concurrent) FROM v_concurrency_minute_delta_total) AS m
 ) FORMAT TSVRaw"
 
+BUILD_COMPLETE=1
 if [ "$GATE_FAILED" != 0 ]; then
   echo "== BUILD FAILED — a tier disagrees with session_intervals. Do NOT benchmark this build." >&2
   exit 1
