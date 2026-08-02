@@ -32,22 +32,48 @@ FILES=(
 # enrichment, user-level concurrency and 10 filter dimensions. Never again — the
 # docs come down with the data.
 DOCS_BASE="${DOCS_BASE_URL:-https://raw.githubusercontent.com/sidagarwal04/click-a-thon-2026/main/SonyLiv}"
-DOCS=(PROBLEM_STATEMENT.md README_START_HERE.md dataset_details.md)
+SUBMISSION_DOCS_BASE="${SUBMISSION_DOCS_BASE_URL:-https://raw.githubusercontent.com/sidagarwal04/click-a-thon-26-submissions/main}"
+# source path|vendored name. The unseen spec lives in a subdirectory upstream
+# but is flattened here so every contract can be found with docs/upstream/*.md.
+DOCS=(
+  "PROBLEM_STATEMENT.md|PROBLEM_STATEMENT.md"
+  "README_START_HERE.md|README_START_HERE.md"
+  "dataset_details.md|dataset_details.md"
+  "unseen_data/spec.md|unseen_spec.md"
+)
+SUBMISSION_DOCS=(
+  "SONYLIV_SUBMISSION_GUIDELINES.md|SONYLIV_SUBMISSION_GUIDELINES.md"
+  "README.md|SUBMISSIONS_README.md"
+)
 
 fetch_docs() {
   mkdir -p docs/upstream
-  for d in "${DOCS[@]}"; do
-    if curl -fsSL --retry 2 -o "docs/upstream/$d.tmp" "$DOCS_BASE/$d"; then
-      if [ -f "docs/upstream/$d" ] && ! cmp -s "docs/upstream/$d.tmp" "docs/upstream/$d"; then
-        echo "  !! UPSTREAM SPEC CHANGED: docs/upstream/$d — re-read it before trusting the model"
+  local entry src dest
+  for entry in "${DOCS[@]}"; do
+    src="${entry%%|*}"; dest="${entry#*|}"
+    if curl -fsSL --retry 2 -o "docs/upstream/$dest.tmp" "$DOCS_BASE/$src"; then
+      if [ -f "docs/upstream/$dest" ] && ! cmp -s "docs/upstream/$dest.tmp" "docs/upstream/$dest"; then
+        echo "  !! UPSTREAM SPEC CHANGED: docs/upstream/$dest — re-read it before trusting the model"
       fi
-      mv "docs/upstream/$d.tmp" "docs/upstream/$d"
+      mv "docs/upstream/$dest.tmp" "docs/upstream/$dest"
     else
-      rm -f "docs/upstream/$d.tmp"
-      echo "  could not fetch $d (continuing)" >&2
+      rm -f "docs/upstream/$dest.tmp"
+      echo "  could not fetch $src (continuing)" >&2
     fi
   done
-  echo "spec docs synced to docs/upstream/"
+  for entry in "${SUBMISSION_DOCS[@]}"; do
+    src="${entry%%|*}"; dest="${entry#*|}"
+    if curl -fsSL --retry 2 -o "docs/upstream/$dest.tmp" "$SUBMISSION_DOCS_BASE/$src"; then
+      if [ -f "docs/upstream/$dest" ] && ! cmp -s "docs/upstream/$dest.tmp" "docs/upstream/$dest"; then
+        echo "  !! SUBMISSION CONTRACT CHANGED: docs/upstream/$dest — re-read it before submitting"
+      fi
+      mv "docs/upstream/$dest.tmp" "docs/upstream/$dest"
+    else
+      rm -f "docs/upstream/$dest.tmp"
+      echo "  could not fetch submission $src (continuing)" >&2
+    fi
+  done
+  echo "problem and submission docs synced to docs/upstream/"
 }
 
 MODE=fetch

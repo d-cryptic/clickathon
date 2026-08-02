@@ -1,33 +1,49 @@
-# upstream/ — the organiser's spec, verbatim
+# upstream/ — organiser contracts, vendored verbatim
 
-> **Summary:** Byte-for-byte copies of the three spec files from
-> [sidagarwal04/click-a-thon-2026](https://github.com/sidagarwal04/click-a-thon-2026/tree/main/SonyLiv),
-> synced by `tools/fetch_data.sh`. **Never edit these** — they are the contract, and a diff against
-> upstream must mean upstream changed, not that we tidied them. `PROBLEM_STATEMENT.md` is
-> byte-identical to `docs/PROBLEM.md`. The other two were NOT read until 2026-08-01 and between them
-> they carry requirements the build had been missing: content-metadata enrichment, user-level
-> concurrency, ten filter dimensions, and time-window trend.
+> **Summary:** This directory contains verbatim-content copies of the four SonyLIV problem-package
+> contracts and the two current SonyLIV/common submission contracts.
+> The problem package was verified against `sidagarwal04/click-a-thon-2026@c1e1c69` and the
+> submission package against `sidagarwal04/click-a-thon-26-submissions@c446938` on 2026-08-02.
+> `unseen_spec.md` adds `video_resolution` and `show_name`; both are mandatory filter dimensions.
+> Never edit the vendored files: re-sync them with `tools/fetch_data.sh`, inspect every diff, then
+> update implementation and project docs in the same change.
 
-## Why this directory exists
+## Contract inventory
 
-`tools/fetch_data.sh` originally pulled only the two CSVs. The spec lives in the same upstream folder,
-so we built for a day and a half against one of three files. The script now syncs all three and warns
-loudly if a file changed since the last sync.
-
-## What the two unread files added
-
-| Source | Requirement | State |
+| Local file | Upstream source | What it controls |
 |---|---|---|
-| README_START_HERE.md | "Enrich events with content metadata" — join `content_dim` | **was missing** — `content_dim` was loaded but never referenced |
-| README_START_HERE.md | **Content-level concurrency** by title / video_type / category | **was missing** |
-| README_START_HERE.md | **Time-window trend** — rolling/fixed windows, watermarking, refresh latency | partially — watermark measured, windows not built |
-| dataset_details.md | **User-level concurrency** "will be derived from" `user_id` | **was missing** — `user_id` carried into `session_intervals`, never aggregated |
-| dataset_details.md | Ten filter dimensions | `session_intervals` carried three |
-| dataset_details.md | "the solution should work even if the number of dimensions increases" | design constraint, not a feature |
+| `PROBLEM_STATEMENT.md` | SonyLiv/PROBLEM_STATEMENT.md | task, foreground-only semantics, benchmark and unseen evidence |
+| `README_START_HERE.md` | SonyLiv/README_START_HERE.md | expected pipeline, aggregation and integration surfaces |
+| `dataset_details.md` | SonyLiv/dataset_details.md | original field names and business meaning |
+| `unseen_spec.md` | SonyLiv/unseen_data/spec.md | official 7M-row release and the two new filter columns |
+| `SONYLIV_SUBMISSION_GUIDELINES.md` | submission repository | SonyLIV curve/filter/UI evidence |
+| `SUBMISSIONS_README.md` | submission repository root | team folder, hosted demo, video, architecture, deck and PR rules |
 
-## Where the organiser's doc contradicts the shipped data
+`tools/fetch_data.sh` fetches all six files and warns when either source changes. The data downloader
+still checksum-pins the original two CSVs; the official unseen files are Drive-hosted and their
+observed hashes are recorded in the current Codex validation report.
 
-`dataset_details.md` says the heartbeat "is currently passed every 1 minute". Measured on the real
-file (ADR 0007): `VideoHeartbeat` is bursty telemetry at **4.72 events/min**, inter-arrival p50 **0s**,
-p90 40s, p99 49s — not a 1-minute beat. Our model follows the data, not the doc. This is a **mentor
-question**, not just a fix: if the graders' ground truth assumed a 1-minute beat, the gap matters.
+## Requirements that are easy to miss
+
+- User concurrency is derived from `user_id`, separately from session concurrency.
+- Content metadata is joined at query time and title/type/category/show filters must not drop orphans.
+- Every dataset dimension must filter the concurrency curve in the product UI.
+- More dimensions may arrive; unknown columns need a lossless landing path and a generic fallback,
+  while measured hot dimensions should be promoted to named serving paths.
+- The official unseen submission needs answers, latencies, and query-log or trace evidence from the
+  actual pipeline. A locally reconstructed benchmark is not a substitute.
+- The final package needs source, README with hosted demo link, architecture, a 2–3 minute video,
+  pitch-deck PDF, self-contained team folder, and `[Submission] Team Name` pull request.
+- Because this project uses ClickStack, the package must also commit its deployment and OTel wiring,
+  a redacted `.env.example`, name the ClickHouse service/tables receiving telemetry, include the
+  dashboards/searches actually used in the README, and walk through them live in the hosted demo
+  and video. Screenshots are required supporting evidence, but are not proof by themselves.
+
+## Source/data contradictions to keep visible
+
+The original dictionary says heartbeats arrive every minute. The original file's useful cadence is
+closer to 40 seconds and contains same-second bursts; the official unseen file also has a strong
+40-second mode. The model therefore uses one declared gap policy rather than learning a threshold
+from each batch. Explicit background/foreground events are not guaranteed, but the task still says
+background time must be excluded. That semantic choice remains separate from heartbeat-only versus
+all-activity liveness and must not be inferred from self-reconciliation.

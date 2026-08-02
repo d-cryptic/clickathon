@@ -118,7 +118,7 @@ under-provisioned**. Honest accounting of what we may be losing:
 | **Point activity dropped** — 182 zero-span runs count zero | peak 2,917 → **2,927 (+10)**, +5.0 h | measured, [evidence/property](../evidence/property/README.md). Small, but it is the *shape* of the risk: a viewer who demonstrably acted is billed as nothing. |
 | **Conservative unclosed-pause rule** — 23% of pauses never resume, and we exclude to the run's end | up to +4.5% peak, +99.3 h | ADR 0007. ⚠️ **measured before ADR 0009 and not re-run** — treat the size as indicative, not current. |
 
-Against that, the risks that push the *other* way are much larger: if the ground truth samples at the
+Against that, the risks that push the *other* way are much larger: if judges sample at the
 instant a minute begins rather than counting any overlap, we are **14.1% high**
 ([doubts/09](../doubts/09-minute-membership-instant-reading.md)); if it requires foreground **and**
 playing to both hold, we are **10.7% high** ([doubts/10](../doubts/10-fail-closed-state-gates.md)).

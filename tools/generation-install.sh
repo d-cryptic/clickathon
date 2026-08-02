@@ -114,9 +114,13 @@ for pair in \
   "cc_user_minute|gen_cc_user_minute| FINAL"
 do
   name="${pair%%|*}"; rest="${pair#*|}"; src="${rest%%|*}"; fin="${rest#*|}"
+  select_list="* EXCEPT generation"
+  if [ "$name" = session_intervals ]; then
+    select_list="* EXCEPT generation, extra_dimensions['video_resolution'] AS video_resolution"
+  fi
   q "DROP TABLE IF EXISTS ${name}" >/dev/null
   q "CREATE OR REPLACE VIEW ${name} AS
-       SELECT * EXCEPT generation
+       SELECT ${select_list}
        FROM ${src}${fin}
        WHERE generation = (SELECT generation FROM v_active_generation)" >/dev/null
   echo "   ${name} -> ${src}${fin}"

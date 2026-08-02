@@ -1,13 +1,6 @@
 # Start Here — Click-a-thon 2026 · SonyLIV Problem
 ## Real-time foreground-only concurrency at streaming scale
 
-> **Vendored verbatim from the upstream problem package. Do not edit the body.**
-> Its relative links (`data/…`) describe the *upstream* layout, not this repo. Here the two CSVs
-> live at repo-root [`data/`](../../data/) and are **gitignored** (`data/*.csv`, 233 MB raw +
-> 1.2 MB content), so they resolve only after you download them locally. Those dangling links are
-> fidelity to the original, not rot — leave them. Our own docs are [`docs/PROBLEM.md`](../PROBLEM.md)
-> and [`docs/DATA_DICTIONARY.md`](../DATA_DICTIONARY.md).
-
 Welcome! This package has everything you need to start building.
 
 ## What's in this package

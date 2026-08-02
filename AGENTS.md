@@ -11,8 +11,9 @@
 Count how many viewers are **actively watching** at each minute — excluding backgrounded, paused and
 heartbeat-missing periods — from session start/end plus 1-minute heartbeats, over a serving layer fast
 enough for dashboard queries and update-friendly enough to absorb still-open sessions and late
-arrivals. Scored against a **private ground truth** on a benchmark query set, plus an **unseen day**
-released in the final hours. Full statement: [docs/PROBLEM.md](docs/PROBLEM.md).
+arrivals. Judges spot-check concurrency against raw events; the released unseen data requires peak
+and average minute/hour/day results with filters, latencies and pipeline evidence. Full statement:
+[docs/PROBLEM.md](docs/PROBLEM.md).
 
 ## Where to go
 

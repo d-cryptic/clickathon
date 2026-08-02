@@ -14,6 +14,7 @@
 | `/reconcile` | the serving layer equals the truth recomputed from raw | after **every** model change |
 | `/bench` | benchmark latency and, more importantly, **bytes read** | before demo / unseen run |
 | **truncation / absorption test** | the model absorbs mid-stream truncation and a late arrival **incrementally**, converging on the from-scratch answer. Covers the open-session and late-arrival probes below in one run | `tools/truncation-test.sh` — after any change to `session_intervals`, its engine, or the delta emission |
+| **partition-safe backfill test** | 130 **sparse** output dates, including the non-start days of a 25-hour interval, are enumerated from accepted `session_intervals` and built in exactly 3 chunks per day-partitioned tier (64/64/2); asserts exact user and OPEN/CLOSE delta rows, so Cloud-safe batching cannot silently omit later days of a long interval | `tools/chunked-backfill-test.sh` — in the fast suite; after any change to `tools/chunked-backfill.sh`, SQL40's backfill anchor, SQL45's backfill anchor, or either full-rebuild caller |
 | open-session probe | the model absorbs sessions with no `VideoSessionEnd` | folded into the truncation test (52.6% of sessions are open at the cut) |
 | late-arrival probe | a heartbeat arriving after its minute was aggregated updates the served value | folded into the truncation test (447,081 events arrive after the cut) |
 | hour-clip probe | an interval spanning ≥3 hours reads correctly **at a minute inside the middle hour** — the case that fails if clipping is wrong | after any change to delta emission |
@@ -225,12 +226,13 @@ whose format matches what `tools/reconcile.sh` writes today — verified by diff
 ## H — edge-case matrix (Codex 003 §11, semantic golden tests §13.1)
 
 `tools/edge-test.sh` · fixtures + harness doc in [tests/edge/](../tests/edge/README.md) · scratch db
-`edge_matrix`, local-only · run after any change to `sql/30_build_intervals.sql` or `sql/40_deltas.sql`.
+`edge_matrix`, local-only · run after any change to `sql/30_build_intervals.sql`, `sql/40_deltas.sql`
+or `sql/45_user_concurrency.sql`.
 
-29 hand-auditable fixtures, one hazard each, run through the **real** derivation (sed-templated, never
+32 hand-auditable fixtures, one hazard each, run through the **real** derivation (sed-templated, never
 reimplemented). Expected intervals AND expected per-minute concurrency are **derived by hand from the
 spec** (ADR 0003/0007/0008/0009, `interval-math`) in each fixture header — never from the model, per
-Codex 003 §13.1. All 26 PASS on the shipped model (2026-08-02). Every family is sabotage-checked: 9
+Codex 003 §13.1. All 32 PASS on the shipped model (2026-08-02). Every family is sabotage-checked: 10
 named mutations of the production SQL each turn their paired fixture red (`tools/edge-test.sh
 sabotage`; ledger with the one instructive miss in [tests/edge/README.md](../tests/edge/README.md)).
 Fixtures that pin an **open fork** carry a `FORK` note naming the dossier — they assert the SHIPPED
@@ -265,6 +267,9 @@ to rewrite.
 | L04 | §11.4 late dimension flip | attribution flips web→android with time unchanged; the old web tuple must net to zero per-platform |
 | D01 | §11.5 dominant + tie | vote 2:2:1 → tie broken by smallest value, deterministically (ADR 0009) |
 | D02 | §11.5 mid-session dim change | per-segment attribution at interval level; the minute-merge keeps the EARLIER platform (ADR 0008 first-wins, pinned including its weirdness) |
+| D03 | §11.5 unseen dynamic fields | an unknown `experiment_id` key and released `video_resolution` alias survive interval attribution; modal values win deterministically |
+| D04 | §11.5 independent dynamic-key votes | keys vote independently instead of as a composite `Map`; reversed input key order cannot change the canonical result |
+| D05 | §11.5 missing vs empty dynamic value | missing and explicitly empty are distinct votes; a presence-first tie retains `cohort=''` instead of dropping the key |
 | U01 | §11.5 exact users | one user on two simultaneous sessions in one dimension: sessions=2, users=1 |
 | U02 | §11.5 exact users across dimensions | one user on web+tv: total users=1 while sum(per-platform users)=2, proving user counts are not additive |
 | U03 | §11.5 multi-user session | one session id carries two users across a pause: sessions=1 and users=2 at the overlap minute; grouping only by session erases a viewer |

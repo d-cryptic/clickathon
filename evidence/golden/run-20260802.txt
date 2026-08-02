@@ -1,4 +1,4 @@
-GOLDEN COHORTS — db=golden_v1 seed=20260802 generated 2026-08-02 00:53 UTC
+GOLDEN COHORTS — db=golden_v1 seed=20260802 generated 2026-08-02 02:46 UTC
 expectations: closed form / stated-tolerance statistics / reference interpreter — NEVER the SQL under test
 
 == closed-staircase — 60 sessions x 600 s, staggered 60 s — ramp/plateau/ramp, peak 12

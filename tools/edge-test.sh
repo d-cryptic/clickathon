@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # tools/edge-test.sh — the executable edge-case matrix (Codex 003 §11 / §13.1).
 # Runs hand-derived golden fixtures (tests/edge/fixtures/) through the REAL derivation
-# (sql/30_build_intervals.sql + sql/40_deltas.sql, sed-templated, never reimplemented)
-# in scratch db `edge_matrix`, and compares against expected intervals + minutes whose
-# values were derived BY HAND from the spec — never from the model under test.
+# (sql/30_build_intervals.sql + sql/40_deltas.sql + sql/45_user_concurrency.sql,
+# sed-templated, never reimplemented) in scratch db `edge_matrix`, and compares
+# against expected intervals, session minutes, and exact user minutes whose values
+# were derived BY HAND from the spec — never from the model under test.
 # Usage: tools/edge-test.sh           run the matrix, PASS/FAIL per fixture
 #        tools/edge-test.sh sabotage  prove fixtures can fail: mutate the SQL stream,
 #                                     assert the paired fixture goes red. Disk untouched.
@@ -47,7 +48,8 @@ setup_schema() {
         platform LowCardinality(String), app_version LowCardinality(String),
         country LowCardinality(String), audio_language LowCardinality(String),
         subtitle_language LowCardinality(String), player_version LowCardinality(String),
-        session_start_epoch DateTime64(3)
+        session_start_epoch DateTime64(3),
+        extra Map(LowCardinality(String), String) DEFAULT map()
       ) ENGINE = MergeTree ORDER BY (video_session_id, event_timestamp)"
 
   # session_intervals / cc_minute_delta clones — SAME engines as production
@@ -56,6 +58,7 @@ setup_schema() {
         platform LowCardinality(String), country LowCardinality(String),
         app_version LowCardinality(String), audio_language LowCardinality(String),
         subtitle_language LowCardinality(String), player_version LowCardinality(String),
+        extra_dimensions Map(LowCardinality(String), String) DEFAULT map(),
         interval_start DateTime64(3), interval_end DateTime64(3),
         is_open UInt8, build_version UInt64"
   local dt_cols="minute DateTime,
@@ -78,14 +81,27 @@ setup_schema() {
   ch "CREATE TABLE ${DB}.delta_corr (${dt_cols})
       ENGINE = AggregatingMergeTree ORDER BY (platform, country, content_id, minute,
         subtitle_language, player_version, audio_language, app_version)"
+  ch "CREATE TABLE ${DB}.cc_user_minute (
+        minute DateTime,
+        platform LowCardinality(String), country LowCardinality(String), content_id Int64,
+        active_state AggregateFunction(uniqExact, String),
+        computed_at DateTime64(3) DEFAULT now64(3)
+      ) ENGINE = ReplacingMergeTree(computed_at)
+        PARTITION BY toYYYYMMDD(minute)
+        ORDER BY (platform, country, content_id, minute)"
 
   # Hand-derived expectations. platform/audio_language '*' = not asserted.
   ch "CREATE TABLE ${DB}.expected_intervals (
         video_session_id String, interval_start DateTime64(3), interval_end DateTime64(3),
-        is_open UInt8, platform String DEFAULT '*', audio_language String DEFAULT '*'
+        is_open UInt8, platform String DEFAULT '*', audio_language String DEFAULT '*',
+        video_resolution String DEFAULT '*',
+        extra_dimensions Map(LowCardinality(String), String) DEFAULT map()
       ) ENGINE = MergeTree ORDER BY (video_session_id, interval_start)"
   ch "CREATE TABLE ${DB}.expected_minutes (
         fixture String, minute DateTime, platform String DEFAULT '*', cc Int64
+      ) ENGINE = MergeTree ORDER BY (fixture, platform, minute)"
+  ch "CREATE TABLE ${DB}.expected_user_minutes (
+        fixture String, minute DateTime, platform String DEFAULT '*', users UInt64
       ) ENGINE = MergeTree ORDER BY (fixture, platform, minute)"
   ch "CREATE TABLE ${DB}.expected_no_interval (
         video_session_id String, interval_start DateTime64(3)
@@ -123,6 +139,7 @@ load_fixtures() {
 # applied to the STREAM — the files on disk are never modified.
 SAB30="${SAB30:-}"   # extra sed program for 30_build_intervals.sql
 SAB40="${SAB40:-}"   # extra sed program for 40_deltas.sql
+SAB45="${SAB45:-}"   # extra sed program for 45_user_concurrency.sql
 CORRMODE="${CORRMODE:-full}"  # full | drop-vanished (sabotage 8)
 
 assert_isolated() {  # every INSERT must target edge_matrix; sonyliv must not appear
@@ -138,7 +155,7 @@ assert_isolated() {  # every INSERT must target edge_matrix; sonyliv must not ap
 build_pass() {  # $1 = si target, $2 = delta target, $3 = max batch
   local si="$1" dt="$2" maxb="$3" sql30 sql40
   sql30="$(sed -e "s/INSERT INTO session_intervals/INSERT INTO ${DB}.${si}/" \
-               -e "s/FROM ev_raw/FROM ${DB}.ev_raw WHERE batch <= ${maxb}/" \
+               -e "s/FROM v_ev_model_input/FROM ${DB}.ev_raw WHERE batch <= ${maxb}/" \
                "$ROOT/sql/30_build_intervals.sql")"
   [ -n "$SAB30" ] && sql30="$(printf '%s' "$sql30" | sed -e "$SAB30")"
   assert_isolated "$sql30"
@@ -152,6 +169,20 @@ build_pass() {  # $1 = si target, $2 = delta target, $3 = max batch
   ch "$sql40"
 }
 
+build_users() {
+  local sql45
+  sql45="$(sed -n '/PUBLISH_EXTRACT_BEGIN:user/,/PUBLISH_EXTRACT_END:user/p' \
+                "$ROOT/sql/45_user_concurrency.sql")"
+  [ -n "$SAB45" ] && sql45="$(printf '%s' "$sql45" | sed -e "$SAB45")"
+  sql45="$(printf '%s' "$sql45" | sed \
+               -e "s/INSERT INTO cc_user_minute/INSERT INTO ${DB}.cc_user_minute/" \
+               -e "s/FROM session_intervals AS si FINAL/FROM ${DB}.session_intervals AS si FINAL/g" \
+               -e "s/FROM session_intervals FINAL/FROM ${DB}.session_intervals FINAL/g" \
+               -e "s/FROM cc_user_minute FINAL/FROM ${DB}.cc_user_minute FINAL/g")"
+  assert_isolated "$sql45"
+  ch "$sql45"
+}
+
 DIMS="platform, country, content_id, subtitle_language, player_version, audio_language, app_version"
 
 build_all() {
@@ -160,9 +191,11 @@ build_all() {
   ch "TRUNCATE TABLE ${DB}.si_old"
   ch "TRUNCATE TABLE ${DB}.delta_old"
   ch "TRUNCATE TABLE ${DB}.delta_corr"
+  ch "TRUNCATE TABLE ${DB}.cc_user_minute"
 
   build_pass si_old delta_old 1                 # the world before the late events
   build_pass session_intervals cc_minute_delta 99   # the world after (full rebuild)
+  build_users
 
   # ADR 0006 correction-by-diff: negate EVERY old row of the touched sessions, then
   # append the new rows, in one block. Here every session counts as touched.
@@ -185,10 +218,12 @@ CORRECTED_SRC="(SELECT * FROM ${DB}.delta_old UNION ALL SELECT * FROM ${DB}.delt
 q_intervals() {  # $1 = fixture
   cat <<SQL
 WITH
- e AS (SELECT video_session_id, interval_start, interval_end, is_open, platform, audio_language
+ e AS (SELECT video_session_id, interval_start, interval_end, is_open, platform, audio_language,
+              video_resolution, extra_dimensions
        FROM ${DB}.expected_intervals WHERE startsWith(video_session_id, '$1_')),
  a AS (SELECT video_session_id, interval_start, interval_end, is_open,
-              toString(platform) AS platform, toString(audio_language) AS audio_language
+              toString(platform) AS platform, toString(audio_language) AS audio_language,
+              extra_dimensions['video_resolution'] AS video_resolution, extra_dimensions
        FROM ${DB}.session_intervals FINAL WHERE startsWith(video_session_id, '$1_'))
 SELECT
   if(a.video_session_id = '', 'missing', if(e.video_session_id = '', 'unexpected', 'mismatch')) AS kind,
@@ -197,13 +232,18 @@ SELECT
   e.interval_end AS want_end, a.interval_end AS got_end,
   e.is_open AS want_open, a.is_open AS got_open,
   e.platform AS want_pf, a.platform AS got_pf,
-  e.audio_language AS want_au, a.audio_language AS got_au
+  e.audio_language AS want_au, a.audio_language AS got_au,
+  e.video_resolution AS want_resolution, a.video_resolution AS got_resolution,
+  toJSONString(e.extra_dimensions) AS want_extra,
+  toJSONString(a.extra_dimensions) AS got_extra
 FROM e FULL OUTER JOIN a
   ON e.video_session_id = a.video_session_id AND e.interval_start = a.interval_start
 WHERE e.video_session_id = '' OR a.video_session_id = ''
    OR e.interval_end != a.interval_end OR e.is_open != a.is_open
    OR (e.platform != '*' AND e.platform != a.platform)
    OR (e.audio_language != '*' AND e.audio_language != a.audio_language)
+   OR (e.video_resolution != '*' AND e.video_resolution != a.video_resolution)
+   OR (length(e.extra_dimensions) > 0 AND e.extra_dimensions != a.extra_dimensions)
 ORDER BY sid, start
 SQL
 }
@@ -252,6 +292,54 @@ ORDER BY m, pf
 SQL
 }
 
+q_users_total() {  # $1 = fixture
+  cat <<SQL
+WITH
+  (SELECT t_from FROM ${DB}.fixture_span WHERE fixture = '$1') AS lo,
+  (SELECT t_to   FROM ${DB}.fixture_span WHERE fixture = '$1') AS hi,
+  a AS (
+    SELECT minute, uniqExactMerge(active_state) AS users
+    FROM ${DB}.cc_user_minute FINAL
+    WHERE minute >= lo AND minute < hi
+    GROUP BY minute
+  ),
+  e AS (
+    SELECT minute, users
+    FROM ${DB}.expected_user_minutes
+    WHERE fixture = '$1' AND platform = '*'
+  )
+SELECT if(a.minute = toDateTime(0), e.minute, a.minute) AS m,
+       e.users AS want, a.users AS got
+FROM a FULL OUTER JOIN e ON a.minute = e.minute
+WHERE a.minute = toDateTime(0) OR e.minute = toDateTime(0) OR e.users != a.users
+ORDER BY m
+SQL
+}
+
+q_users_platform() {  # $1 = fixture
+  cat <<SQL
+WITH
+  (SELECT t_from FROM ${DB}.fixture_span WHERE fixture = '$1') AS lo,
+  (SELECT t_to   FROM ${DB}.fixture_span WHERE fixture = '$1') AS hi,
+  a AS (
+    SELECT minute, toString(platform) AS pf, uniqExactMerge(active_state) AS users
+    FROM ${DB}.cc_user_minute FINAL
+    WHERE minute >= lo AND minute < hi
+    GROUP BY minute, platform
+  ),
+  e AS (
+    SELECT minute, platform AS pf, users
+    FROM ${DB}.expected_user_minutes
+    WHERE fixture = '$1' AND platform != '*'
+  )
+SELECT if(a.minute = toDateTime(0), e.minute, a.minute) AS m,
+       if(a.pf = '', e.pf, a.pf) AS pf, e.users AS want, a.users AS got
+FROM a FULL OUTER JOIN e ON a.minute = e.minute AND a.pf = e.pf
+WHERE a.minute = toDateTime(0) OR e.minute = toDateTime(0) OR e.users != a.users
+ORDER BY m, pf
+SQL
+}
+
 q_no_interval() {  # $1 = fixture
   cat <<SQL
 SELECT n.video_session_id, n.interval_start
@@ -265,9 +353,11 @@ SQL
 FAILED=0
 
 check_fixture() {  # $1 = fixture. Prints "<fixture>  PASS|FAIL ..." and mismatch detail.
-  local fx="$1" is_late has_pf out fails=""
+  local fx="$1" is_late has_pf has_users has_user_pf out fails=""
   is_late="$(ch "SELECT is_late FROM ${DB}.fixture_span WHERE fixture = '${fx}'")"
   has_pf="$(ch "SELECT count() FROM ${DB}.expected_minutes WHERE fixture = '${fx}' AND platform != '*'")"
+  has_users="$(ch "SELECT count() FROM ${DB}.expected_user_minutes WHERE fixture = '${fx}' AND platform = '*'")"
+  has_user_pf="$(ch "SELECT count() FROM ${DB}.expected_user_minutes WHERE fixture = '${fx}' AND platform != '*'")"
 
   out="$(ch "$(q_intervals "$fx")")"
   [ -n "$out" ] && { fails+=" intervals"; printf '    [intervals]\n%s\n' "$out" | sed 's/^/    /'; }
@@ -282,6 +372,15 @@ check_fixture() {  # $1 = fixture. Prints "<fixture>  PASS|FAIL ..." and mismatc
 
   out="$(ch "$(q_no_interval "$fx")")"
   [ -n "$out" ] && { fails+=" vanished-interval-present"; printf '    [vanished-interval-present]\n%s\n' "$out" | sed 's/^/    /'; }
+
+  if [ "$has_users" != "0" ]; then
+    out="$(ch "$(q_users_total "$fx")")"
+    [ -n "$out" ] && { fails+=" users"; printf '    [users]\n%s\n' "$out" | sed 's/^/    /'; }
+  fi
+  if [ "$has_user_pf" != "0" ]; then
+    out="$(ch "$(q_users_platform "$fx")")"
+    [ -n "$out" ] && { fails+=" users-by-platform"; printf '    [users-by-platform]\n%s\n' "$out" | sed 's/^/    /'; }
+  fi
 
   # Late-data fixtures: the served answer must ALSO be right when reached via
   # old + (-old + new), not only via the fresh rebuild — including netting minutes
@@ -348,13 +447,14 @@ sabotage_run() {
     "merge-off-by-one|SAB40=s/(x.1 > (acc.2 + 60))/(x.1 > acc.2)/|D02"
     "close-leaks-next-hour|SAB40=s/AND ((((intDiv(e, 60) \* 60)) + 60) < (h + 3600))//;s/AND (((intDiv(e, 60) \* 60) + 60) < (h + 3600))//|B06"
     "corr-drops-vanished|CORRMODE=drop-vanished|L02"
+    "user-fold-by-session|SAB45=s/GROUP BY video_session_id, user_id/GROUP BY video_session_id/|U03"
   )
 
   echo "== sabotage — every mutation must turn its fixture red =="
   for spec in "${specs[@]}"; do
     name="${spec%%|*}"; env="${spec#*|}"; env="${env%%|*}"; fx="${spec##*|}"
     (
-      export SAB30="" SAB40="" CORRMODE=full
+      export SAB30="" SAB40="" SAB45="" CORRMODE=full
       export "${env%%=*}"="${env#*=}"
       build_all
     )
@@ -367,7 +467,7 @@ sabotage_run() {
   done
 
   # restore: clean rebuild, whole matrix must be green again
-  SAB30="" SAB40="" CORRMODE=full build_all
+  SAB30="" SAB40="" SAB45="" CORRMODE=full build_all
   echo "== post-sabotage clean rebuild =="
   run_matrix || rc=1
   return $rc

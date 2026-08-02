@@ -17,7 +17,7 @@
 #
 #   1  next        allocate generation G, record 'building'
 #   2  build       full rebuild into a DISPOSABLE database <db>_bld_gG, using
-#                  tools/build-model.sh unchanged — including all three of its
+#                  the current tools/build-model.sh — including all three of its
 #                  reconcile gates
 #   3  stage       copy the four tiers into <db>.gen_* tagged with G. Present on
 #                  disk, INVISIBLE to every reader: the pointer still says G-1
@@ -104,11 +104,11 @@ q "INSERT INTO model_generation (generation, status, git_commit, notes) VALUES
 phase next
 
 # ── 2 · build ───────────────────────────────────────────────────────────────
-# Nothing about this step is new. It is tools/build-model.sh, unchanged, pointed
+# This is the canonical tools/build-model.sh, pointed
 # at a database nobody reads — which is the entire point: the existing build and
 # all three of its gates keep working, they just cannot damage the serving layer
 # any more.
-echo "== 2/6  full rebuild into $BUILD_DB (tools/build-model.sh, unchanged)"
+echo "== 2/6  full rebuild into $BUILD_DB (current tools/build-model.sh)"
 q "CREATE DATABASE IF NOT EXISTS $BUILD_DB" >/dev/null
 apply "$BUILD_DB" sql/00_schema.sql sql/01_policy.sql sql/10_intervals.sql >/dev/null
 
@@ -117,8 +117,31 @@ apply "$BUILD_DB" sql/00_schema.sql sql/01_policy.sql sql/10_intervals.sql >/dev
 # points the derivation at `<serving>.ev_raw` directly — a cross-database read
 # in ClickHouse costs nothing — which is a one-line change to sql/30 and is left
 # out here so that build-model.sh stays byte-for-byte the script that runs today.
-qb "INSERT INTO ev_raw SELECT * FROM ${DB}.ev_raw" >/dev/null
-qb "INSERT INTO content_dim SELECT * FROM ${DB}.content_dim" >/dev/null 2>/dev/null || true
+# Explicit physical columns make source-envelope additions such as ingested_at
+# harmless. SELECT * made a new source-only column shift/fail the whole build.
+EV_HAS_EXTRA="$(scalar "SELECT count() FROM system.columns
+                         WHERE database = '$DB' AND table = 'ev_raw' AND name = 'extra'")"
+EV_EXTRA_EXPR="CAST(map(), 'Map(String, String)')"
+[ "$EV_HAS_EXTRA" = 1 ] && EV_EXTRA_EXPR=extra
+qb "INSERT INTO ev_raw
+      (content_id, video_session_id, user_id, event_type, event, event_timestamp,
+       platform, app_version, country, audio_language, subtitle_language,
+       player_version, session_start_epoch, extra)
+    SELECT content_id, video_session_id, user_id, event_type, event, event_timestamp,
+       platform, app_version, country, audio_language, subtitle_language,
+       player_version, session_start_epoch, ${EV_EXTRA_EXPR}
+    FROM ${DB}.ev_raw" >/dev/null
+CONTENT_EXISTS="$(scalar "SELECT count() FROM system.tables
+                           WHERE database = '$DB' AND name = 'content_dim'")"
+if [ "$CONTENT_EXISTS" = 1 ]; then
+  CONTENT_HAS_EXTRA="$(scalar "SELECT count() FROM system.columns
+                               WHERE database = '$DB' AND table = 'content_dim' AND name = 'extra'")"
+  CONTENT_EXTRA_EXPR="CAST(map(), 'Map(String, String)')"
+  [ "$CONTENT_HAS_EXTRA" = 1 ] && CONTENT_EXTRA_EXPR=extra
+  qb "INSERT INTO content_dim (content_id, title, video_type, category, extra)
+      SELECT content_id, title, video_type, category, ${CONTENT_EXTRA_EXPR}
+      FROM ${DB}.content_dim" >/dev/null
+fi
 echo "   ev_raw: $(qb "SELECT count() FROM ev_raw FORMAT TSVRaw" | tr -d '[:space:]') rows"
 
 if [ "$TARGET" = cloud ]; then TARGET=cloud CH_DATABASE="$BUILD_DB" tools/build-model.sh
@@ -128,17 +151,42 @@ phase build
 # ── 3 · stage ───────────────────────────────────────────────────────────────
 # Rows land in the serving database and are INVISIBLE, because the pointer still
 # names G-1 and `generation` leads both the partition key and the sort key.
-# `SELECT $G, *` is positional — that is why `generation` is the first column of
-# every gen_* table.
+# Explicit lists make schema evolution fail loudly. A positional `SELECT $G, *`
+# can silently shift values when a future physical column is inserted mid-table.
 echo "== 3/6  stage generation $G into $DB (invisible: pointer still at ${ACTIVE:-0})"
-q "INSERT INTO gen_session_intervals SELECT $G, * FROM ${BUILD_DB}.session_intervals" >/dev/null
-q "INSERT INTO gen_cc_minute_delta   SELECT $G, * FROM ${BUILD_DB}.cc_minute_delta"   >/dev/null
+q "INSERT INTO gen_session_intervals
+     (generation, video_session_id, user_id, content_id, platform, country,
+      app_version, audio_language, subtitle_language, player_version,
+      extra_dimensions, interval_start, interval_end, is_open, build_version)
+   SELECT $G, video_session_id, user_id, content_id, platform, country,
+      app_version, audio_language, subtitle_language, player_version,
+      extra_dimensions, interval_start, interval_end, is_open, build_version
+   FROM ${BUILD_DB}.session_intervals" >/dev/null
+q "INSERT INTO gen_cc_minute_delta
+     (generation, minute, platform, country, content_id, subtitle_language,
+      player_version, audio_language, app_version, delta, starts, ends)
+   SELECT $G, minute, platform, country, content_id, subtitle_language,
+      player_version, audio_language, app_version, delta, starts, ends
+   FROM ${BUILD_DB}.cc_minute_delta" >/dev/null
 if [ "$DOUBLE_DELTA" = yes ]; then
   echo "   !! DOUBLE_DELTA=yes — staging cc_minute_delta a SECOND time (the 2026-08-02 corruption)"
-  q "INSERT INTO gen_cc_minute_delta SELECT $G, * FROM ${BUILD_DB}.cc_minute_delta" >/dev/null
+  q "INSERT INTO gen_cc_minute_delta
+       (generation, minute, platform, country, content_id, subtitle_language,
+        player_version, audio_language, app_version, delta, starts, ends)
+     SELECT $G, minute, platform, country, content_id, subtitle_language,
+        player_version, audio_language, app_version, delta, starts, ends
+     FROM ${BUILD_DB}.cc_minute_delta" >/dev/null
 fi
-q "INSERT INTO gen_cc_hour_agg       SELECT $G, * FROM ${BUILD_DB}.cc_hour_agg"       >/dev/null
-q "INSERT INTO gen_cc_user_minute    SELECT $G, * FROM ${BUILD_DB}.cc_user_minute"    >/dev/null
+q "INSERT INTO gen_cc_hour_agg
+     (generation, hour, platform, country, content_id, cube_level, peak,
+      peak_minute, integral, computed_at)
+   SELECT $G, hour, platform, country, content_id, cube_level, peak,
+      peak_minute, integral, computed_at
+   FROM ${BUILD_DB}.cc_hour_agg" >/dev/null
+q "INSERT INTO gen_cc_user_minute
+     (generation, minute, platform, country, content_id, active_state, computed_at)
+   SELECT $G, minute, platform, country, content_id, active_state, computed_at
+   FROM ${BUILD_DB}.cc_user_minute" >/dev/null
 echo "   staged: $(scalar "SELECT concat(toString((SELECT count() FROM gen_session_intervals WHERE generation=$G)), ' intervals, ', toString((SELECT count() FROM gen_cc_minute_delta WHERE generation=$G)), ' deltas, ', toString((SELECT count() FROM gen_cc_hour_agg WHERE generation=$G)), ' hours, ', toString((SELECT count() FROM gen_cc_user_minute WHERE generation=$G)), ' user buckets')")"
 phase stage
 

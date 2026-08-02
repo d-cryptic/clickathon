@@ -301,6 +301,10 @@ FROM
     FROM cc_user_minute FINAL
     WHERE 1 /* publish: existing buckets */
 )
+-- Full rebuilds replace this with at most 64 actual output dates. Keep it
+-- outside both branches: the publisher independently scopes each branch to its
+-- touched minutes and deliberately leaves this predicate unchanged.
+WHERE 1 /* backfill: output dates */
 GROUP BY minute, platform, country, content_id;
 -- PUBLISH_EXTRACT_END:user
 

@@ -1,6 +1,6 @@
 # tests/edge — the executable edge-case matrix
 
-> **Summary:** Codex 003 §11's edge-case register turned into 29 hand-auditable golden fixtures
+> **Summary:** Codex 003 §11's edge-case register turned into 32 hand-auditable golden fixtures
 > (§13.1), run through the REAL derivation (`sql/30_build_intervals.sql` + `sql/40_deltas.sql` + `sql/45_user_concurrency.sql`,
 > sed-templated, never reimplemented) in scratch db `edge_matrix` by `tools/edge-test.sh`. Every
 > expected interval and minute was derived **by hand from the spec, never from the model** — and
@@ -48,7 +48,7 @@ and prune phase are `tools/publish-test.sh` territory, deliberately not retested
 
 ## Sabotage ledger — measured 2026-08-02, all via the sed stream (disk never modified)
 
-The final clean rebuild in the same run is the reversion proof: all 29 fixtures green again.
+The final clean rebuild in the same run is the reversion proof: all 32 fixtures green again.
 
 | Mutation | What it breaks in the production SQL | Caught by | Result |
 |---|---|---|---|
@@ -69,11 +69,22 @@ actually breaks the *touching-minute* merge, which is D02's shape. The pairing w
 always-split mutation added so S08 covers the double-count it exists for. A sabotage that stays
 green is telling you which hazard the fixture actually covers — listen to it.
 
+## Dynamic-field and user-tier fixtures
+
+| Fixture | Hand-derived contract |
+|---|---|
+| D03 | An unseen `experiment_id` key and the released `video_resolution` alias survive interval attribution; the modal value wins deterministically. |
+| D04 | Dynamic keys vote independently rather than as one composite `Map`; input key order cannot change the canonical result. |
+| D05 | A missing key and an explicitly empty value are distinct; the presence-first tie rule retains `cohort=''`. |
+| U01 | Two simultaneous sessions for one user in one dimension serve sessions=2 and exact users=1. |
+| U02 | One user on web and TV serves total users=1 while each platform serves users=1; per-dimension distinct counts are not additive. |
+| U03 | Two user identities on one session across a pause remain two users in the overlap minute; folding only by session would erase one. |
+
 ## Files
 
 - `fixtures/b_boundaries.sql` — B01–B08, §11.3 (minute/hour/day boundaries, zero-length, exact-gap)
 - `fixtures/s_state.sql` — S01–S08 (no S05), §11.2 (pause/background combinations, tails, dips)
 - `fixtures/o_ordering.sql` — O01–O05, §11.1 (same-second ties, arrival order, ends, duplicates)
 - `fixtures/l_late.sql` — L01–L04, §11.4 (extend, shrink, bridge/vanish, dimension flip)
-- `fixtures/d_dimensions.sql` — D01–D02, §11.5's derivation share (dominant vote, first-wins merge)
+- `fixtures/d_dimensions.sql` — D01–D05, deterministic fixed and dynamic dimension attribution
 - `fixtures/u_users.sql` — U01–U03, exact user distinctness (same user/multiple sessions and dimensions; multiple users/one session)

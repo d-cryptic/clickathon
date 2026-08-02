@@ -159,6 +159,6 @@ shows `is_final = 0` on exactly the buckets newer than the boundary.
 - The floor under `allowed_lateness` is now measured rather than guessed: **210 s**, predicted by
   `GAP_S + TAIL_S` and confirmed at 542,537 cells. If those tunables move, this moves with them.
 - The direction of the live-edge error is on record as an **under-count** (largest over-count in the
-  whole sweep: +2 viewers), which is the safe side for a metric scored against exact ground truth.
+  whole sweep: +2 viewers), which is the safe side for a metric checked exactly against raw events.
 - The graded database is untouched: everything ran in scratch `sonyliv_v3live`, disposable with
   `DROP DATABASE IF EXISTS sonyliv_v3live`. `sonyliv` was read with `SELECT` on `ev_raw` only.

@@ -52,6 +52,21 @@
 - Default TTL is **30 days**; `SeverityText` is stored **lower-cased**.
 - One OTel emitter feeds ClickStack **and** Langfuse — same `trace_id` lands in both (verified).
 
+## Submission-contract update verified 2026-08-02
+
+The official submission repository at commit `c446938` now adds explicit evidence requirements for
+ClickStack, Langfuse and LibreChat. For ClickStack, commit deployment/integration and OTel wiring,
+use a secrets-redacted `.env.example`, name the ClickHouse service and destination tables, include
+the dashboards/searches actually used in the README, and show them live in the hosted demo and video.
+Screenshots are supporting evidence, not proof by themselves. The same official rules require a
+self-contained team folder and `[Submission] Team Name` PR; they do not say this project repository
+must be public or that only a named Team Captain may submit.
+
+The official problem/unseen repository then moved to `c1e1c69`. It no longer promises a fixed
+benchmark-query set or private answer key. It requires peak and average concurrency at minute, hour
+and day grain with dimension filters, latency and pipeline evidence; judges spot-check results
+against raw events. The repository's 13 queries are therefore a coverage matrix, not official SQL.
+
 ## MCP
 
 - Env names are `CLICKHOUSE_MCP_*`; `MCP_SERVER_TRANSPORT` is **silently ignored**.

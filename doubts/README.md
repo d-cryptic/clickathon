@@ -2,9 +2,9 @@
 
 > **Summary:** One file per doubt. Each carries the **measured evidence**, the **exact words to ask**,
 > **why it is worth mentor time**, and a **decision table** saying what we change for each possible
-> answer. These are dossiers, not a list — `docs/MENTOR_QUESTIONS.md` is the ranked list of all 17
-> questions and stays the index; a file here exists only where the evidence got deep enough that the
-> question changed shape. Every number is measured against the loaded data, never estimated.
+> answer. The official contract now says judges spot-check results against raw events; older dossier
+> Older wording has been updated to the organiser's intended raw-event spot-check semantics. Every
+> number is measured against loaded data, never estimated.
 > **Record the answer inline the moment it arrives, and update the affected ADR in the same commit.**
 
 ## Ask in this order — ranked by measured cost to the answer we submit
@@ -60,7 +60,7 @@ supersede or sharpen the version in `MENTOR_QUESTIONS.md`:
   the serving SQL and the reconcile gate share one convention, so a green gate cannot decide it.
 - **06 scopes `evidence/dedup.txt`.** The dedup-is-inert proof was right at the grain it measured
   (totals) and is wrong at the grain the model now serves (7 dimensions): the attribution vote counts
-  events, so duplicates vote. The question — does the ground truth dedup before attributing? — only
+  events, so duplicates vote. The question — do judges dedup before attributing? — only
   exists because the finer measurement was taken.
 - **07, 08, 09 come from the adversarial audit** (`evidence/adversarial/README.md`), which rebuilt the
   interval derivation in a scratch database under **21 alternative readings** of conventions the model

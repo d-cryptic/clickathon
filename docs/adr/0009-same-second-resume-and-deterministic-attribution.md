@@ -143,7 +143,7 @@ FROM ev_raw GROUP BY video_session_id
 
 Three attributions of one input. The consequence is not "95 sessions get an arbitrary platform" — it
 is that **two rebuilds of the same data serve two different answers to the same filtered query**.
-Against an exact private ground truth that is disqualifying whether it touches 120 sessions or
+Under exact raw-event spot-checks that is disqualifying whether it touches 120 sessions or
 12,000, and it does not depend on `any()` being *inaccurate* at all.
 
 ### Decision — reuse ADR 0008's rule, do not invent a second one

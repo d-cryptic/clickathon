@@ -293,27 +293,32 @@ SELECT
     cityHash64(raw_content_id, video_session_id, user_id, event_type, event,
                raw_event_timestamp, platform, app_version, country,
                audio_language, subtitle_language, player_version,
-               raw_session_start_epoch)               AS src_hash,
+               raw_session_start_epoch,
+               arraySort(mapKeys(extra)),
+               arrayMap(k -> extra[k], arraySort(mapKeys(extra)))) AS src_hash,
     toUInt32(count())                                 AS copies,
     any(detail)                                       AS detail,
-    map('content_id',          raw_content_id,
-        'video_session_id',    video_session_id,
-        'user_id',             user_id,
-        'event_type',          toString(event_type),
-        'event',               toString(event),
-        'event_timestamp',     raw_event_timestamp,
-        'platform',            toString(platform),
-        'app_version',         toString(app_version),
-        'country',             toString(country),
-        'audio_language',      toString(audio_language),
-        'subtitle_language',   toString(subtitle_language),
-        'player_version',      toString(player_version),
-        'session_start_epoch', raw_session_start_epoch) AS raw
+    mapConcat(
+        map('content_id',          raw_content_id,
+            'video_session_id',    video_session_id,
+            'user_id',             user_id,
+            'event_type',          toString(event_type),
+            'event',               toString(event),
+            'event_timestamp',     raw_event_timestamp,
+            'platform',            toString(platform),
+            'app_version',         toString(app_version),
+            'country',             toString(country),
+            'audio_language',      toString(audio_language),
+            'subtitle_language',   toString(subtitle_language),
+            'player_version',      toString(player_version),
+            'session_start_epoch', raw_session_start_epoch),
+        extra)                                           AS raw
 FROM v_ev_landing_cast
 WHERE reason != ''
 GROUP BY load_id, reason, disposition, raw_content_id, video_session_id, user_id,
          event_type, event, raw_event_timestamp, platform, app_version, country,
-         audio_language, subtitle_language, player_version, raw_session_start_epoch;
+         audio_language, subtitle_language, player_version, raw_session_start_epoch,
+         extra;
 
 -- ---------------------------------------------------------------------------
 -- The catalogue side. content_id is the join key and nothing else in the row is
@@ -343,16 +348,20 @@ SELECT
     load_id,
     reason,
     disposition,
-    cityHash64(raw_content_id, title, video_type, category) AS src_hash,
+    cityHash64(raw_content_id, title, video_type, category,
+               arraySort(mapKeys(extra)),
+               arrayMap(k -> extra[k], arraySort(mapKeys(extra)))) AS src_hash,
     toUInt32(count())                                 AS copies,
     any(detail)                                       AS detail,
-    map('content_id', raw_content_id,
-        'title',      title,
-        'video_type', toString(video_type),
-        'category',   toString(category))             AS raw
+    mapConcat(
+        map('content_id', raw_content_id,
+            'title',      title,
+            'video_type', toString(video_type),
+            'category',   toString(category)),
+        extra)                                           AS raw
 FROM v_content_landing_cast
 WHERE reason != ''
-GROUP BY load_id, reason, disposition, raw_content_id, title, video_type, category;
+GROUP BY load_id, reason, disposition, raw_content_id, title, video_type, category, extra;
 
 -- ===========================================================================
 -- THE JUDGE-FACING SUMMARIES. "What did you do with the rows that would not

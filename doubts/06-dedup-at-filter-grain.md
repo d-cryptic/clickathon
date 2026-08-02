@@ -113,7 +113,7 @@ benchmark answer is generated.
 > they *do* vote: deduplicating flips the audio-language attribution of 6 intervals and moves the
 > per-language curves by up to 2 viewers on 59 minutes.
 >
-> **The question:** does your ground truth deduplicate repeated events before computing
+> **The question:** do judge spot-checks deduplicate repeated events before computing
 > dimension-filtered answers — and if so, on what key? Or is the stream taken as delivered, so a
 > replayed event legitimately carries extra weight?
 >
@@ -142,7 +142,7 @@ behind it.
 
 | If they say | We change | Cost | Effect |
 |---|---|---|---|
-| **"ground truth dedups exact replays"** | add the deterministic dedup (the `ORDER BY … LIMIT 1 BY` above, tie-break recorded) at the head of `per_session` in `sql/30_build_intervals.sql`; record the policy in ADR **0016**; rebuild + `/reconcile` | one extra pass over ev_raw per rebuild; ~4 lines + ADR | 6 intervals re-attributed; `unk` audio peak becomes **184**; headline untouched |
+| **"judges dedup exact replays"** | add the deterministic dedup (the `ORDER BY … LIMIT 1 BY` above, tie-break recorded) at the head of `per_session` in `sql/30_build_intervals.sql`; record the policy in ADR **0016**; rebuild + `/reconcile` | one extra pass over ev_raw per rebuild; ~4 lines + ADR | 6 intervals re-attributed; `unk` audio peak becomes **184**; headline untouched |
 | **"stream as delivered — multiplicity is real"** | nothing in SQL; ADR **0016** records that replayed events intentionally carry vote weight | ADR only | current numbers stand (`unk` peak **183**) |
 | **"dedup, but on a different key"** (e.g. ignoring `event`, or full-row) | re-run this A/B with that key before touching the model — the winner-pinning tie-break matters if the key leaves conflicting rows (the one `UNK`/`OFF` subtitle conflict in `evidence/dedup.txt` §1) | one query, then as row 1 | unknown until measured |
 | *no answer received* | keep raw multiplicity; the deck states the sensitivity (6 intervals, ≤2 viewers/minute, one filtered peak ±1) next to the other definitional forks; `docs/RUNBOOK_UNSEEN.md` re-runs this A/B whenever `evidence/dedup.txt` §5(c)'s detector fires on the unseen day | zero | bounded and visible instead of silent |

@@ -1,6 +1,7 @@
-# evidence/benchmark — OUR RECONSTRUCTION of the benchmark query set
-> **Summary:** The official benchmark query set was never released. These 13 queries are OUR
-> RECONSTRUCTION of the shapes the problem statement names — peak AND average concurrency, at
+# evidence/benchmark — OUR COVERAGE MATRIX for the required concurrency results
+> **Summary:** The organiser specifies peak and average concurrency at minute, hour and day grain
+> with dimension filters, not a fixed SQL set. These 13 queries are OUR COVERAGE MATRIX for those
+> shapes — peak AND average concurrency, at
 > minute / hour / day grain, with dimension filters (platform, country, content, video type) —
 > plus the one shape the hour tier explicitly does NOT serve (a partial platform filter), so its
 > minute-scan fallback cost is measured, not guessed. Run `tools/bench.sh` to regenerate

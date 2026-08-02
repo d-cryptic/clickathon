@@ -253,7 +253,7 @@ run_point() {
   hr
   qd default "DROP DATABASE IF EXISTS $DBN" >/dev/null
   qd default "CREATE DATABASE $DBN" >/dev/null
-  for f in sql/00_schema.sql sql/01_policy.sql sql/10_intervals.sql sql/20_views.sql; do
+  for f in sql/00_schema.sql sql/01_policy.sql sql/10_intervals.sql sql/15_normalise.sql sql/20_views.sql; do
     docker exec -i ch clickhouse-client --database "$DBN" --multiquery < "$f" >/dev/null 2>&1
   done
   local t
@@ -483,9 +483,10 @@ SQL
   fi
 
   # ---- build the four tiers -------------------------------------------------
-  # max_partitions_per_insert_block raised for every stage: the deltas and user
-  # backfills write into day-partitioned tables across the whole span, so any
-  # span > ~100 days trips the default limit exactly as the generator did.
+  # This local-only harness raises max_partitions_per_insert_block for every
+  # stage so the experiment can continue past the default limit. ClickHouse
+  # Cloud pins that setting read-only; production must chunk inserts to <=100
+  # daily partitions or migrate the affected tiers to monthly partitions.
   say ""
   local BUILD_STAGES=("30_build_intervals:intervals" "45_user_concurrency:users" "40_deltas:deltas" "50_hour_agg:houragg")
   local stage f lbl st BUILD_FAILED=""

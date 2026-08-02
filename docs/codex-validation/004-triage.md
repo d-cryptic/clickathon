@@ -1,5 +1,8 @@
 # Codex 004 — triage: the preprocessing boundary, against what has since landed
 
+> **Historical audit:** predates the official unseen release and upstream `c1e1c69`; current
+> terminology and readiness live in Codex Validation 009.
+
 > **Summary:** Codex 004 audits commit `9c26918` and says keep the system ClickHouse-first, add an
 > immutable all-`String` landing table, and wire `v_ev_model_input` into both the builder and the gate.
 > Most of its architecture advice is **already implemented** — `extra Map` (ADR 0024), quarantine
@@ -45,7 +48,7 @@ ran everything. They independently name the same two gaps, in the same order.**
 | §4.1.1 "the current typed `input()` path can reject a whole batch because one value cannot parse" | [`docs/PREPROCESSING.md`](../PREPROCESSING.md) §Known gaps **1**, written by T3 before 004: "A type-mismatched row still fails the whole load batch… rejects the batch, not the row" |
 | §4.1.2 "`sql/30_build_intervals.sql` and three reads in `sql/90_reconcile.sql` still use `ev_raw`, while `v_ev_model_input` exists but is not enforced" | [`docs/PREPROCESSING.md`](../PREPROCESSING.md) §Known gaps **2**, and the comment block at `sql/15_normalise.sql:550-557` which says "NOT WIRED" in the source itself |
 | §6 `feat/problem-space-research` is ideas, not mergeable code | [`docs/design-bakeoff.md`](../design-bakeoff.md) reached **REJECT wholesale adoption, confidence HIGH (~90%)** on 2026-08-01 — a day earlier, from the git diff, never having checked the branch out |
-| §6.4 the research branch's state-gated model reads ~10.9% below the incumbent, and that delta is a mentor question not a verdict | Bake-off measured **~11% below on watch-time** and reached the same "this is dossier evidence, not ground truth" conclusion |
+| §6.4 the research branch's state-gated model reads ~10.9% below the incumbent, and that delta is a mentor question not a verdict | Bake-off measured **~11% below on watch-time** and reached the same "this is dossier evidence, not organiser semantics" conclusion |
 
 **004's §4.1.2 line count is exactly right.** `sql/30_build_intervals.sql:135` reads `FROM ev_raw`;
 `sql/90_reconcile.sql` reads `ev_raw` at lines **59, 92 and 172** — "three reads", as claimed.

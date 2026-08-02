@@ -81,13 +81,15 @@ The first hard failure in the matrix, and it is a span failure, not a volume one
 ```
 
 `ev_raw`, `cc_minute_delta`, `cc_minute_stateless` and `cc_user_minute` are all `PARTITION BY` day.
-Any bulk INSERT whose squashed blocks span more than 100 distinct days is refused. **A backfill, a
-restore, or a re-derivation covering more than ~100 days of history fails at default settings**,
-while the identical statement over 60 days succeeds. It is a one-setting fix
-(`max_partitions_per_insert_block=400`, which the harness then uses everywhere), but it is a fix
-you need to know about *before* the restore, not during it.
+Any single INSERT block spanning more than 100 distinct days is refused. **A backfill, restore or
+re-derivation over >100 populated dates can therefore fail**, while the identical statement over
+60 dates succeeds. This harness raises `max_partitions_per_insert_block=400` on local ClickHouse to
+continue the experiment. That is **not a ClickHouse Cloud fix**: the graded service pins this setting
+read-only and returns Code 452 if it is overridden. Production-safe choices are driver-side chunks
+with at most 100 daily partitions per INSERT, or a deliberate migration to monthly partitions.
 
-Steady-state ingest is unaffected — it writes one day at a time.
+Steady-state ingest is unaffected when each insert covers fewer than 100 populated dates. Calendar
+span alone is not the trigger; the count of distinct output partitions in one block is.
 
 ## Finding 2 — what breaks second: the interval derivation, at 180 days
 

@@ -1,8 +1,10 @@
 # CLICKSTACK_DASHBOARDS — what every panel shows, and how to read it
 
-> **Summary:** Panel-by-panel reference for the seven HyperDX dashboards on the hosted ClickStack
-> (Cloud), captured **live from the running service** on 2026-08-01, not from the provisioning scripts.
-> **7 dashboards · 53 tiles · 24 sources · 1 connection.** Dashboards 1–3 and 7 open with a markdown
+> **Summary:** Panel-by-panel reference for the seven HyperDX dashboards on hosted ClickStack.
+> The **2026-08-01 capture** proves 7 dashboards, 53 tiles, 24 sources, 1 connection and eight filters.
+> The current provisioning candidate exposes all 12 declared filter dimensions plus generic sources
+> for future columns, but those additions are not yet deployed or captured live. Dashboards
+> 1–3 and 7 open with a markdown
 > CAPTION tile stating the trap a viewer would otherwise fall into (peaks not summable, title not a
 > key, users are a set). Read this with [CLICKSTACK.md](CLICKSTACK.md) (*bringing the stack up*); this
 > file covers *what is on screen*. **The single most common failure is the time range** — data ends
@@ -126,9 +128,12 @@ heartbeats survive a pause. That small gap is the pause exclusion, made visible.
 
 ## 2 · `SonyLIV drilldown — sessions & users` — the filter story
 
-Eight data tiles, all from one source (`Session minutes (drilldown)`), plus **8 dashboard filters**
-wired to it: platform, country, title, content_id, app_version, audio_language, subtitle_language,
-player_version. One control drives every tile. A **caption tile — “⚠ Peak is NOT summable across
+Ten data tiles, all from one source (`Session minutes (drilldown)`). The live 2026-08-01 capture
+has **8 dashboard filters**: platform, country, title, content_id, app_version, audio_language,
+subtitle_language and player_version. The current candidate provisions **all 12 declared filters**,
+adding `video_resolution`, `show_name`, `video_type` and `category`; deployment and a signed-in
+capture are still required. Generic event/content dimension sources provide a slower fallback for
+later unknown columns. One control drives every tile. A **caption tile — “⚠ Peak is NOT summable across
 dimensions”** — heads the dashboard: summing per-platform peaks overstates the true peak by
 **+2.4%**, per-content by **+94.7%** (re-measured 2026-08-01, [EXPLAINER §E.1](EXPLAINER.md)), and
 it restates the zoom caveat and the Hindi-four-ways artifact so a viewer cannot miss them.
@@ -145,6 +150,8 @@ it restates the zoom caveat and the Hindi-four-ways artifact so a viewer cannot 
  │ by app_version          │ by audio_language                │
  ├─────────────────────────┼──────────────────────────────────┤
  │ by subtitle_language    │ by player_version                │
+ ├─────────────────────────┼──────────────────────────────────┤
+ │ top video_resolution    │ top show_name                    │
  └─────────────────────────┴──────────────────────────────────┘
  ┌────────────────────────────────────────────────────────────┐
  │ by title (top 20)                                          │
@@ -152,6 +159,7 @@ it restates the zoom caveat and the Hindi-four-ways artifact so a viewer cannot 
 
  FILTERS:  platform · country · title · content_id · app_version
            audio_language · subtitle_language · player_version
+ CANDIDATE: video_resolution · show_name · video_type · category
 ```
 
 Tiles use `count_distinct(video_session_id)` and `count_distinct(user_id)` **per bucket**. At
@@ -357,11 +365,13 @@ Two deliberate design points:
 | **Hindi appears four times** | un-normalised source values | real data; ADR 0011 exists but is not deployed |
 
 **Everything is scripted.** `tools/clickstack-cloud.sh` provisions sources, dashboards and saved
-searches over the Cloud control-plane API and is idempotent — a re-run **PUTs** the dashboard so the
-script stays the source of truth and a hand-edit in the UI cannot silently outlive it. Two operational
+searches over the Cloud control-plane API and is idempotent — a re-run **PUTs existing named sources
+and dashboards** so the script stays the source of truth and stale select expressions or UI edits
+cannot silently outlive it. Two operational
 notes added 2026-08-01: **`CLICKSTACK_SKIP_APPLY=1`** runs the script control-plane-only (skips the
-`sql/87_viz.sql` DDL step — required for sessions that must not write to the graded database; the
-views must already exist), and **tile ids regenerate on every PUT**, so reference dashboards by
+`sql/00_schema.sql`, `sql/10_intervals.sql` and `sql/87_viz.sql` migration/view step — required for
+sessions that must not write to the graded database; the columns and views must already exist), and
+**tile ids regenerate on every PUT**, so reference dashboards by
 name/URL, never deep-link a tile.
 
 One value the API cannot yield on an empty service is the `connection` id; get it once from the

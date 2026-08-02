@@ -38,7 +38,7 @@ independently on the gate side.
 
 **Does a viewer who generated exactly one event count as watching for one cadence, or not at all?**
 
-This is a semantics question about the private ground truth, not a bug with a right answer. What
+This is a semantics question about judge raw-event interpretation, not a bug with a right answer. What
 makes it a defect is *how* we were answering it: the segment fold drops a segment whose two endpoints
 coincide, and it does so **before** `TAIL_S` is applied — so a run of one instant earned no interval,
 where every other run end earns `[t, t + TAIL_S]`. Nothing in `doubts/` or any ADR ever stated that as

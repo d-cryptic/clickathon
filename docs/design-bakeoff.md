@@ -67,7 +67,7 @@ ground-truth question (the doubts/02–06 axis), not something either gate can s
   lease model. Its half-open minute boundary is precisely the alternative doubts/05 says our gate
   cannot see. As an independently-built second implementation, it bounds our semantic risk for free.
 - ADR 0015 ("a precomputed peak is valid only for its exact filter cuboid") is mathematically right
-  and worth a one-time check against our benchmark answers (b09, the partial-platform cut).
+  and worth a one-time check against our required-shape results (b09, the partial-platform cut).
 
 ## 4 · What it costs
 
@@ -83,7 +83,7 @@ ground-truth question (the doubts/02–06 axis), not something either gate can s
   `TARGET=cloud tools/materialize.sh --replace`, which truncates 7 tables in whatever `CH_DATABASE`
   names — `sonyliv` in `.env.example`.
 - Nine commits of effort is sunk cost, not an argument; and its lower watch-time number is a
-  hypothesis, not evidence — nothing shows the private ground truth prefers it.
+  hypothesis, not evidence — nothing shows judge spot-checks prefer it.
 
 ## 5 · Recommendation
 
@@ -113,5 +113,5 @@ ground-truth question (the doubts/02–06 axis), not something either gate can s
   incumbent could not match — no such run exists today.
 - **Evidence the incumbent sums per-cuboid maxes anywhere** (an ADR 0015 violation) in the b01–b13
   answers → the challenger's doctrine and its serving-path design gain real weight.
-- **Ground truth scoring distinct users where we serve sessions** (or vice versa) — the two designs
+- **Judges checking distinct users where we serve sessions** (or vice versa) — the two designs
   made opposite metric bets; the incumbent hedges by carrying both tiers, the challenger does not.

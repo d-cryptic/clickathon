@@ -97,7 +97,7 @@ Earliest was the incumbent, and it is also the right choice on the merits:
    hour rows.
 
 An honest note on what this rule is not: it is a *presentation* convention, not a fact about the data.
-When four minutes tie, all four are equally the peak. If the private ground truth happens to use
+When four minutes tie, all four are equally the peak. If judge spot-checks happen to use
 latest-wins, we lose those questions and the fix is a one-character edit in one tuple, applied in six
 places — which is the real point of consolidating it.
 

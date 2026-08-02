@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tools/bench.sh — run the benchmark query set (evidence/benchmark/*.sql) against the
+# tools/bench.sh — run our required-shape query matrix (evidence/benchmark/*.sql) against the
 # graded Cloud database, READ-ONLY, and regenerate evidence/bench.txt.
 #
 # For every query: 1 EXPLAIN indexes=1 pass, then 3 timed runs with the query caches

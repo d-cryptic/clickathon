@@ -78,7 +78,7 @@ was destroyed before either side runs.
 
 ## Exactly what to ask
 
-> "Was the ground truth computed at millisecond precision or on second-truncated timestamps? In
+> "Will judge spot-checks use millisecond precision or second-truncated timestamps? In
 > particular, when a `resume` and a `pause` share the same second but the resume's milliseconds come
 > first, does that resume close the pause? 2,697 pauses hit the tie, 1,781 of them are
 > order-inverted, and the two readings differ by 52 viewers (1.8%) at peak / 52.1 h (2.6%) of watch

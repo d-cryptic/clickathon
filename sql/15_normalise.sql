@@ -487,8 +487,9 @@ SELECT throwIf(q_reason('s1', 'u1', toDateTime64('2026-07-26 10:00:00', 3)) != '
 -- caught it named in `reason`.
 --
 -- ORDER BY (reason, src_hash): inspection is by reason ("show me the 412 rows
--- and why"), and src_hash — a hash of all 13 raw columns — is the row's
--- logical identity, which is what makes the sweep below IDEMPOTENT: a re-run
+-- and why"), and src_hash — a hash of every raw column, including the
+-- schema-evolution `extra` map — is the row's logical identity, which is what
+-- makes the sweep below IDEMPOTENT: a re-run
 -- REPLACES the same logical row instead of duplicating it. Byte-identical
 -- source duplicates (the provided file has 4,210) collapse to one quarantine
 -- row carrying `copies`, so nothing is lost and nothing is double-reported.
@@ -513,10 +514,18 @@ CREATE TABLE IF NOT EXISTS ev_quarantine
     subtitle_language   LowCardinality(String),
     player_version      LowCardinality(String),
     session_start_epoch DateTime64(3),
+    extra               Map(LowCardinality(String), String) DEFAULT map(),
     quarantined_at      DateTime DEFAULT now()
 )
 ENGINE = ReplacingMergeTree(quarantined_at)
 ORDER BY (reason, src_hash);
+
+-- Metadata-only migration for databases created before open-ended source
+-- dimensions were quarantined. Existing rows read an empty map; future sweeps
+-- retain the exact map that arrived in ev_raw.
+ALTER TABLE ev_quarantine
+    ADD COLUMN IF NOT EXISTS extra Map(LowCardinality(String), String) DEFAULT map()
+    AFTER session_start_epoch;
 
 -- THE SWEEP. Runs on every apply of this file — which build-model.sh does as
 -- stage 6/6 — so preprocessing runs on every load/build without any tool
@@ -528,38 +537,42 @@ ORDER BY (reason, src_hash);
 INSERT INTO ev_quarantine
     (reason, src_hash, copies, content_id, video_session_id, user_id, event_type,
      event, event_timestamp, platform, app_version, country, audio_language,
-     subtitle_language, player_version, session_start_epoch)
+     subtitle_language, player_version, session_start_epoch, extra)
 SELECT
     q_reason(video_session_id, user_id, event_timestamp) AS reason,
-    cityHash64(content_id, video_session_id, user_id, event_type, event,
-               event_timestamp, platform, app_version, country, audio_language,
-               subtitle_language, player_version, session_start_epoch) AS src_hash,
+    if(empty(extra),
+       -- Preserve the pre-migration identity for original-schema rows so an
+       -- existing empty-map quarantine remains idempotent after this ALTER.
+       cityHash64(content_id, video_session_id, user_id, event_type, event,
+                  event_timestamp, platform, app_version, country, audio_language,
+                  subtitle_language, player_version, session_start_epoch),
+       cityHash64(content_id, video_session_id, user_id, event_type, event,
+                  event_timestamp, platform, app_version, country, audio_language,
+                  subtitle_language, player_version, session_start_epoch,
+                  toJSONString(extra))) AS src_hash,
     toUInt32(count()) AS copies,
     content_id, video_session_id, user_id, event_type, event, event_timestamp,
     platform, app_version, country, audio_language, subtitle_language,
-    player_version, session_start_epoch
+    player_version, session_start_epoch, extra
 FROM ev_raw
 WHERE q_reason(video_session_id, user_id, event_timestamp) != ''
 GROUP BY content_id, video_session_id, user_id, event_type, event, event_timestamp,
          platform, app_version, country, audio_language, subtitle_language,
-         player_version, session_start_epoch;
+         player_version, session_start_epoch, extra;
 
 -- ===========================================================================
 -- SECTION 8 — the model-input boundary, and the summary views.
 --
 -- v_ev_model_input is ev_raw minus the quarantined rows — computed by RULE,
 -- not by subtracting the table, so the boundary cannot drift from the sweep.
--- NOT WIRED: sql/30_build_intervals.sql and sql/90_reconcile.sql both still
--- read ev_raw directly, and this file does not own either. The wiring is a
--- TWO-FILE change proposed in ADR 0025 — model and gate MUST switch together,
--- because a model that skips a row the gate still counts is a mismatch the
--- gate will (correctly) fail on. On the provided file the point is moot:
--- zero rows quarantine, so the view IS ev_raw, verified row-for-row.
+-- WIRED: sql/30_build_intervals.sql and sql/90_reconcile.sql both read this
+-- view. They switched together because a model that skips a row the gate still
+-- counts is not the same contract. `ev_raw` remains the lossless/audit tier.
 -- ===========================================================================
 CREATE OR REPLACE VIEW v_ev_model_input AS
 SELECT content_id, video_session_id, user_id, event_type, event, event_timestamp,
        platform, app_version, country, audio_language, subtitle_language,
-       player_version, session_start_epoch
+       player_version, session_start_epoch, extra
 FROM ev_raw
 WHERE q_reason(video_session_id, user_id, event_timestamp) = '';
 

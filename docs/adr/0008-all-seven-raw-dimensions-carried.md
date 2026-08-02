@@ -80,7 +80,7 @@ SELECT any(audio_language) FROM ev_raw GROUP BY video_session_id
   max_threads=32                              17800373085716731507
 ```
 
-Three different attributions of the same input. Against a private ground truth, two rebuilds of the
+Three different attributions of the same input. Under deterministic raw-event spot-checks, two rebuilds of the
 same data would serve two different answers to the same filtered query. That alone disqualifies it.
 
 ### The rule adopted: dominant value, per interval
@@ -103,7 +103,7 @@ event in that minute:
 | `any()` | **2,004 (73.5%)** |
 | shipped rule | **99 (3.6%)** |
 
-Values are kept **raw**. `HIN` and `hin` stay distinct; the ground truth is matched on the shipped
+Values are kept **raw**. `HIN` and `hin` stay distinct; judge filters can match the shipped
 strings, not on our idea of tidy ones. Canonicalisation is a query-time concern.
 
 ### The interval is NOT split when a dimension changes
@@ -226,7 +226,7 @@ scan cost is set by the interval count, not by the dimension count.
   a different blast radius, and out of scope here. The exact change is written down in
   `10_intervals.sql`.
 - **Canonicalising dirty values** (`HIN`/`hin`, `off`/`OFF`, `''`/`UNK`/`UND`/`NON`). A view over the
-  raw values is a safe addition; rewriting them in storage is not, while the ground truth is private.
+  raw values is a safe addition; rewriting them in storage is not while judge normalization semantics are unspecified.
   → **Now done, exactly that way, in [ADR 0011](0011-normalise-filter-dimensions-at-query-time.md)**
   (`sql/15_normalise.sql`). It measures the hole this leaves open at **1,768 vs 2,180** peak Hindi
   concurrency — **23.3%** — and it corrects two numbers on this page: the serving layer rebuilds to

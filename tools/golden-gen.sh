@@ -52,7 +52,7 @@ fi
 
 if [ "${GOLDEN_SKIP_SETUP:-}" != 1 ]; then
   tools/ch "CREATE DATABASE IF NOT EXISTS ${DB}" >/dev/null
-  tools/apply-sql.sh --database "$DB" sql/00_schema.sql sql/01_policy.sql sql/10_intervals.sql
+  tools/apply-sql.sh --database "$DB" sql/00_schema.sql sql/01_policy.sql sql/10_intervals.sql sql/15_normalise.sql
 fi
 
 GOLDEN_DB="$DB" GOLDEN_ONLY="$ONLY_COHORT" GOLDEN_SKIP_ORG="$SKIP_ORGANISER" \

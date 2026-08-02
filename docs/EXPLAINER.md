@@ -2,10 +2,10 @@
 
 > **Summary:** A from-scratch, plain-English walkthrough of what we were asked to build and why the
 > obvious approach is wrong, written for someone who has never seen the repo — a new teammate, a judge,
-> or the author at hour 18. Section A is the **ask**; B is **why it is hard**; C is **what we built**;
-> D is **why this approach and what we rejected**; E is **proven vs. missing**. Every number here is
-> measured against the graded ClickHouse Cloud service, never hand-computed. Where a number is
-> load-bearing, the query that produced it is shown. Deeper treatments:
+> or the author at hour 18. Its measurements describe the original dataset and are historical after
+> the 2026-08-02 official unseen release. For current readiness, new fields and submission rules read
+> Codex Validation 009; the public-repo and Team-Captain assumptions below are explicitly retired.
+> Deeper treatments:
 > [ARCHITECTURE.md](ARCHITECTURE.md) for the model, [adr/](adr/) for the decisions,
 > [DATA_DICTIONARY.md](DATA_DICTIONARY.md) for the field-level detail.
 
@@ -699,7 +699,7 @@ demonstrably were not receiving playback events. Re-measuring the permissive arm
  🟡 STRAGGLER PATH          arithmetic proven; not wired into a live path.
  ❌ /bench                  evidence/bench.txt and evidence/benchmark/ both MISSING.
  ❌ DECK · VIDEO · SUMMARY  none started.        ✅ LICENSE   ✅ README
- ❌ TEAM CAPTAIN            unnamed. Only they can submit.
+ ❌ SUBMISSION PACKAGE      hosted demo/video/team folder/PR not yet complete.
 ```
 
 **C in one sentence:** the model is arithmetically exact and the design is defensible, but the gate
@@ -876,7 +876,7 @@ same discipline applied to the *gate* found it passing on zero rows.
 ## E.2 · Claimed, but not proven
 
 ```
- "our answers match the ground truth"
+ "our answers match an unavailable answer key"
      ✗  UNPROVABLE without the key. Envelope ±10% across three definitional
         forks, none of which any test we own can detect.
 
@@ -949,7 +949,7 @@ other, which is why the totals had looked unremarkable.
                             and say clearly that they are our reconstruction". Bytes-read
                             on our own shapes is still evidence where we have none.)
  ❌ DECK · VIDEO · SUMMARY  none started          ✅ LICENSE  ✅ README
- ❌ TEAM CAPTAIN            unnamed — and only they can submit
+ ❌ SUBMISSION PACKAGE      hosted demo/video/team folder/PR not yet complete
 ```
 
 The three mechanical defects recorded in [`SESSION-2026-08-01.md`](SESSION-2026-08-01.md) §6 that used
@@ -1005,9 +1005,9 @@ and at 100× it needs its thread count capped to fit. Both numbers are in `evide
                           1/8/32, was three. Peak and hours unmoved, as expected.
  ✅ NORMALISE DIMENSIONS  DONE in ac04975 (ADR 0011). Query-time rule.
 
- 0  MAKE THE REPO PUBLIC  ~1 min   a required artifact. Currently PRIVATE.
-                                   Nothing else on this list matters if this
-                                   is missed. Needs a human.
+ 0  PACKAGE THE SUBMISSION          self-contained team folder, hosted demo,
+                                   video, deck and mandatory PR. This development
+                                   repository is not required to be public.
  1  RESUME RULE           ~1 h     up to 189.2h / 9.6%. Now the largest open
                                    number by some distance. Needs the mentor
                                    answer (doubts/02) or a stated, measured

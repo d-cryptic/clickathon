@@ -117,7 +117,7 @@ derives truth from `ev_raw` with a different implementation, so it shares the SP
 Verified both ways: model-only flip → gate catches it (240 mismatched minutes, max_abs_diff 156);
 both flipped → gate green at peak 3,018; restored → green at 2,887.
 
-**Default stays conservative** because against an EXACT private ground truth, under-counting is a
+**Default stays conservative** because under exact raw-event spot-checks, under-counting is a
 visible, explainable error, while over-counting invents viewers that demonstrably were not receiving
 playback events. Still worth asking (mentor Q2) — but it is now a two-line change plus a rebuild and
 a gate run, not a redesign.

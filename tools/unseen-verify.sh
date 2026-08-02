@@ -94,10 +94,14 @@ else
   say "     rollup (cube_level 0): '${R9_ROLLUP}' · real content -1 (cube_level 4): '${R9_REAL}' -> FAIL"
   say "     (designed: 2/3060 and 1/1020 — the R9 collision is BACK, or the cube did not build)"
 fi
-say "6 · dictGet on ids absent from content_dim (A9) serves blanks, not errors:"
-q "SELECT content_id, concat('[', dictGet('dict_content','title',tuple(content_id)), ']') AS title
-   FROM (SELECT DISTINCT content_id FROM ev_raw WHERE content_id IN (-987654399,-1,21000099,21000016))
-   ORDER BY content_id FORMAT PrettyCompactNoEscapes" | tee -a "$OUT"
+say "6 · content lookup on ids absent from content_dim (A9) stays visible, not dropped:"
+q "SELECT e.content_id,
+          concat('[', if(c.has_catalog=0, '(unknown)', if(c.title='', '(blank)', c.title)), ']') AS title
+   FROM (SELECT DISTINCT content_id FROM ev_raw WHERE content_id IN (-987654399,-1,21000099,21000016)) AS e
+   LEFT ANY JOIN
+   (SELECT content_id, title, toUInt8(1) AS has_catalog FROM content_dim FINAL) AS c
+     ON e.content_id = c.content_id
+   ORDER BY e.content_id FORMAT PrettyCompactNoEscapes" | tee -a "$OUT"
 say "7 · ADR 0014 — peak minute must be the EARLIEST tied minute, at every tier:"
 say "     bare argMax  (what phase 7 prints): $(q "SELECT toString(argMax(minute, concurrent)) FROM v_concurrency_minute_delta_total FORMAT TSVRaw" | tr -d '\n')"
 say "     ADR 0014 rule (earliest at max):    $(q "SELECT toString(min(minute)) FROM v_concurrency_minute_delta_total WHERE concurrent = (SELECT max(concurrent) FROM v_concurrency_minute_delta_total) FORMAT TSVRaw" | tr -d '\n')  (designed: 2026-08-15 20:00 UTC)"

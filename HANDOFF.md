@@ -1,25 +1,29 @@
 # HANDOFF — read this first when you wake
 
-> **Summary:** `dev` is healthy and carries everything: gate green on the graded database
-> (17,028 minutes, 0 mismatched, peak 2,917), `make ci` green, all four tiers coherent. `main` is
-> still ~190 commits behind because the feature-by-feature promotion gate has **correctly rejected
-> three of three attempts on real defects** — that is the gate working, not stalling. **Two things
-> only you can do, both disqualification-level: the repo is still PRIVATE, and no Team Captain is
-> named.** Neither is affected by anything below. If you read nothing else, read §1.
+> **Summary:** The official unseen data and submission contract are now released. The old “private
+> repo” and “Team Captain” blockers below were not official requirements and are retired. What a
+> human must still finish is the hosted demo, 2–3 minute video, final pitch PDF, self-contained team
+> folder/PR and live ClickStack evidence. The ClickStack update also requires committed deployment
+> and OTel wiring, redacted environment example, named destination service/tables, README captures,
+> and a live walkthrough; screenshots alone are insufficient. The portal closes automatically at
+> **12:00 PM IST on 2026-08-02**. Use Codex Validation 009 for current
+> model/readiness findings; the engineering history after §1 is retained as dated context.
 
 **Written:** 2026-08-02, at the start of an unattended stretch.
 
 ---
 
-## 1 · Only you can do these, and they decide whether we can submit at all
+## 1 · Only you can finish these submission artifacts
+
+**Deadline:** finish and submit before 12:00 PM IST; the portal closes automatically.
 
 | # | Blocker | What to do |
 |---|---|---|
-| **A1** | **The repo is PRIVATE.** Submission requires public. | Flip it — but run the pre-publication checklist in [`SUBMISSION.md`](SUBMISSION.md) first. The real Cloud **hostname** appears in `evidence/load-guard.txt` and in history at commit `6355048`. A hostname grants no access, but decide deliberately: scrub-and-rewrite, or accept and document. |
-| **A2** | **No Team Captain is named.** Only the Captain can submit. | Name one in `SUBMISSION.md`. |
+| **A1** | **Hosted demo and 2–3 minute video.** | Show the real curve, required filters and ClickStack dashboards live; a screenshot-only demonstration is rejected by the official README. |
+| **A2** | **Official team folder and PR.** | Package source, README, architecture, pitch PDF, demo/video links, ClickStack deployment and OTel wiring, redacted `.env.example`, destination service/tables and dashboard captures; open `[Submission] Team Name`. |
 
-Everything else in this file is engineering. These two are not, and no amount of overnight work
-substitutes for them.
+Everything else in this file is engineering. These artifacts require a published URL or human-owned
+submission action; no local test can substitute for them.
 
 ## 2 · What I could NOT do while you slept, and why
 

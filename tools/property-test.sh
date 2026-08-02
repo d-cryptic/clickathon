@@ -35,7 +35,7 @@ fi
 if [ "${PROP_SKIP_SETUP:-}" != 1 ]; then
   tools/ch "CREATE DATABASE IF NOT EXISTS ${DB}" >/dev/null
   tools/apply-sql.sh --database "$DB" \
-    sql/00_schema.sql sql/01_policy.sql sql/10_intervals.sql sql/45_user_concurrency.sql
+    sql/00_schema.sql sql/01_policy.sql sql/10_intervals.sql sql/15_normalise.sql sql/45_user_concurrency.sql
 fi
 
 PROP_DB="$DB" PROP_MODE="$MODE" PROP_CASE="$CASE_SEED" \

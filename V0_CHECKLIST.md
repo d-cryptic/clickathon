@@ -2,10 +2,9 @@
 
 > **Summary:** Version 0 is the **submittable floor**: a correct, fast, defensible foreground-only
 > concurrency system that survives the unseen day, with every known-wrong thing either fixed or stated
-> out loud. Re-evaluated 2026-08-01 against the Codex audits ([docs/codex-validation/](docs/codex-validation/)).
-> **Both proven defects are fixed, §B2's evidence file is regenerated (CONVERGES), and §D1's build gap
-> is closed** — `build-model.sh` now runs all five stages. What is left: the `/bench` evidence bundle,
-> the unseen-day rehearsal from a clean checkout, and the scoped-out items in the deferred table.
+> out loud. This was the pre-release floor; the official unseen data and final submission contract
+> arrived on 2026-08-02. Codex Validation 009 and `REMAINING.md` now own the release queue. Historical
+> checks below remain useful, but their “repo public” and “Team Captain” assumptions are retired.
 > Scoring view is [checklist.md](checklist.md); status is [WALKTHROUGH.md](WALKTHROUGH.md).
 
 **The v0 bet:** we cannot out-build a missing correctness gate. A submission that is *correct, fast,
@@ -45,7 +44,7 @@ evidence) and §D1 (incomplete build path) — **are both closed and marked so b
       once; mean per-content peak went 1.32 → 1.69.)* This
       was my biggest silent-wrong worry and it is now a defended number.
 - [ ] **Unclosed-pause rule decided and recorded** in ADR 0007. Conservative is the shipped default
-      and the safer bet against an exact ground truth; v0 needs the *decision written down*, not
+      and the safer bet under exact raw-event spot-checks; v0 needs the *decision written down*, not
       necessarily a change. **Still the only open modeling question.**
 
 ## B. Evidence integrity — the new top risk
@@ -135,7 +134,7 @@ described — a green gate over a stale `cc_hour_agg` — is gone.
 - [ ] Deck: 15 slides mapped to C1–C5, including the **business framing** (33.6% of apparent watch
       time is backgrounded or paused; 3,708 naive vs 2,917 actual at the peak).
 - [ ] Demo rehearsed twice.
-- [ ] **Team Captain confirmed and awake before the freeze.**
+- [ ] **Submission operator confirmed** to assemble the self-contained folder and mandatory PR.
 
 ---
 

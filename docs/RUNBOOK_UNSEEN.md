@@ -1,11 +1,13 @@
 # RUNBOOK — the unseen day
 
-> **Summary:** One command runs the whole path on a dataset we have never seen —
+> **Summary:** The official unseen dataset is released: about 7 million raw rows plus 33 thousand
+> content rows, adding `video_resolution` and `show_name`. One command runs the whole path —
 > `UNSEEN_DB=<fresh_name> tools/unseen-run.sh <raw.csv> <content.csv>` — into an isolated scratch
-> database, ending on the self-targeting correctness gate (`sql/90_reconcile.sql`, run verbatim; the
-> script asserts its SUMMARY row against the day's own minute spine). **Plan against the contract-first
-> path: 90 s for 6,887 events · 93 s for 30,097 · 120 s for 849,888** (re-measured 2026-08-02; the
-> build alone is 66/67/82 s). Budget **4 min** for a delivered-size day and **6 min** for a 5× one.
+> database, ending on the accepted-row correctness gate (`sql/90_reconcile.sql`). Historical timing
+> rehearsals below are not the final 7-million-row measurement. The runner now enforces landing,
+> cast-rejection, quarantine, model-input and schema-evolution accounting before it builds answers.
+> Final evidence must include hashes, result queries, exact query IDs, latency and query-log/trace
+> rows before the portal closes automatically at **12:00 PM IST on 2026-08-02**.
 > Peak minutes resolve to the **earliest tied minute (ADR 0014) at every tier**. Ten unseen-day
 > assumptions (A1–A10) and the ten findings of the synthetic-day rehearsal (R1–R10) are the body of
 > this document. Evidence: [`evidence/unseen-rehearsal.txt`](../evidence/unseen-rehearsal.txt) (holdout
@@ -132,18 +134,9 @@ what buys you the right to stop before deriving anything. **Budget 4 min for a d
 6 min for a 5× one.** An operator who budgets from the build alone has no room for the step that
 protects the answer, and that is the step that gets dropped under time pressure.
 
-> 🔴 **Taking these numbers required a workaround, and you will need it too.**
-> `tools/unseen-run.sh:351` reads `$TARGET`, which the script never sets in its own scope (line 276
-> sets it only inside the load subshell). Under `set -euo pipefail` that is fatal, so the advertised
-> one-command path **dies at phase 2b** — the contract gate itself — with
-> `line 351: TARGET: unbound variable`, after ~32 s, with no model built and no gate run. Every timing
-> above was taken with **`TARGET=cloud`** exported. Prefix the run with it until the fix lands:
-> ```bash
-> TARGET=cloud UNSEEN_DB=sonyliv_unseen_<slug> tools/unseen-run.sh <raw.csv> <content.csv>
-> ```
-> Not fixed here — `tools/unseen-run.sh` belongs to `fix/contract-gate-runner-agreement`. Note the
-> shape of it: phase 2b was wired onto the path on 2026-08-02 *because* Codex 005 found the gate was
-> documented but never called. It is called now, and it is the line that stops the run.
+> **Historical runner defect, now closed.** The phase-2b contract call used to read an unset
+> `$TARGET` and die. The runner now selects its Cloud connection explicitly, and the agreement suite
+> covers the path. Do not carry the old `TARGET=cloud` workaround into the evidence narrative.
 
 **Extrapolation, restated.** 123× the events cost **1.24×** the wall clock (66 s → 82 s) — still
 fixed-cost dominated, but not the 1.07× this document used to claim. Phase 2 is the only one that
@@ -266,17 +259,16 @@ past-midnight tail minute**.
     FROM ev_raw) WHERE d > 0;
   ```
 
-  If p99 has moved, `GAP_S` must change in `sql/30_build_intervals.sql` **and** `sql/90_reconcile.sql`
-  in the same edit.
+  If p99 has moved, change the declared policy in `policy/model.policy`, regenerate
+  `sql/01_policy.sql` with `tools/policy.sh gen`, and re-run both model and gate.
 - **A4 · FIXED (loader)** — re-loading doubles the day on Cloud (SharedMergeTree; insert dedup does
   not fire — measured 60,194 from 30,097). `tools/load.sh` refuses when tables hold rows; `--replace`
   / `--append` decide on purpose. The schema comment claiming idempotency is still wrong.
-- **A5 · PARTLY FIXED** — `load.sh` and `apply-sql.sh` resolve `--database` > environment > `.env`
-  and hard-error on contradictions. `build-model.sh`, `reconcile.sh`, `truncation-test.sh`, `tools/ch`
-  still let `.env` win.
-- **A6 · FIXED (ADR 0010)** — `sql/80_content.sql` names no database; views pin to their own
-  database's dictionary at CREATE time. The `render()` guard stays as the standing check (and, since
-  R2, reads code only). Related: **never run bare `tools/apply-sql.sh`/`make sql-cloud` on the day**
+- **A5 · FIXED** — target-aware tools preserve explicit environment/database choices over `.env`
+  and hard-error on contradictions.
+- **A6 · FIXED (ADR 0010)** — `sql/80_content.sql` names no database; serving views now use a direct
+  `content_dim FINAL` join, while the optional dictionary is database-local. The `render()` guard
+  remains the standing cross-database check. **Never run bare `tools/apply-sql.sh`/`make sql-cloud` on the day**
   — with no arguments it applies *every* `sql/*.sql`, including `60_projection.sql` (ALTERs
   `sonyliv.ev_raw`) and `70_truncation_test.sql`.
 - **A7 · OPEN, inherent** — a day-file cut at midnight is self-consistent, so the gate cannot see
@@ -300,20 +292,21 @@ past-midnight tail minute**.
 1. **Pick the scratch database name** (R8) — fresh, agreed in the team channel, so no concurrent
    worktree is dropped.
 2. **Run the A3 vocabulary probes** and decide whether `pause`/`resume`/`VideoSessionEnd` still mean
-   what they meant. If the p99 gap moved, re-tune `GAP_S` in **two files at once**.
+   what they meant. If policy changes, edit `policy/model.policy`, regenerate and rebuild/gate.
 3. **The unclosed-pause rule** remains undecided (23% of pauses never resume; conservative vs
    permissive is +99.3 h / 5.09% on the delivered file, +131 on the PEAK). Unknowable from the data;
    the shipped default is conservative. See `doubts/`.
 4. **Set the HyperDX chart range** to the unseen day (A10). No API call in the repo does this.
 5. **If `content_id = -1` appears in the event stream** (R9): state that per-content numbers for that
    id are unreliable and exclude it from cube claims.
-6. **Check dimension drift before trusting any FILTERED number** (TODOS · doubts/04). The pipeline
-   does not apply `sql/15_normalise.sql` — do it by hand in the scratch DB, then read the summary:
-   `TARGET=cloud tools/apply-sql.sh --database <db> sql/15_normalise.sql` and
-   `SELECT * FROM <db>.v_dimension_drift_summary`. On the delivered file, raw-vs-normalised is worth
+6. **Check dimension drift before trusting any FILTERED number** (TODOS · doubts/04). The runner
+   applies `sql/15_normalise.sql` before derivation and reports the accepted/quarantine accounting;
+   also inspect `v_dimension_drift_summary`. On the delivered file, raw-vs-normalised is worth
    **+23.6% on the Hindi peak** with the total peak unchanged — a new day's casing/sentinel mix can
    move any filtered answer by that class of margin.
-7. **Team Captain submits.** Only they can.
+7. **Package and submit.** Put source, README, architecture, pitch PDF, hosted-demo/video links and
+   the required ClickStack wiring/captures in the self-contained team folder, then open the official
+   `[Submission] Team Name` PR.
 
 ---
 

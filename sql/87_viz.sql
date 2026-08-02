@@ -62,8 +62,10 @@ GROUP BY minute;
 
 -- ---------------------------------------------------------------------------
 -- SESSION-MINUTE EXPANSION — the drilldown source. One row per (active
--- session, minute), carrying user_id and ALL SEVEN dimensions plus the
--- dictGet title. This exists because a dashboard filter can pin ANY subset of
+-- session, minute), carrying user_id, the original seven dimensions, every
+-- newly discovered raw dimension, content metadata, and every newly
+-- discovered content dimension. This exists because a dashboard filter can
+-- pin ANY subset of
 -- dimensions, and the only aggregation that stays correct under an arbitrary
 -- filter is count_distinct over these rows:
 --   * at 1-minute granularity it IS concurrency (verified: 2,917 sessions /
@@ -75,34 +77,145 @@ GROUP BY minute;
 -- O(sessions x minutes) expansion 20_views.sql documents for
 -- v_concurrency_minute_intervals — ~149K rows, fine to chart, NOT the
 -- serving path.
--- uniqExact/count_distinct dedupes a session whose intervals touch the same
--- minute twice, so no DISTINCT is needed here.
+-- A session can have two active intervals touching the same minute. Collapse
+-- that cell here, choosing the interval with the latest start as the state for
+-- that minute. This makes every (session, minute) occur once, so dimension
+-- buckets are additive instead of counting one viewer under two resolutions.
+-- Dynamic values are still the deterministic per-interval modal values from
+-- SQL30. The official source does not define whether a mid-minute resolution
+-- change should be first, last, modal, or count in both buckets; the unseen
+-- audit measures that policy sensitivity rather than hiding it here.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE VIEW v_session_minutes AS
 SELECT
-    toDateTime(m) AS minute,
-    video_session_id,
-    user_id,
-    platform,
-    country,
-    content_id,
-    dictGet('dict_content', 'title', tuple(content_id)) AS title,
-    app_version,
-    audio_language,
-    subtitle_language,
-    player_version
+    sm.minute AS minute,
+    sm.video_session_id AS video_session_id,
+    sm.user_id AS user_id,
+    sm.platform AS platform,
+    sm.country AS country,
+    sm.content_id AS content_id,
+    if(c.has_catalog = 0, '(unknown)', if(c.title = '', '(blank)', c.title)) AS title,
+    if(c.has_catalog = 0, '(unknown)', if(c.video_type = '', '(blank)', c.video_type)) AS video_type,
+    if(c.has_catalog = 0, '(unknown)', if(c.category = '', '(blank)', c.category)) AS category,
+    if(c.has_catalog = 0, '(unknown)', if(c.show_name = '', '(blank)', c.show_name)) AS show_name,
+    c.content_dimensions,
+    sm.app_version AS app_version,
+    sm.audio_language AS audio_language,
+    sm.subtitle_language AS subtitle_language,
+    sm.player_version AS player_version,
+    sm.extra_dimensions['video_resolution'] AS video_resolution,
+    sm.extra_dimensions AS extra_dimensions
 FROM
 (
     SELECT
-        video_session_id, user_id, platform, country, content_id,
-        app_version, audio_language, subtitle_language, player_version,
-        arrayJoin(range(
-            toUInt32(toDateTime(toStartOfMinute(interval_start))),
-            toUInt32(toDateTime(toStartOfMinute(interval_end))) + 60,
-            60
-        )) AS m
-    FROM session_intervals FINAL
-);
+        toDateTime(m) AS minute,
+        video_session_id,
+        argMax(user_id, interval_start) AS user_id,
+        argMax(platform, interval_start) AS platform,
+        argMax(country, interval_start) AS country,
+        argMax(content_id, interval_start) AS content_id,
+        argMax(app_version, interval_start) AS app_version,
+        argMax(audio_language, interval_start) AS audio_language,
+        argMax(subtitle_language, interval_start) AS subtitle_language,
+        argMax(player_version, interval_start) AS player_version,
+        argMax(extra_dimensions, interval_start) AS extra_dimensions
+    FROM
+    (
+        SELECT
+            *,
+            arrayJoin(range(
+                toUInt32(toDateTime(toStartOfMinute(interval_start))),
+                toUInt32(toDateTime(toStartOfMinute(interval_end))) + 60,
+                60
+            )) AS m
+        FROM session_intervals FINAL
+    )
+    GROUP BY minute, video_session_id
+) AS sm
+LEFT ANY JOIN
+(
+    -- Generic, fresh-schema path. The small catalog table avoids local
+    -- self-source dictionary credentials and exposes a newly landed field
+    -- immediately rather than after dictionary lifetime.
+    SELECT
+        content_id,
+        title,
+        video_type,
+        category,
+        show_name,
+        extra AS content_dimensions,
+        toUInt8(1) AS has_catalog
+    FROM content_dim FINAL
+) AS c ON sm.content_id = c.content_id;
+
+-- The released event-side proof. It remains out of the fixed delta key because
+-- the unseen file has 2,071 raw values and most sessions change resolution.
+CREATE OR REPLACE VIEW v_cc_by_video_resolution AS
+SELECT minute, video_resolution, uniqExact(video_session_id) AS concurrent
+FROM v_session_minutes
+GROUP BY minute, video_resolution;
+
+-- Generic event-field discovery and one-dimension drilldown. Multiple dynamic
+-- predicates use v_session_minutes directly, for example
+-- extra_dimensions['experiment_id'] = 'A'.
+CREATE OR REPLACE VIEW v_dynamic_dimension_values AS
+SELECT
+    minute,
+    video_session_id,
+    user_id,
+    dimension_name,
+    extra_dimensions[dimension_name] AS dimension_value
+FROM v_session_minutes
+ARRAY JOIN mapKeys(extra_dimensions) AS dimension_name;
+
+-- Generic content-field equivalent. `show_name` is the named dashboard alias;
+-- content_dimensions['show_name'] is the schema-evolution contract.
+CREATE OR REPLACE VIEW v_dynamic_content_dimension_values AS
+SELECT
+    minute,
+    video_session_id,
+    user_id,
+    content_id,
+    dimension_name,
+    content_dimensions[dimension_name] AS dimension_value
+FROM v_session_minutes
+ARRAY JOIN mapKeys(content_dimensions) AS dimension_name;
+
+-- On-demand landing-table inventory. Profile before promotion: a new key is
+-- queryable immediately, while its observed cardinality and coverage decide
+-- whether it deserves a specialized serving path.
+CREATE OR REPLACE VIEW v_dynamic_dimension_profile AS
+SELECT
+    'event' AS dimension_source,
+    dimension_name,
+    count() AS source_rows,
+    countIf(dimension_value != '') AS non_empty_rows,
+    uniqExact(dimension_value) AS distinct_values,
+    uniqExact(video_session_id) AS distinct_entities
+FROM
+(
+    SELECT video_session_id, dimension_name, extra[dimension_name] AS dimension_value
+    FROM ev_raw
+    ARRAY JOIN mapKeys(extra) AS dimension_name
+)
+GROUP BY dimension_name
+
+UNION ALL
+
+SELECT
+    'content' AS dimension_source,
+    dimension_name,
+    count() AS source_rows,
+    countIf(dimension_value != '') AS non_empty_rows,
+    uniqExact(dimension_value) AS distinct_values,
+    uniqExact(content_id) AS distinct_entities
+FROM
+(
+    SELECT content_id, dimension_name, extra[dimension_name] AS dimension_value
+    FROM content_dim FINAL
+    ARRAY JOIN mapKeys(extra) AS dimension_name
+)
+GROUP BY dimension_name;
 
 -- ---------------------------------------------------------------------------
 -- PER-DIMENSION ACCURATE CURVES, one view per dimension. Sum deltas AT THE

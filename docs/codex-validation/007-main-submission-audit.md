@@ -1,5 +1,9 @@
 # Codex Validation 007 — `main` submission audit after the 234-commit merge
 
+> **Superseded by Codex Validation 009:** this audit predates the official unseen data and final
+> submission rules. Its repository-visibility and Team-Captain findings are historical, not current
+> requirements.
+>
 > **Summary:** Audited `main`/`dev` at `c642066` on 2026-08-02, read-only against the graded `sonyliv` database and with an isolated local negative test for the gate.
 > All five submitted answers independently reproduce from `ev_raw`: peak 2,917 @ 10:56, 1,978.1 h, 33.6% excluded, user peak 2,844, and session-independent peak 2,894.
 > The 17,028-minute gate is live-green and non-vacuous: one fabricated local scratch delta produced `mismatched=1`, `max_abs_diff=1`, and `MISMATCH`.

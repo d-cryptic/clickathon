@@ -27,7 +27,7 @@
 
 ## Scoring reality (drives priority)
 
-1. **Correctness** vs a private ground truth — foreground-only means foreground-only.
+1. **Correctness** under judge spot-checks against raw events — foreground-only means foreground-only.
 2. **Query performance** — judges look at what queries *read*, not just elapsed time.
 3. **Update handling** — open sessions and late heartbeats absorbed incrementally, not by rebuild.
 4. **Design quality** — you must be able to defend the trade-offs out loud.

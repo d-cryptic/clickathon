@@ -36,7 +36,7 @@ day (data stops at 11:32), so integral ÷ 86,400 = 92.1 while integral ÷ (12 ac
 184.21. A 2× spread on one stored integral.
 
 This is not a hypothetical. A judge who spot-checks by picking an hour and comparing one number
-against their ground truth will mark us wrong if their number is B and ours is A — and neither of us
+against their raw-event interpretation will mark us wrong if their number is B and ours is A — and neither of us
 would be miscomputing anything.
 
 ## Decision

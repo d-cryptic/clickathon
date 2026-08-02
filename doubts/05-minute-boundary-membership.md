@@ -39,7 +39,7 @@ arrayJoin(range(intDiv(a, 60) * 60, (intDiv(b, 60) * 60) + 1, 60)) AS m   -- +1 
 
 Same convention, independently implemented on both sides of the comparison. That is why this is a
 dossier and not a bug report: **the gate is structurally blind here.** It proves serving matches our
-derivation; if the ground truth read the boundary the other way, every local gate stays green
+derivation; if judges read the boundary the other way, every local gate stays green
 (17,028 minutes, 0 mismatched) while every boundary minute is off. Nothing we can run distinguishes
 the readings — only the graders can.
 
@@ -108,7 +108,7 @@ no boundary instant and vanishes). Measured:
 -- covered minutes = boundary instants inside [s, e]:  range(ceil(s/60)*60, intDiv(e,60)*60 + 60, 60)
 ```
 
-Peak **2,507** — a **14.1%** drop from 2,917. If the ground truth samples rather than overlaps,
+Peak **2,507** — a **14.1%** drop from 2,917. If judges sample rather than use overlap,
 nothing about our current curve survives contact, which is why the question is worth asking even
 though we consider this reading unlikely.
 
@@ -118,7 +118,7 @@ though we consider this reading unlikely.
 
 > "A definitional edge case that our own gate provably cannot decide. When a viewer's active period
 > ends **exactly on a minute boundary** — active up to 10:56:00.000 and not a millisecond past it —
-> does your ground truth count them as concurrent in the 10:56 minute?
+> do judge spot-checks count them as concurrent in the 10:56 minute?
 >
 > Read as 'they were active at an instant belonging to minute 10:56', yes. Read as half-open
 > overlap — `[start, end)` against `[10:56:00, 10:57:00)` — the overlap is zero and the answer is
@@ -140,7 +140,7 @@ though we consider this reading unlikely.
 
 **The two readings differ by exactly one viewer at the graded peak minute, and no measurement we can
 make chooses between them.** Both are internally consistent; both are standard conventions; the
-private ground truth picked one and the file cannot tell us which. Our gate is structurally blind —
+judge interpretation picks one and the file cannot tell us which. Our gate is structurally blind —
 serving SQL and reconcile truth share the convention (§1), so a wrong guess is green locally and
 wrong on every boundary minute of the benchmark and the unseen day.
 

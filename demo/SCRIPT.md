@@ -6,7 +6,10 @@
 > against `sonyliv`; the runner refuses writes by construction. Every beat has a committed fallback
 > in `evidence/demo/` that `run.sh` plays automatically if the live query fails; `--offline` plays
 > the whole demo from fallbacks. Machine time is ~14 s total (measured, `evidence/demo/rehearsal.txt`)
-> — the five minutes are talk time. Cut the beat-3 Hindi encore first if running long.
+> — the five minutes are talk time. This is **not** the final submission video: the current official
+> contract requires 2–3 minutes and a live ClickStack dashboard walkthrough before the **12:00 PM
+> IST, 2026-08-02** portal close, while this script keeps
+> dashboards outside the main path. Use it as technical rehearsal material only.
 
 ## How to drive it
 
@@ -125,7 +128,7 @@ with the failure modes measured before they happened. Questions."
 | Network drops mid-beat | `run.sh` prints the committed fallback with a banner | "The connection dropped — this is the same query's saved output, committed before the demo. The pipeline is unchanged; I'll re-run it live for you afterwards." |
 | No network at all | start with `demo/run.sh --offline` | "We're on the committed evidence files — every number here was captured from the live service and is in the repo history." |
 | Beat-0 sanity MISMATCH (wrong model generation on `sonyliv` — happened once already today) | runner warns loudly | Switch to `--offline`. "We'll drive from the committed artifacts — they're self-consistent." **Never improvise numbers against a database in an unknown state.** |
-| Someone asks to see a dashboard | not in the 5:00 path | open `docs/artifacts/2026-08-01-clickstack-dashboards.html` — the committed offline capture of the six live HyperDX dashboards. |
+| Someone asks to see a dashboard | not in the 5:00 path | open `docs/artifacts/2026-08-01-clickstack-dashboards.html` as a fallback only. The official video must instead walk through the real ClickStack UI live. |
 | Reconcile takes longer than expected | 240 s cap, then fallback | "It compares seventeen thousand minutes — while it runs: the point is that it's a *different implementation* of the same spec." |
 
 ## The one absolute rule

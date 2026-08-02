@@ -8,7 +8,8 @@
 # database, and ends on the correctness gate:
 #
 #   reset -> schema -> load -> intervals -> user tier -> deltas -> views
-#         -> hour agg -> content -> windows -> RECONCILE (truth from ev_raw)
+#         -> hour agg -> content -> windows -> normalisation -> viz
+#         -> RECONCILE (truth from accepted raw events)
 #
 # It does NOT reimplement any model SQL. Every statement is sed-templated out of
 # the real sql/*.sql files (the technique tools/truncation-test.sh uses), so this
@@ -27,7 +28,7 @@
 #   stops. There is no "half-worked".
 #
 # THE GATE, on a day whose dates nobody knew in advance
-#   Since 81c0161, sql/90_reconcile.sql derives its targets from ev_raw: a dense
+#   Since 81c0161, sql/90_reconcile.sql derives its targets from accepted input: a dense
 #   minute spine between the first and last event, idle minutes compared as 0=0,
 #   and a SUMMARY row carrying minutes_compared. So the gate runs ONCE, verbatim,
 #   and this script ASSERTS the summary: verdict PASS and minutes_compared equal
@@ -323,9 +324,9 @@ say "    a quoted embedded newline is ONE row here and two to \`wc -l\` (Q37)."
 # that does not name the revision it tested is not evidence.
 say ""
 say "SQL fingerprint (sha256, first 12) — the exact model this run exercised:"
-for f in sql/00_schema.sql sql/01_policy.sql sql/10_intervals.sql sql/20_views.sql sql/30_build_intervals.sql \
+for f in sql/00_schema.sql sql/01_policy.sql sql/10_intervals.sql sql/15_normalise.sql sql/20_views.sql sql/30_build_intervals.sql \
          sql/40_deltas.sql sql/45_user_concurrency.sql sql/50_hour_agg.sql \
-         sql/80_content.sql sql/85_windows.sql sql/90_reconcile.sql tools/load.sh; do
+         sql/80_content.sql sql/85_windows.sql sql/87_viz.sql sql/90_reconcile.sql tools/load.sh; do
   say "  $(shasum -a 256 "$f" | cut -c1-12)  $f"
 done
 say "  git $(git rev-parse --short HEAD 2>/dev/null || echo n/a) $(git diff --quiet -- sql tools 2>/dev/null && echo '(sql+tools clean)' || echo '(sql+tools DIRTY — uncommitted changes)')"
@@ -362,10 +363,13 @@ CONTENT_ABS="/dev/null"
     "$REPO/tools/load.sh" --database "$DB" "$RAW_ABS" "$CONTENT_ABS" ) | tee -a "$OUT"
 
 EV=$(q1 "SELECT count() FROM ev_raw")
-[ "$EV" = "$CSV_ROWS" ] || die "ev_raw holds $EV rows, the CSV has $CSV_ROWS data rows.
+CAST_REJECTED=$(q1 "SELECT toString(ifNull(sum(copies), 0)) FROM ev_cast_quarantine FINAL
+                    WHERE source = 'ev_raw' AND disposition = 'rejected'")
+[ "$((EV + CAST_REJECTED))" = "$CSV_ROWS" ] || die "ev_raw holds $EV typed rows and the cast
+ledger holds $CAST_REJECTED rejected rows, but the CSV has $CSV_ROWS data rows.
 A partial or doubled load is worse than no load: every downstream number would
 be plausible and wrong."
-say "  ev_raw $EV = CSV data rows $CSV_ROWS"
+say "  raw terminal states: $EV typed + $CAST_REJECTED cast-rejected = $CSV_ROWS CSV rows"
 say "  $(q1 "SELECT concat(toString(uniqExact(video_session_id)),' sessions · ',
         toString(uniqExact(user_id)),' users · ',toString(uniqExact(content_id)),' content ids · ',
         toString(min(event_timestamp)),' -> ',toString(max(event_timestamp))) FROM ev_raw")"
@@ -375,11 +379,33 @@ STL=$(q1 "SELECT count() FROM cc_minute_stateless")
 It is the only populator; there is no backfill. Schema must precede the load."
 say "  cc_minute_stateless $STL rows (mv_stateless fired during the load)"
 
-# The day under test, derived from the data. Never assumed, never hard-coded.
-DAY_MIN=$(q1 "SELECT toString(toStartOfMinute(min(event_timestamp))) FROM ev_raw")
-DAY_MAX=$(q1 "SELECT toString(toStartOfMinute(max(event_timestamp))) FROM ev_raw")
-NDAYS=$(q1  "SELECT uniqExact(toDate(event_timestamp)) FROM ev_raw")
-say "  data spans ${DAY_MIN} .. ${DAY_MAX}  (${NDAYS} calendar day(s))"
+# Preserve the lossless typed bounds for diagnostics. They are deliberately not
+# the model spine: the official unseen file contains quarantined timestamp
+# outliers, and letting one rejected row stretch the gate across years makes
+# its expected-minute assertion disagree with the accepted-input truth.
+RAW_DAY_MIN=$(q1 "SELECT toString(toStartOfMinute(min(event_timestamp))) FROM ev_raw")
+RAW_DAY_MAX=$(q1 "SELECT toString(toStartOfMinute(max(event_timestamp))) FROM ev_raw")
+RAW_NDAYS=$(q1  "SELECT uniqExact(toDate(event_timestamp)) FROM ev_raw")
+say "  typed raw spans ${RAW_DAY_MIN} .. ${RAW_DAY_MAX}  (${RAW_NDAYS} calendar day(s))"
+
+# The interval model and the independent gate both consume this accepted-row
+# view. Apply it before either derivation; applying it only with the serving
+# views would make quarantine observability-only.
+phase "2b semantic preprocessing boundary (15_normalise.sql)"
+run_file "$(render sql/15_normalise.sql)"
+MODEL_INPUT_ROWS=$(q1 "SELECT count() FROM v_ev_model_input")
+QUARANTINED_ROWS=$(q1 "SELECT toString(ifNull(sum(copies), 0)) FROM ev_quarantine FINAL")
+[ "$((MODEL_INPUT_ROWS + QUARANTINED_ROWS))" = "$EV" ] || die "preprocessing does not partition ev_raw:
+${MODEL_INPUT_ROWS} model-input + ${QUARANTINED_ROWS} quarantined != ${EV} typed rows."
+[ "$MODEL_INPUT_ROWS" -gt 0 ] || die "semantic preprocessing rejected every typed row; there is no model day to build."
+say "  preprocessing: ${MODEL_INPUT_ROWS} model-input + ${QUARANTINED_ROWS} quarantined rows"
+
+# The interval model and SQL90 both consume v_ev_model_input, so every derived
+# spine and expected-minute assertion must use this same accepted boundary.
+DAY_MIN=$(q1 "SELECT toString(toStartOfMinute(min(event_timestamp))) FROM v_ev_model_input")
+DAY_MAX=$(q1 "SELECT toString(toStartOfMinute(max(event_timestamp))) FROM v_ev_model_input")
+NDAYS=$(q1  "SELECT uniqExact(toDate(event_timestamp)) FROM v_ev_model_input")
+say "  accepted model spans ${DAY_MIN} .. ${DAY_MAX}  (${NDAYS} calendar day(s))"
 
 # SENTINEL AUDIT (ADR 0022) — assert, at load, that no VALUE in the data
 # collides with a rollup MARKER, instead of trusting that it never will. The
@@ -485,7 +511,7 @@ say "  $(q1 "SELECT concat(toString(count()),' intervals over ',
 
 # ---------------------------------------------------------------------------
 phase "4 user tier (45_user_concurrency.sql)"
-run_file "$(render sql/45_user_concurrency.sql)"
+CH_DATABASE="$DB" TARGET=cloud tools/chunked-backfill.sh users | tee -a "$OUT"
 say "  cc_user_minute $(q1 "SELECT count() FROM cc_user_minute") rows"
 
 # ---------------------------------------------------------------------------
@@ -493,19 +519,81 @@ phase "5 deltas (40_deltas.sql)"
 # cc_minute_delta is an AggregatingMergeTree of SUMS: a second insert without a
 # TRUNCATE silently doubles every number, and the result looks plausible.
 q "TRUNCATE TABLE cc_minute_delta" >/dev/null
-run_file "$(render sql/40_deltas.sql)"
+CH_DATABASE="$DB" TARGET=cloud tools/chunked-backfill.sh deltas | tee -a "$OUT"
 CD=$(q1 "SELECT count() FROM cc_minute_delta")
 [ "$CD" -gt 0 ] || die "cc_minute_delta is empty."
 say "  $(q1 "SELECT concat(toString(count()),' delta rows · opens ',toString(sum(starts)),
         ' · closes ',toString(sum(ends))) FROM cc_minute_delta")"
 
 # ---------------------------------------------------------------------------
-phase "6 views (20) + hour agg (50) + content (80) + windows (85)"
+phase "6 serving surfaces (20/50/80/85) + viz (87)"
 run_file "$(render sql/20_views.sql)"
 run_file "$(render sql/50_hour_agg.sql)"
 [ -n "$CONTENT" ] && run_file "$(render sql/80_content.sql)"
 run_file "$(render sql/85_windows.sql)"
+run_file "$(render sql/87_viz.sql)"
 say "  cc_hour_agg $(q1 "SELECT count() FROM cc_hour_agg FINAL") rows"
+
+# Schema-evolution smoke tests. View creation proves the SQL compiles; these
+# reads prove the named unseen fields and every raw catch-all key survived the
+# load -> interval -> filterable session-minute path. CSV_NEW is safe to embed:
+# the preflight and loader both restrict new headers to plain identifiers.
+FILTER_VIEWS=$(q1 "SELECT count() FROM system.tables
+                   WHERE database = '${DB}' AND name IN
+                     ('v_session_minutes', 'v_cc_by_video_resolution',
+                      'v_dynamic_dimension_values',
+                      'v_dynamic_content_dimension_values',
+                      'v_dynamic_dimension_profile')")
+[ "$FILTER_VIEWS" = "5" ] || die "only ${FILTER_VIEWS}/5 schema-evolution filter views were installed."
+
+if [ -n "$CSV_NEW" ]; then
+  for dimension_name in $CSV_NEW; do
+    MISSING_INTERVALS=$(q1 "SELECT countIf(NOT mapContains(extra_dimensions, '${dimension_name}'))
+                            FROM session_intervals FINAL")
+    [ "$MISSING_INTERVALS" = "0" ] || die "dynamic raw field '${dimension_name}' is absent from
+${MISSING_INTERVALS} derived intervals — the generic filter path lost it."
+    q1 "SELECT extra_dimensions['${dimension_name}'] FROM v_session_minutes LIMIT 1" >/dev/null
+  done
+  say "  dynamic raw filters: ${CSV_NEW} survived into v_session_minutes.extra_dimensions"
+else
+  say "  dynamic raw filters: no new raw headers in this file"
+fi
+
+VIDEO_RESOLUTION_ROWS=$(q1 "SELECT countIf(mapContains(extra, 'video_resolution')) FROM ev_raw")
+if [ "$VIDEO_RESOLUTION_ROWS" != "0" ]; then
+  VIDEO_RESOLUTION_MISMATCHES=$(q1 "SELECT countIf(video_resolution != extra['video_resolution']) FROM ev_raw")
+  [ "$VIDEO_RESOLUTION_MISMATCHES" = "0" ] || die "video_resolution alias disagrees with extra map on
+${VIDEO_RESOLUTION_MISMATCHES} raw rows."
+  q1 "SELECT video_resolution FROM v_session_minutes LIMIT 1" >/dev/null
+  say "  video_resolution: ${VIDEO_RESOLUTION_ROWS} raw rows, alias + filter view smoke PASS"
+else
+  say "  video_resolution: absent from this raw file"
+fi
+
+CONTENT_DYNAMIC_KEYS="$(q "SELECT DISTINCT arrayJoin(mapKeys(extra)) AS dimension_name
+                            FROM content_dim ORDER BY dimension_name FORMAT TSVRaw")"
+if [ -n "$CONTENT_DYNAMIC_KEYS" ]; then
+  while IFS= read -r dimension_name; do
+    [ -n "$dimension_name" ] || continue
+    MISSING_CONTENT_ROWS=$(q1 "SELECT countIf(NOT mapContains(extra, '${dimension_name}')) FROM content_dim FINAL")
+    [ "$MISSING_CONTENT_ROWS" = "0" ] || die "dynamic content field '${dimension_name}' is absent from
+${MISSING_CONTENT_ROWS} content rows — the generic content filter path lost it."
+  done <<< "$CONTENT_DYNAMIC_KEYS"
+  say "  dynamic content filters: $(printf '%s' "$CONTENT_DYNAMIC_KEYS" | tr '\n' ' ')"
+else
+  say "  dynamic content filters: no new content headers in this file"
+fi
+
+SHOW_NAME_ROWS=$(q1 "SELECT countIf(mapContains(extra, 'show_name')) FROM content_dim FINAL")
+if [ "$SHOW_NAME_ROWS" != "0" ]; then
+  SHOW_NAME_MISMATCHES=$(q1 "SELECT countIf(show_name != extra['show_name']) FROM content_dim FINAL")
+  [ "$SHOW_NAME_MISMATCHES" = "0" ] || die "show_name alias disagrees with extra map on
+${SHOW_NAME_MISMATCHES} content rows."
+  q1 "SELECT show_name FROM v_session_minutes LIMIT 1" >/dev/null
+  say "  show_name: ${SHOW_NAME_ROWS} content rows, alias + filter view smoke PASS"
+else
+  say "  show_name: absent from this content file"
+fi
 # ADR 0014: under a tie the peak minute is the EARLIEST minute at the peak
 # level, at every tier. The old bare argMax(peak_minute, peak) here picked an
 # arbitrary tied hour — on the synthetic rehearsal it answered 21:10 where the
@@ -536,7 +624,7 @@ say "  stateless baseline   peak $(q1 "SELECT toString(max(concurrent)) FROM v_c
 # change-point view under-counts (it said 2 where 64 minutes were tied, because
 # a level that HOLDS across minutes only appears at the minute it changes).
 say "  minutes tied at the peak: $(q1 "
-    WITH b AS (SELECT toStartOfMinute(min(event_timestamp)) lo, toStartOfMinute(max(event_timestamp)) hi FROM ev_raw),
+    WITH b AS (SELECT toStartOfMinute(min(event_timestamp)) lo, toStartOfMinute(max(event_timestamp)) hi FROM v_ev_model_input),
     spine AS (SELECT toDateTime(arrayJoin(range(toUInt32((SELECT lo FROM b)), toUInt32((SELECT hi FROM b)) + 60, 60))) AS minute),
     dm AS (SELECT minute, sum(delta) d FROM cc_minute_delta GROUP BY minute),
     lv AS (SELECT s.minute AS minute, toInt64(sum(ifNull(dm.d,0)) OVER (PARTITION BY toStartOfHour(s.minute)
@@ -545,8 +633,8 @@ say "  minutes tied at the peak: $(q1 "
     SELECT toString(countIf(c = (SELECT max(c) FROM lv))) FROM lv")  (dense spine; the change-point count under-reports)"
 
 # ---------------------------------------------------------------------------
-phase "8 THE GATE — truth recomputed from ev_raw"
-# The gate is SELF-TARGETING since 81c0161: dense spine derived from ev_raw,
+phase "8 THE GATE — truth recomputed from accepted raw events"
+# The gate is SELF-TARGETING since 81c0161: dense spine derived from v_ev_model_input,
 # idle minutes compared as 0=0, SUMMARY row first. Run it once, verbatim, then
 # assert the summary — a gate that silently compared less than the day implies
 # is the failure mode that made the old G0 pass vacuously.

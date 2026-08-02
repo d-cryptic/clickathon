@@ -1,6 +1,10 @@
 # PROMOTION FALLBACK — the decision to make before the deadline forces it
 
-> **Summary:** `main` is **186 commits / 629 files / +61,349 lines** behind `dev`, and the
+> **Superseded historical plan:** `main` and `dev` were later merged; current release status is in
+> Codex Validation 009. The repository-public and Team-Captain blockers in this dated plan were not
+> present in the final official submission rules and must not be used.
+>
+> **Summary:** `main` was **186 commits / 629 files / +61,349 lines** behind `dev`, and the
 > feature-by-feature gate has correctly rejected **three** promotion attempts on real defects. That is
 > the gate working — but it is slow, and if it does not finish, `main` ships without almost everything
 > we built. This file states the fallback **now**, while it is a considered choice, rather than at the
@@ -75,9 +79,8 @@ unlikely the rest are clean.
 
 - **The cutoff time.** It depends on the submission deadline, which the orchestrator does not know.
 - **Whether to take the fallback at all**, versus shipping a partially-promoted `main`.
-- The two administrative blockers that gate everything regardless: **the repo is still private**, and
-  **no Team Captain is named**. Neither is affected by any of the above, and both are
-  disqualification-level.
+- The final administrative contract is now tracked in `SUBMISSION.md`; this historical plan's public-
+  repository and Team-Captain assumptions were retired after the official repository update.
 
 ## Recommendation
 

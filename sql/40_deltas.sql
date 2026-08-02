@@ -213,5 +213,11 @@ FROM
     WHERE (e < (h + 3600))
       AND (((intDiv(e, 60) * 60) + 60) < (h + 3600))
 )
+-- Full rebuilds template this final predicate into one explicit set of output
+-- dates at a time. The filter belongs after OPEN/CLOSE are derived: filtering
+-- source intervals by their start date would lose later days of a long run.
+-- The incremental publisher leaves it at 1 and keeps its existing session
+-- scope on the load-bearing `FROM session_intervals FINAL` anchor above.
+WHERE 1 /* backfill: output dates */
 GROUP BY minute, platform, country, content_id,
          subtitle_language, player_version, audio_language, app_version;

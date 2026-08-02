@@ -24,8 +24,9 @@
 | `apply-sql.sh [--database N] [file...]` | apply `sql/*.sql` to local or `TARGET=cloud`. initdb only runs on first boot; Cloud has no mount at all |
 | `load-guard-test.sh` | negative tests for the two above: makes them refuse a double load and proves a load lands in the database that was asked for. Own scratch databases, dropped on exit; never writes `sonyliv` |
 | `clickstack-bootstrap.sh` | headless ClickStack setup; prints the OTLP ingestion key |
-| `clickstack-sources.sh` | point the SELF-HOSTED HyperDX at our concurrency views. Idempotent |
-| `clickstack-cloud.sh` | provision the HyperDX built into ClickHouse Cloud — 24 sources, SIX dashboards, saved searches — via the Cloud API. Idempotent (dashboards converge by PUT) |
+| `clickstack-sources.sh` | point the SELF-HOSTED HyperDX at our concurrency views. Idempotent: existing named sources converge by full-replacement PUT |
+| `clickstack-cloud.sh` | provision the HyperDX built into ClickHouse Cloud — 27 sources, seven dashboards, saved searches — via the Cloud API. Idempotent: existing sources and dashboards converge by PUT |
+| `clickstack-static-test.py` | offline gate: all 12 declared dataset filters exist in `v_session_minutes`, both source definitions and the hosted dashboard; both provisioners PUT existing sources instead of retaining stale selects |
 | `clickstack-alerts.sh [--validate\|--verify]` | concurrency-**decline** detection + the three-way ended/broken/boring classifier: one dashboard, one webhook, 3 alerts on hosted HyperDX. Idempotent. `--validate` regenerates every threshold's evidence read-only; `--verify` reads the alerts back signed-in. Read-only against ClickHouse ([docs/DECLINE_ALERTING.md](../docs/DECLINE_ALERTING.md)) |
 | `clickstack-artifact.sh` | regenerate the offline demo fallback `docs/artifacts/2026-08-01-clickstack-dashboards.html` from live serving-view data |
 | `../evidence/capture.sh` | the evidence harness — parts, compression, pruning, latency, MV cost |

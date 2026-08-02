@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # tools/clickstack-cloud.sh — provision the HyperDX built into ClickHouse Cloud:
 # sources, SEVEN dashboards, and saved searches. Idempotent — a re-run converges
-# the remote to this script (dashboards are PUT, not skipped).
+# sources and dashboards to this script with full-replacement PUTs.
 #
 # Drives the Cloud control-plane API, NOT the console session, so all of this is
 # scriptable and survives a rebuild:
@@ -12,7 +12,7 @@
 #   1 SonyLIV concurrency        — the headline: ACCURATE vs STATELESS vs NAIVE
 #                                  side by side, so the over-count is visible
 #   2 SonyLIV drilldown          — sessions & users under WORKING filters on all
-#                                  seven dimensions + title (session-minute grain,
+#                                  12 declared dataset dimensions (session-minute grain,
 #                                  count_distinct — correct under ANY filter)
 #   3 SonyLIV content            — title / video_type / category + the NOW panel
 #   4 SonyLIV time-window trend  — rolling 5/15/60 peaks+avgs, tumbling 15m/hour
@@ -63,21 +63,22 @@ API=https://api.clickhouse.cloud/v1
 api() { curl -sS -u "$CH_API_KEY_ID:$CH_API_KEY_SECRET" "$@"; }
 py() { python3 -c "$1"; }
 
-# The chart-only views the sources below point at (sql/87_viz.sql — additive
-# only, reconcile-gated). apply-sql.sh needs the `ch` container for the native
-# client; fail with instructions rather than registering sources over views
-# that do not exist.
+# Converge the two metadata-only schema migrations that sql/87_viz.sql reads,
+# then the chart-only views themselves. CREATE TABLE IF NOT EXISTS + ADD COLUMN
+# IF NOT EXISTS make 00/10 safe on an existing model; this does not rebuild or
+# rewrite concurrency. apply-sql.sh needs the `ch` container for the native
+# client; fail with instructions rather than registering stale source schemas.
 if [ "${CLICKSTACK_SKIP_APPLY:-0}" = "1" ]; then
   # Control-plane-only run: provision sources/dashboards/searches WITHOUT the
   # DDL step. For sessions that must not write to the graded database at all —
   # the views must already exist (SHOW TABLES FROM sonyliv LIKE 'v\\_%').
-  echo "NOTE: CLICKSTACK_SKIP_APPLY=1 — skipping sql/87_viz.sql apply (control-plane only)." >&2
+  echo "NOTE: CLICKSTACK_SKIP_APPLY=1 — skipping schema/view apply (control-plane only)." >&2
 elif docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^ch$'; then
-  TARGET=cloud tools/apply-sql.sh sql/87_viz.sql
+  TARGET=cloud tools/apply-sql.sh sql/00_schema.sql sql/10_intervals.sql sql/87_viz.sql
 else
-  echo "NOTE: docker container 'ch' not running — skipping sql/87_viz.sql apply." >&2
-  echo "      If the v_session_minutes / v_cc_by_* / naive views are missing on" >&2
-  echo "      Cloud, run: docker compose up -d ch && TARGET=cloud tools/apply-sql.sh sql/87_viz.sql" >&2
+  echo "NOTE: docker container 'ch' not running — skipping schema/view apply." >&2
+  echo "      Before provisioning, run: docker compose up -d ch &&" >&2
+  echo "      TARGET=cloud tools/apply-sql.sh sql/00_schema.sql sql/10_intervals.sql sql/87_viz.sql" >&2
 fi
 
 ORG=$(api "$API/organizations" | py 'import json,sys; r=json.load(sys.stdin)["result"]; print(r[0]["id"] if r else "")')
@@ -133,19 +134,52 @@ fi
 echo "connection $CONN"
 
 # ---------------------------------------------------------------- sources ----
-add_source() {  # add_source <name> <table> <select expression>
-  local name="$1" table="$2" select="$3" existing
+# Source update is a full replacement, not a patch. Always send the same
+# complete definition for POST and PUT so an old select expression cannot
+# silently survive a re-run after a view gains a filter dimension. Include id
+# only for PUT: SourceSchema requires it on self-hosted ClickStack, while the
+# Cloud/external API accepts and ignores the duplicate path identifier.
+upsert_source() {  # upsert_source <name> <database> <table> <timestamp expr> <select>
+  local name="$1" db="$2" table="$3" tscol="$4" select="$5" existing payload
   existing=$(SRC_NAME="$name" py '
 import json, os
 print(next((s.get("id","") for s in json.load(open("/tmp/cs-sources.json"))["result"] if s.get("name") == os.environ["SRC_NAME"]), ""))
 ')
-  if [ -n "$existing" ]; then echo "  source '$name' exists"; return; fi
-  api -X POST "$BASE/sources" -H 'Content-Type: application/json' \
-    -d "{\"name\":\"$name\",\"kind\":\"log\",\"connection\":\"$CONN\",\"from\":{\"databaseName\":\"$DB\",\"tableName\":\"$table\"},\"timestampValueExpression\":\"minute\",\"defaultTableSelectExpression\":\"$select\"}" \
-    | py 'import json,sys; d=json.load(sys.stdin); print("  created" if not d.get("error") else "  FAILED: "+d["error"]); sys.exit(1 if d.get("error") else 0)'
+  payload=$(SOURCE_NAME="$name" SOURCE_DB="$db" SOURCE_TABLE="$table" SOURCE_ID="$existing" \
+    SOURCE_TIMESTAMP="$tscol" SOURCE_SELECT="$select" SOURCE_CONNECTION="$CONN" py '
+import json, os
+payload = {
+    "name": os.environ["SOURCE_NAME"],
+    "kind": "log",
+    "connection": os.environ["SOURCE_CONNECTION"],
+    "from": {
+        "databaseName": os.environ["SOURCE_DB"],
+        "tableName": os.environ["SOURCE_TABLE"],
+    },
+    "timestampValueExpression": os.environ["SOURCE_TIMESTAMP"],
+    "defaultTableSelectExpression": os.environ["SOURCE_SELECT"],
+}
+if os.environ["SOURCE_ID"]:
+    payload["id"] = os.environ["SOURCE_ID"]
+print(json.dumps(payload))
+')
+  if [ -n "$existing" ]; then
+    printf '%s' "$payload" | api -f -X PUT "$BASE/sources/$existing" \
+      -H 'Content-Type: application/json' --data-binary @- \
+      | SOURCE_LABEL="$name" py 'import json,os,sys; raw=sys.stdin.read(); d=json.loads(raw) if raw.strip() else {}; n=os.environ["SOURCE_LABEL"]; print(f"  updated  {n}" if not d.get("error") else f"  FAILED {n}: "+str(d["error"])[:300]); sys.exit(1 if d.get("error") else 0)'
+  else
+    printf '%s' "$payload" | api -f -X POST "$BASE/sources" \
+      -H 'Content-Type: application/json' --data-binary @- \
+      | SOURCE_LABEL="$name" py 'import json,os,sys; raw=sys.stdin.read(); d=json.loads(raw) if raw.strip() else {}; n=os.environ["SOURCE_LABEL"]; print(f"  created  {n}" if not d.get("error") else f"  FAILED {n}: "+str(d["error"])[:300]); sys.exit(1 if d.get("error") else 0)'
+  fi
 }
 
-# Same, but with an explicit database and timestamp expression — for
+# Default database and minute timestamp used by the concurrency sources.
+add_source() {  # add_source <name> <table> <select expression>
+  upsert_source "$1" "$DB" "$2" minute "$3"
+}
+
+# Explicit database and timestamp expression — for
 # system.query_log, the *_now views (timestamped by as_of), the hour-tumbling
 # view (window_start) and the watermark view. The watermark source's timestamp
 # is literally `now()`: v_cc_watermark is a one-row CURRENT-STATE view, and
@@ -153,15 +187,7 @@ print(next((s.get("id","") for s in json.load(open("/tmp/cs-sources.json"))["res
 # rest of the pipeline-health dashboard uses — instead of demanding the July
 # data range that every OTHER tile on that dashboard would render empty under.
 add_source_db() {  # add_source_db <name> <database> <table> <timestamp expr> <select>
-  local name="$1" db="$2" table="$3" tscol="$4" select="$5" existing
-  existing=$(SRC_NAME="$name" py '
-import json, os
-print(next((s.get("id","") for s in json.load(open("/tmp/cs-sources.json"))["result"] if s.get("name") == os.environ["SRC_NAME"]), ""))
-')
-  if [ -n "$existing" ]; then echo "  source '$name' exists"; return; fi
-  api -X POST "$BASE/sources" -H 'Content-Type: application/json' \
-    -d "{\"name\":\"$name\",\"kind\":\"log\",\"connection\":\"$CONN\",\"from\":{\"databaseName\":\"$db\",\"tableName\":\"$table\"},\"timestampValueExpression\":\"$tscol\",\"defaultTableSelectExpression\":\"$select\"}" \
-    | py 'import json,sys; d=json.load(sys.stdin); print("  created" if not d.get("error") else "  FAILED: "+d["error"])'
+  upsert_source "$1" "$2" "$3" "$4" "$5"
 }
 
 echo "sources:"
@@ -176,10 +202,10 @@ add_source "Concurrency NAIVE session-span (minute)" v_concurrency_minute_naive 
 # User tier — uniqExact, not deltas (a user can hold several concurrent sessions).
 add_source "User concurrency (minute)"          v_user_concurrency_minute_total    "minute, concurrent_users"
 add_source "User concurrency by dimension"      v_user_concurrency_minute          "minute, platform, country, content_id, concurrent_users"
-# Drilldown tier — session-minute grain, ALL seven dimensions + title + user_id.
+# Drilldown tier — session-minute grain, all declared filter dimensions + user_id.
 # count_distinct over these rows is correct under ANY filter combination.
 add_source "Session minutes (drilldown)"        v_session_minutes \
-  "minute, video_session_id, user_id, platform, country, content_id, title, app_version, audio_language, subtitle_language, player_version"
+  "minute, video_session_id, user_id, platform, country, content_id, title, video_type, category, show_name, content_dimensions, app_version, audio_language, subtitle_language, player_version, video_resolution, extra_dimensions"
 # Per-dimension ACCURATE curves — one source per dimension, each at its own
 # grain (sql/87_viz.sql), so max() on a tile is a genuine peak at any zoom.
 add_source "Concurrency by platform"            v_cc_by_platform                   "minute, platform, concurrent"
@@ -188,7 +214,10 @@ add_source "Concurrency by app_version"         v_cc_by_app_version             
 add_source "Concurrency by audio_language"      v_cc_by_audio_language             "minute, audio_language, concurrent"
 add_source "Concurrency by subtitle_language"   v_cc_by_subtitle_language          "minute, subtitle_language, concurrent"
 add_source "Concurrency by player_version"      v_cc_by_player_version             "minute, player_version, concurrent"
-# Content tier — enriched through dict_content.
+add_source "Concurrency by video_resolution"    v_cc_by_video_resolution           "minute, video_resolution, concurrent"
+add_source "Dynamic event dimensions"           v_dynamic_dimension_values         "minute, video_session_id, user_id, dimension_name, dimension_value"
+add_source "Dynamic content dimensions"         v_dynamic_content_dimension_values "minute, video_session_id, user_id, content_id, dimension_name, dimension_value"
+# Content tier — enriched by the credential-free content_dim join in sql/80.
 add_source "Concurrency by title"               v_concurrency_minute_title         "minute, title, concurrent"
 add_source "Concurrency by video_type"          v_concurrency_minute_video_type    "minute, video_type, concurrent"
 add_source "Concurrency by category"            v_concurrency_minute_category      "minute, category, concurrent"
@@ -376,6 +405,10 @@ dashboards.append({
     filt("Audio language",    "audio_language",    sm, sm_only),
     filt("Subtitle language", "subtitle_language", sm, sm_only),
     filt("Player version",    "player_version",    sm, sm_only),
+    filt("Video resolution",  "video_resolution",  sm, sm_only),
+    filt("Show name",         "show_name",         sm, sm_only),
+    filt("Video type",        "video_type",        sm, sm_only),
+    filt("Category",          "category",          sm, sm_only),
   ],
   "tiles": [
     md("⚠ Peak is NOT summable across dimensions", 0, 0, 12, 2,
@@ -396,7 +429,11 @@ dashboards.append({
     line("by audio_language",    sm, 6, 10, 6, 4, [sel("video_session_id", "sessions", agg="count_distinct")], group="audio_language"),
     line("by subtitle_language", sm, 0, 14, 6, 4, [sel("video_session_id", "sessions", agg="count_distinct")], group="subtitle_language"),
     line("by player_version",    sm, 6, 14, 6, 4, [sel("video_session_id", "sessions", agg="count_distinct")], group="player_version"),
-    line("by title (top 20)",    sm, 0, 18, 12, 4, [sel("video_session_id", "sessions", agg="count_distinct")], group="title"),
+    table("Top resolutions — distinct active sessions in range", sm, 0, 18, 6, 4,
+          "video_resolution", [sel("video_session_id", "sessions", agg="count_distinct")], '"sessions" DESC'),
+    table("Top shows — distinct active sessions in range", sm, 6, 18, 6, 4,
+          "show_name", [sel("video_session_id", "sessions", agg="count_distinct")], '"sessions" DESC'),
+    line("by title (top 20)",    sm, 0, 22, 12, 4, [sel("video_session_id", "sessions", agg="count_distinct")], group="title"),
   ]})
 
 # 3 ── CONTENT ────────────────────────────────────────────────────────────────

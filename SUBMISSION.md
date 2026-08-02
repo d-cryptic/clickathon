@@ -3,17 +3,22 @@
 > **Summary:** Click-a-thon India 2026 · SonyLIV foreground-only concurrency, on ClickHouse Cloud
 > with ClickStack. This file maps each judging criterion — correctness, query performance, update
 > handling, design quality, the unseen day — to the claim we make, the committed evidence that
-> proves it, and the command that regenerates it. All numbers were re-verified live against the
-> graded database on **2026-08-01** (read-only). Known limitations are stated at the end, not
-> hidden. ⚠ Two administrative blockers are flagged first: the repo is still private, and no Team
-> Captain is named.
+> proves it, and the command that regenerates it. The official submission contract was re-fetched
+> at problem commit `c1e1c69` and submission commit `c446938` on **2026-08-02**. The portal closes
+> automatically at **12:00 PM IST on 2026-08-02**. The contract requires a hosted
+> demo, 2–3 minute video, self-contained team folder and live ClickStack walkthrough with committed
+> wiring; repository visibility and a named Team Captain are not requirements in that contract.
 
-## ⚠ Before submitting — two blockers, one checklist
+## ⚠ Before submitting — official-package blockers
 
-**1 · The repository is PRIVATE.** Submission requires it public — a disqualification-level item.
-**2 · No Team Captain is named.** Only the Team Captain can submit. Name one now.
+**Hard deadline: 12:00 PM IST, 2026-08-02.** Do not plan a final upload at the boundary; the portal
+closes automatically.
 
-Pre-publication checklist (do these in order, before flipping visibility):
+The current official rules require a self-contained folder in the submission repository, not that
+this development repository be public. They also contain no Team Captain rule. The actual blockers
+are a hosted demo, a 2–3 minute video, a final pitch PDF, and proof of the live ClickStack integration.
+
+Final-package checklist:
 
 - [ ] **Secret scan the full history**, not just HEAD. Status as of 2026-08-01: `.env` was never
       committed (`git log --all -- .env` is empty); the Cloud **password appears nowhere** in
@@ -27,7 +32,13 @@ Pre-publication checklist (do these in order, before flipping visibility):
 - [ ] Confirm `tools/fetch_data.sh` works from an anonymous clone (it pulls from the public
       organiser repo; the 223 MB of data is deliberately not in this repo).
 - [ ] Confirm `demo/run.sh --offline` and `make ci` pass on a fresh clone with no `.env`.
-- [ ] Name the Team Captain here: ______ — and have them do the actual submission.
+- [ ] Put source, final `README.md`, architecture, pitch PDF and video link in one team-named folder.
+- [ ] Add the hosted demo link and document which source column backs every dashboard filter.
+- [ ] Include the ClickStack deployment/config wiring, redacted `.env.example`, OTel config, the
+      ClickHouse service and destination tables, and dashboard/search captures.
+- [ ] Walk through the real ClickStack dashboards in both the hosted demo and the 2–3 minute video;
+      screenshots alone are explicitly insufficient.
+- [ ] Open one PR titled `[Submission] Team Name` against the official submission repository.
 
 ## What was verified, when
 
@@ -73,8 +84,9 @@ raw history. Judges look at what queries read: every timed run's `query_id` and
 `log_comment` are committed, so each number is auditable in `system.query_log`, and each query's
 `EXPLAIN indexes=1` is committed alongside.
 
-**Stated up front:** the official benchmark query set was never released. These 13 queries are
-**our reconstruction** of the shapes the problem statement names — peak AND average at
+**Stated up front:** the organiser now specifies result classes, not a fixed SQL set: peak and average
+concurrency at minute, hour and day grain with dimension filters. These 13 queries are **our coverage
+matrix** of the shapes the problem statement names — peak AND average at
 minute/hour/day grain, with dimension filters — plus the one shape the hour tier deliberately does
 NOT serve (a partial platform filter), so the documented minute-scan fallback is measured
 (9.4 ms), not guessed.
@@ -178,6 +190,13 @@ HyperDX charts reading our serving views (no hand-rolled frontend), and (b) **se
 our own pipeline** — the Go CLI (`sonyliv observe`) emits OTLP for ingestion watermark lag, build
 timing and the reconcile gate, landing in 6 provisioned dashboards / 41 tiles.
 
+**New official evidence rule, fetched 2026-08-02.** Using ClickStack now carries an explicit
+submission contract: commit the service deployment and integration wiring, keep secrets redacted,
+state which ClickHouse service and tables receive its data, include the dashboards/searches actually
+used in the team README, and demonstrate them live in the hosted demo and video. Existing screenshots
+remain useful evidence but cannot establish integration by themselves. This package is not complete
+until those artifacts are copied into the self-contained submission folder.
+
 | Evidence | Regenerate |
 |---|---|
 | [`docs/CLICKSTACK_DASHBOARDS.md`](docs/CLICKSTACK_DASHBOARDS.md) — every panel, captured live | `make clickstack-cloud` |
@@ -239,7 +258,7 @@ None of these are hidden in footnotes; each has evidence and, where possible, a 
 
    We are not hedging our answer: **2,917 is our number**, under a stated and consistently applied
    convention, and we think any-overlap is the right reading for a concurrency metric. But a judge
-   comparing against a ground truth built by sampling would see a systematic 14% gap with no
+   a judge sampling minute boundaries would see a systematic 14% gap with no
    defect anywhere in our pipeline, so it belongs in the open, not in a footnote
    ([doubts/09](doubts/09-minute-membership-instant-reading.md), full ledger of 21 probed
    assumptions in [evidence/adversarial/](evidence/adversarial/README.md) — ten came back safe at

@@ -1,8 +1,9 @@
 # MENTOR_QUESTIONS — what only the organisers can answer
 
 > **Summary:** Seventeen questions for a SonyLIV/ClickHouse mentor, ranked by how much the answer
-> changes what we build. The ground truth is **private**, so none of these can be measured our way out
-> of — a wrong guess is silently wrong on every benchmark answer and we would never see it. Tier 1 can
+> changes what we build. The latest official wording says judges spot-check results against raw
+> events, not that a fixed private answer key or benchmark SQL set exists. These semantic questions
+> still matter because a wrong policy can fail that spot-check. Tier 1 can
 > invalidate the activity model itself (which heartbeat events count, `resume` semantics, the
 > unclosed-pause rule, session-vs-user, timezone, exact-vs-tolerance, cadence). **The largest measured
 > fork is Q3 · `resume` semantics — 189.2 h / 9.7%**, ahead of the unclosed-pause rule this file used
@@ -36,11 +37,11 @@
 > heartbeats **survive a pause**: 0.756/min, one event every ~79 seconds, comfortably inside any sane
 > gap threshold. So a gap-only model silently counts paused time as watching, which the statement
 > explicitly forbids. We've made the model a hybrid. What we can't determine from the data is where
-> you draw the line in the ground truth. One more thing while we're here: your dataset doc says the
+> you draw the line when spot-checking raw events. One more thing while we're here: your dataset doc says the
 > heartbeat is passed every minute. `VideoHeartbeat` in the file we got is 41 telemetry streams under
 > one label — mixed together they look like noise at **4.72/min**, but separated, the three big ones
 > tick at **exactly 40 seconds**, p50 and p90 both 40.0. So there *is* a pulse and it is not the
-> documented one. We derived our thresholds from the data rather than the doc. If the ground truth
+> documented one. We derived our thresholds from the data rather than the doc. If judge expectations
 > assumed a 1-minute beat, we'd want to know now rather than at submission."
 > ([doubts/01](../doubts/01-heartbeat-cadence.md), superseding Q17.)
 
@@ -56,7 +57,7 @@ definition question rather than a competence question.
 `network-activity`, `buffer-health`, `video-resize`, `BufferStart`, `Seek`, `pause`, `resume`.
 Inter-arrival within a session: **p50 = 0s, p90 = 40s, p99 = 49s**, mean 12.4s, rate **4.72/min**.
 
-**Ask:** Does the ground truth treat *every* `VideoHeartbeat` row as evidence of watching, or only a
+**Ask:** Should judge spot-checks treat *every* `VideoHeartbeat` row as evidence of watching, or only a
 subset representing actual playback progress?
 **Why it matters:** this is the root of the activity definition. If it's a subset, every downstream
 number is wrong regardless of how good the serving layer is.
@@ -104,7 +105,7 @@ to use, and a decision table per possible answer — ask from that dossier, not 
 resume**. A clean toggle cannot produce that; `resume` evidently also fires after seeks, buffer
 recovery and foregrounding.
 
-**Ask:** (a) what ends a paused period in the ground truth — the very next `resume`, or a resume that
+**Ask:** (a) what ends a paused period under judge spot-check semantics — the very next `resume`, or a resume that
 actually corresponds to that pause? (b) Is a `resume` with no preceding `pause` meaningful — does it
 imply an *unlogged* pause we should be excluding?
 **Why it matters:** measured end to end on the real file, closing at the *first* resume (shipped
@@ -137,8 +138,8 @@ and nothing looks broken.
 **Our assumption:** UTC.
 **Answer:** _unrecorded_
 
-### Q6 · Exact match, or a tolerance?
-**Ask:** Is correctness scored on exact equality against the ground truth, or within a percentage band?
+### Q6 · Exact spot-check, or a tolerance?
+**Ask:** When judges spot-check against raw events, is exact equality required or is there a tolerance?
 **Why it matters:** decides `uniqExact` vs approximate `uniq` (HLL carries 1–2% error), and whether the
 tail-credit rule in Q7 must be exactly right or merely close.
 **Our assumption:** exact — we use `uniqExact` throughout.
@@ -151,7 +152,7 @@ tail-credit rule in Q7 must be exactly right or merely close.
 > together they look aperiodic (that is where the p50 of 0s comes from), but `network-activity`
 > (177,485), `buffer-health` (167,460) and `video-resize` (141,250) each tick at p50 = p90 = **40.0 s**
 > independently, and the gap histogram's mode is the 40 s bucket with 100,099 gaps. Everything below
-> about *which cadence the ground truth assumed* still stands and is still unanswerable from the data.
+> about *which cadence judges expect* still stands and is still unanswerable from the data.
 
 `docs/upstream/dataset_details.md` states: *"The heartbeat event type is a periodic event which is
 currently passed every 1 minute."* Measured over the whole 905,558-event file, that is not what
@@ -160,8 +161,8 @@ p90 40s, p99 49s**, mean 12.4s, overall rate **4.72/min** — 41 discrete player
 (`network-activity`, `buffer-health`, `video-resize`, `BufferStart`, `Seek`, `pause`, `resume`), whose
 three largest are metronomes at 40s rather than at the documented 60s.
 
-**Ask:** Which is authoritative for the ground truth — the documented 1-minute beat, or the event
-stream you shipped us? Concretely: was the private ground truth computed with a rule that *assumes*
+**Ask:** Which is authoritative for judge spot-checks — the documented 1-minute beat, or the event
+stream you shipped us? Concretely: should activity use a rule that *assumes*
 a 1-minute cadence — "active for the 60 seconds following each heartbeat", or an inactivity timeout
 derived as N missed 60-second beats?
 **Why it matters:** every tunable in our activity model is a function of the cadence, so the two
@@ -231,7 +232,7 @@ it is the same shape of trap as pause.
 `audio_language` has 41 distinct values and Hindi is four of them — `hin` 610,889, `HIN` 69,033,
 `hin-hindi` 23,095, `hin-Hindi` 507. English is another four, Japanese four.
 
-**Ask:** In your ground truth, does a Hindi-audio filter count all four spellings as one language, or
+**Ask:** In judge spot-checks, does a Hindi-audio filter count all four spellings as one language, or
 is each string its own filter value? (And: do `UNK` and `UND` mean different things in
 `subtitle_language`, which is 91.5% sentinel?)
 **Why it matters:** measured, peak Hindi concurrency is **1,768** un-normalised and **2,180**
@@ -248,10 +249,11 @@ rebuild.
 
 ## Tier 3 — logistics that shape the build
 
-### Q12 · When do we get the benchmark query set?
-We do not have it yet. Its exact shapes decide what is worth pre-aggregating; guessing wrong wastes the
-pre-aggregation budget on the wrong grain.
-**Answer:** _unrecorded_
+### Q12 · What query shapes are required? — answered by upstream `c1e1c69`
+There is no promised fixed SQL set. Submit peak and average concurrency at minute, hour and day grain,
+with dimension filters, plus latency and pipeline evidence. Our 13-query matrix is coverage for those
+classes, not organiser-supplied SQL.
+**Answer:** _recorded 2026-08-02 from the official problem/unseen repository_
 
 ### Q13 · How is query latency measured?
 Cold or warm cache? First run or median of N? And **which counter** do judges read for "what your

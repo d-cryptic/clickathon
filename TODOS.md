@@ -1,8 +1,9 @@
 # TODOS — the task queue
 
 > **Summary:** Pull from the top. `[H*]` marks the hour block from AGENT_WORKFLOW. Anything blocking
-> the `/reconcile` gate outranks everything else. Keep this file honest — an agent picking up a dead
-> session reads it first.
+> the `/reconcile` gate outranks everything else. The official unseen release and submission rules
+> arrived on 2026-08-02; use Codex Validation 009 for their current P0 queue. Older Cloud counts and
+> mentor-era tasks below are retained as engineering history, not the final submission checklist.
 
 ## Now
 
@@ -73,7 +74,7 @@
 - [~] **[H2a]** ~~DECIDE~~ unclosed-pause rule. 23% of pauses never resume. Both rules now MEASURED
       end to end: conservative (shipped) 1,949.3 h vs permissive 2,048.6 h — **+99.3 h, 5.09%**.
       The earlier "~19,800 min" estimate was ~3x too high; that time is mostly already excluded by the
-      gap rule, the two overlap. Conservative is the safer default against an exact ground truth.
+      gap rule, the two overlap. Conservative is the safer default for exact raw-event spot-checks.
       **Operator call — see ADR 0007.**
 - [ ] **[H2a-remeasure]** **Re-measure the permissive arm on the fixed derivation.** ADR 0009 moved
       the conservative arm (PEAK 2,887 → 2,917, 1,949.3 h → 1,978.1 h) but nothing re-ran
@@ -147,7 +148,7 @@
       deliberately NOT duplicated here — a separate `system.query_log` HyperDX source already covers
       it more accurately than a client span could.
 - [ ] **[H8]** Straggler correction-by-diff path (ADR 0006) + the live late-arrival demo
-- [ ] **[H8]** Tail-sensitivity sweep (gap × tail grid) — the ground truth is private and unfittable
+- [ ] **[H8]** Tail-sensitivity sweep (gap × tail grid) — organiser semantics are not fit-able from one file
 - [~] **[DIMS]** Filter-dimension value normalisation — **built, wired AND deployed; the decision
       that remains is a mentor's**. `sql/15_normalise.sql` (UDFs + `v_cc_minute_delta_norm`,
       `v_concurrency_minute_audio_norm`, `v_dimension_drift`) and
@@ -159,7 +160,7 @@
       the Codex 002 audit independently measured 1,774 → 2,196 on an isolated current rebuild, which
       matches live.)* Normalising inside the derivation was built and measured as **worse** — 202
       intervals degraded onto a sentinel — so `30_build_intervals.sql` needs no change. **Remaining:**
-      (a) decide whether per-language benchmark queries read the raw column or the normalised view —
+      (a) decide whether per-language judged queries read the raw column or the normalised view —
       that is [doubts/04](doubts/04-dimension-normalisation.md) / Q18, and it is the only part that
       needs a mentor;
       (b) run `v_dimension_drift` against the unseen day before trusting any filtered number from it
@@ -189,7 +190,10 @@
       `docker compose down -v` + reload — **operator call, it destroys the local volume.**
 - [ ] **ASK A MENTOR** — 16 questions in [docs/MENTOR_QUESTIONS.md](docs/MENTOR_QUESTIONS.md), ranked.
       Tier 1 (Q1 which heartbeats count · Q2 unclosed-pause rule · Q4 session-vs-user · Q5 timezone)
-      can invalidate the model, and **none of them are measurable from the data** — the ground truth is
-      private, so a wrong guess is silently wrong on every answer. Q2 is the same decision as `[H2a]`.
+      can invalidate the model, and **none of them are measurable from the data** — judge spot-check
+      semantics are not fully specified, so a wrong guess can silently move every answer. Q2 is the
+      same decision as `[H2a]`.
       Record answers inline and update the affected ADR in the same commit.
-- [ ] **Team Captain** — only they can submit. Confirm who, and that they are awake before the freeze.
+- [ ] **Submission operator** — assemble the self-contained team folder, hosted-demo/video/deck
+      links and open the mandatory `[Submission] Team Name` PR. The official rules do not restrict
+      this action to a named Team Captain.

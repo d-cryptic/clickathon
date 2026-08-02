@@ -172,6 +172,17 @@ tools/policy.sh check >/dev/null || { tools/policy.sh check; echo "== BUILD REFU
 TARGET="$TARGET" APPLY_GRADED_DESTRUCTIVE="${REBUILD_GRADED:-}" tools/apply-sql.sh sql/01_policy.sql >/dev/null
 q "SELECT concat('   policy v', policy_version, ' (', policy_hash, ') applied') FROM v_model_policy FORMAT TSVRaw"
 
+# Establish the semantic input boundary before any derived table reads the
+# events. ev_raw remains lossless; q_reason only removes rows whose session or
+# timestamp cannot be used by the model, and ev_quarantine retains them with a
+# reason and source identity. Applying the file again at stage 6 refreshes the
+# read-side normalisation views after the serving tables have been rebuilt.
+echo "== 0b/6  accepted-row boundary (ADR 0025)"
+TARGET="$TARGET" APPLY_GRADED_DESTRUCTIVE="${REBUILD_GRADED:-}" tools/apply-sql.sh sql/15_normalise.sql >/dev/null
+q "SELECT concat('   model input ', toString(model_input_rows), ' / raw ', toString(raw_rows),
+                 ' · quarantined ', toString(quarantined_rows))
+   FROM v_preprocess_summary FORMAT TSVRaw"
+
 echo "== 1/6  session_intervals (gap + pause, ADR 0001/0007)"
 q "TRUNCATE TABLE session_intervals" >/dev/null
 TARGET="$TARGET" APPLY_GRADED_DESTRUCTIVE="${REBUILD_GRADED:-}" tools/apply-sql.sh sql/30_build_intervals.sql >/dev/null
@@ -194,12 +205,12 @@ esac
 # Truncate is storage hygiene here (drops retraction tombstones); the backfill
 # inside 45 replaces every bucket regardless. See the header.
 q "TRUNCATE TABLE IF EXISTS cc_user_minute" >/dev/null
-TARGET="$TARGET" APPLY_GRADED_DESTRUCTIVE="${REBUILD_GRADED:-}" tools/apply-sql.sh sql/45_user_concurrency.sql >/dev/null
+TARGET="$TARGET" APPLY_GRADED_DESTRUCTIVE="${REBUILD_GRADED:-}" tools/chunked-backfill.sh users
 q "SELECT concat('   user-minute buckets: ', toString(count())) FROM cc_user_minute FINAL FORMAT TSVRaw"
 
 echo "== 3/6  cc_minute_delta (hour-clipped, ADR 0003)"
 q "TRUNCATE TABLE cc_minute_delta" >/dev/null
-TARGET="$TARGET" APPLY_GRADED_DESTRUCTIVE="${REBUILD_GRADED:-}" tools/apply-sql.sh sql/40_deltas.sql >/dev/null
+TARGET="$TARGET" APPLY_GRADED_DESTRUCTIVE="${REBUILD_GRADED:-}" tools/chunked-backfill.sh deltas
 q "SELECT concat('   delta rows: ', toString(count()), '  opens ', toString(sum(starts)), '  closes ', toString(sum(ends))) FROM cc_minute_delta FORMAT TSVRaw"
 # WHY NO EXTRA ASSERTION HERE, and why the doubling of 2026-08-02 was missed.
 #
@@ -245,12 +256,8 @@ echo "== 5/6  views"
 TARGET="$TARGET" APPLY_GRADED_DESTRUCTIVE="${REBUILD_GRADED:-}" tools/apply-sql.sh sql/20_views.sql >/dev/null
 echo "   ok"
 
-# Normalisation is READ-SIDE only (ADR 0011): UDFs plus views over cc_minute_delta.
-# It stores nothing and rewrites no byte, so it cannot move the headline or the gate —
-# but until it is applied, `hin` / `HIN` / `hin-hindi` / `hin-Hindi` stay four separate
-# filter buckets and the drift audit does not exist. Everything in the file is
-# CREATE OR REPLACE, so re-running is free. It comes last because its views read
-# cc_minute_delta, which stage 2 builds.
+# Re-apply the same file to refresh its read-side normalisation views over the
+# newly rebuilt delta tier. The quarantine sweep is idempotent.
 echo "== 6/6  normalisation UDFs + views (ADR 0011)"
 TARGET="$TARGET" APPLY_GRADED_DESTRUCTIVE="${REBUILD_GRADED:-}" tools/apply-sql.sh sql/15_normalise.sql >/dev/null
 echo "   ok"

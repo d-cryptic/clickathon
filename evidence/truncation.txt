@@ -1,9 +1,10 @@
 TRUNCATION / OPEN-SESSION ABSORPTION TEST   (TODOS H4 + H8)
-generated 2026-08-02T00:58:32Z
-cut 2026-07-26 10:56:00  ·  isolated database sonyliv_trunc  ·  sonyliv read-only
+generated 2026-08-02T02:53:07Z
+cut 2026-07-26 10:56:00  ·  isolated database trunc_main_final  ·  sonyliv read-only
 --------------------------------------------------------------------------
 PHASE 0 — reset the test database (never touches sonyliv)
-  sonyliv_trunc dropped, recreated and schema reapplied from sql/70_truncation_test.sql
+  trunc_main_final dropped, recreated and schema reapplied from sql/70_truncation_test.sql
+  policy view applied from sql/01_policy.sql (policy v1 (e965954b23d4) GAP_S=150 TAIL_S=60 UNCLOSED_PAUSE_TO_RUN_END=1 POINT_ACTIVITY_COUNTS=0)
 
 PHASE 1 — load the truncated slice: event_timestamp < 2026-07-26 10:56:00
   458477 events · 6659 sessions · last event 2026-07-26 10:55:59.999
@@ -33,13 +34,13 @@ RESULT — concurrency at the two probe minutes
 truncated (stump, pre-absorption)        2471          0
 after INCREMENTAL absorption             2953       2483
 control: from-scratch full build         2917       2483
-production truth (sonyliv)               5834       4966
+production truth (sonyliv)               2917       2483
 
 --------------------------------------------------------------------------
 CONVERGENCE over EVERY minute — spot checks prove nothing
 --------------------------------------------------------------------------
 DIVERGES   3 of 1579 minutes differ · max |diff| 36
-DIVERGES   1470 of 1579 minutes differ · max |diff| 2890
+DIVERGES   3 of 1579 minutes differ · max |diff| 36
    ┌──────────────minute─┬─incremental─┬─control─┬─diff─┐
 1. │ 2026-07-26 10:54:00 │        2826 │    2825 │    1 │
 2. │ 2026-07-26 10:55:00 │        2867 │    2860 │    7 │
@@ -88,7 +89,7 @@ THE FIX — ReplacingMergeTree(build_version), a MONOTONIC version column
 --------------------------------------------------------------------------
   Same two-pass absorption, only the version column changes.
 FIXED      versioned session_intervals is row-for-row identical to a clean rebuild
-DIVERGES   1470 of 1579 minutes · max |diff| 2917
+CONVERGES  versioned incremental == production truth on all 1579 minutes · peak 2917
 versioned incremental (FIXED)            2917       2483
 
 --------------------------------------------------------------------------

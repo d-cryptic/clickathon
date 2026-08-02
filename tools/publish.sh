@@ -178,7 +178,7 @@ trap 'type release_lease >/dev/null 2>&1 && release_lease; rm -rf "$TMP"' EXIT
 # template_or_die <src> <dst> <marker> <sed args...>
 #
 # sed substitutions fail SILENTLY: an anchor that stops matching leaves the
-# original line, and here the original lines are "FROM ev_raw" with no WHERE
+# original line, and here the original line is "FROM v_ev_model_input" with no WHERE
 # and "sum(d) AS delta" with no sign flip. Either one would produce a run that
 # looks successful and is wrong — a full re-derivation billed as an incremental
 # one, or a doubled contribution instead of a corrected one. So every template
@@ -249,8 +249,8 @@ sleep_if() {
 }
 
 # ---------------------------------------------------------------------------
-# PREFLIGHT — refuse a pre-ADR-0019 schema instead of running wrongly on it.
-# Five checks: insert_id on session_dirty, insert_id on cc_publish_consumed,
+# PREFLIGHT — refuse a pre-ADR-0019/0025 schema instead of running wrongly on it.
+# Six checks: insert_id on session_dirty, insert_id on cc_publish_consumed,
 # the consumed key being the PAIR, the MV capturing initialQueryID(), and the
 # lease table existing. Any miss is a hard stop with the migration commands.
 # ---------------------------------------------------------------------------
@@ -267,13 +267,16 @@ preflight_schema() {
          AND name = 'cc_publish_lease')
     + (SELECT countSubstrings(any(create_table_query), 'initialQueryID')
          FROM system.tables WHERE database = currentDatabase()
-         AND name = 'mv_session_dirty'))")"
-  [ "$ok" = "5" ] || die "database '$DB' has a pre-ADR-0019 publication schema ($ok/5 checks passed).
+         AND name = 'mv_session_dirty')
+    + (SELECT count() FROM system.tables WHERE database = currentDatabase()
+         AND name = 'v_ev_model_input'))")"
+  [ "$ok" = "6" ] || die "database '$DB' has an incomplete publication/input schema ($ok/6 checks passed).
 Two identities changed (Q10): session_dirty and cc_publish_consumed now carry
 insert_id, and the consumed set keys on the (marked_at, insert_id) pair.
-With NO publisher running and no in-flight run, migrate with:
+The publisher also requires ADR 0025's accepted-row view. With NO publisher
+running and no in-flight run, migrate with:
     DROP TABLE ${DB}.mv_session_dirty; DROP TABLE ${DB}.cc_publish_consumed;
-then re-apply sql/12_publish.sql. Markings still in session_dirty are
+then re-apply sql/12_publish.sql and sql/15_normalise.sql. Markings still in session_dirty are
 re-claimed once and republished — a no-op by idempotence (PHASE 8 of
 tools/publish-test.sh). See docs/adr/0019."
 }
@@ -577,22 +580,20 @@ publish_once() {
     fi
     crash_if consumed
 
-    # The read window. For each claimed session take the union of
-    #   (a) the event-time span of the markings we are consuming, and
-    #   (b) the span of its CURRENTLY PUBLISHED intervals.
+    # The read window is the COMPLETE raw event span of every claimed session.
+    # The previous implementation unioned the dirty marking with the currently
+    # published interval span and called that complete. It was not: with
+    # POINT_ACTIVITY_COUNTS=0 a singleton produces no interval; a later beat
+    # inside GAP_S then needs the old singleton, but there was no interval span
+    # to recover it from. Incremental publication emitted nothing while a full
+    # rebuild emitted an interval.
     #
-    # That union provably contains every event the session has, which is what
-    # makes it safe to bound the ev_raw read by time as well as by session id:
-    # a session's first interval STARTS at its first event (run_start is an
-    # event timestamp) and its last interval ENDS at or after its last event
-    # (TAIL_S only ever extends), so (b) covers everything published so far,
-    # and (a) covers everything that has arrived since. A brand-new session has
-    # no (b) and is covered entirely by (a).
-    #
-    # This is what lets the scoped read use ev_raw's ACTUAL sort key
-    # (toStartOfHour(event_timestamp) first, ADR 0002) instead of depending on
-    # the video_session_id projection that WALKTHROUGH §5 measured as not worth
-    # shipping.
+    # `proj_session_event_bounds` in sql/00_schema.sql makes this exact GROUP BY
+    # proportional to touched sessions on newly loaded parts. Existing parts
+    # remain correct through the base table and can be accelerated once with:
+    #   ALTER TABLE ev_raw MATERIALIZE PROJECTION proj_session_event_bounds
+    # The later derivation still bounds by both session id and this exact time
+    # span, preserving the event-time pruning supplied by the primary key.
     local where_dirty
     if [ -n "$FORCE_SESSIONS" ]; then
       local in_list; in_list="'$(printf '%s' "$FORCE_SESSIONS" | sed "s/,/','/g")'"
@@ -611,16 +612,19 @@ publish_once() {
            SELECT video_session_id, min(min_event_ts) AS lo, max(max_event_ts) AS hi
            FROM session_dirty WHERE $where_dirty
            GROUP BY video_session_id),
-         prior AS (
-           SELECT video_session_id, min(interval_start) AS plo, max(interval_end) AS phi,
-                  toUInt8(1) AS has
-           FROM session_intervals FINAL
+         history AS (
+           SELECT video_session_id,
+                  min(event_timestamp) AS hlo,
+                  max(event_timestamp) AS hhi
+           -- Raw bounds are deliberate even though derivation below reads the
+           -- accepted-row view: an insert containing only quarantined rows
+           -- still has to be claimed and consumed instead of being retried
+           -- forever. The scoped derive will emit no contribution for it.
+           FROM ev_raw
            WHERE video_session_id IN (SELECT video_session_id FROM claimed)
            GROUP BY video_session_id)
-       SELECT $run_id, c.video_session_id,
-              if(has = 1, least(c.lo, plo), c.lo),
-              if(has = 1, greatest(c.hi, phi), c.hi)
-       FROM claimed c LEFT JOIN prior p USING (video_session_id)" >/dev/null
+       SELECT $run_id, c.video_session_id, h.hlo, h.hhi
+       FROM claimed c INNER JOIN history h USING (video_session_id)" >/dev/null
 
     crash_if batch
     sleep_if batch
@@ -700,7 +704,7 @@ BV here deletes the run's own derivation. Inspect cc_publish_runs run $run_id." 
   if [ "$phase" = negated ]; then
     lease_beat
     template_or_die sql/30_build_intervals.sql "$TMP/derive.sql" 'PUBLISH_SCOPE' \
-      -e "s|^        FROM ev_raw\$|        FROM ev_raw WHERE $SCOPE AND event_timestamp >= toDateTime64('$LO',3) AND event_timestamp <= toDateTime64('$HI',3) /*PUBLISH_SCOPE*/|" \
+      -e "s|^        FROM v_ev_model_input\$|        FROM v_ev_model_input WHERE $SCOPE AND event_timestamp >= toDateTime64('$LO',3) AND event_timestamp <= toDateTime64('$HI',3) /*PUBLISH_SCOPE*/|" \
       -e "s|^        toUInt64(toUnixTimestamp(now())) AS build_version,\$|        toUInt64($BV) AS build_version, /*PUBLISH_BV*/|"
     grep -q 'PUBLISH_BV' "$TMP/derive.sql" || die "derive template lost its build_version override"
     t0=$(now_ms)

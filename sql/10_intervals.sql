@@ -37,8 +37,8 @@
 --
 --   from ev_raw      content_id, platform, app_version, country,
 --                    audio_language, subtitle_language, player_version   (7)
---   from dict_content title, video_type, category                        (3, free
---                    via dictGet on content_id — see 80_content.sql)
+--   from content_dim  title, video_type, category                        (3, joined
+--                    at query time on content_id — see 80_content.sql)
 --
 -- All seven raw ones are carried from here on. They used to stop at three
 -- (content_id, platform, country) and the other four were DROPPED at derivation,
@@ -63,6 +63,10 @@ CREATE TABLE IF NOT EXISTS session_intervals
     audio_language    LowCardinality(String),
     subtitle_language LowCardinality(String),
     player_version    LowCardinality(String),
+    -- Complete name/value map of every raw header unknown to the original
+    -- contract. New fields are filterable without changing this table's key.
+    extra_dimensions  Map(LowCardinality(String), String) DEFAULT map(),
+    video_resolution  String ALIAS extra_dimensions['video_resolution'],
     interval_start   DateTime64(3),
     interval_end     DateTime64(3),
     is_open          UInt8,          -- 1 = session had no VideoSessionEnd at build time
@@ -100,7 +104,9 @@ ALTER TABLE session_intervals
     ADD COLUMN IF NOT EXISTS app_version       LowCardinality(String) AFTER country,
     ADD COLUMN IF NOT EXISTS audio_language    LowCardinality(String) AFTER app_version,
     ADD COLUMN IF NOT EXISTS subtitle_language LowCardinality(String) AFTER audio_language,
-    ADD COLUMN IF NOT EXISTS player_version    LowCardinality(String) AFTER subtitle_language;
+    ADD COLUMN IF NOT EXISTS player_version    LowCardinality(String) AFTER subtitle_language,
+    ADD COLUMN IF NOT EXISTS extra_dimensions  Map(LowCardinality(String), String) DEFAULT map() AFTER player_version,
+    ADD COLUMN IF NOT EXISTS video_resolution  String ALIAS extra_dimensions['video_resolution'] AFTER extra_dimensions;
 
 -- ---------------------------------------------------------------------------
 -- The serving layer: minute deltas per dimension combination.

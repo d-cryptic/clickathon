@@ -36,9 +36,26 @@ CREATE TABLE IF NOT EXISTS ev_raw
     -- the empty maps on all 905,558 rows: see evidence/schema-drift/).
     extra Map(LowCardinality(String), String),
 
+    -- Released unseen dimension. Keep the loader generic: it discovers this
+    -- and every future header into `extra`; this alias promotes the official
+    -- field without making the original 13-column dataset require it.
+    video_resolution String ALIAS extra['video_resolution'],
+
     -- skip indexes: the two lookups that are not the sort key prefix
     INDEX idx_content content_id TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_ts      event_timestamp TYPE minmax GRANULARITY 1
+    INDEX idx_ts      event_timestamp TYPE minmax GRANULARITY 1,
+
+    -- The incremental finalizer must recover the complete event-time span of
+    -- a dirty session even when its previous singleton produced no interval.
+    -- This aggregate projection makes that exact lookup O(touched sessions)
+    -- instead of a history scan; see tools/publish.sh's claim phase.
+    PROJECTION proj_session_event_bounds
+    (
+        SELECT video_session_id,
+               min(event_timestamp) AS min_event_ts,
+               max(event_timestamp) AS max_event_ts
+        GROUP BY video_session_id
+    )
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMMDD(event_timestamp)
@@ -59,6 +76,14 @@ SETTINGS index_granularity = 8192,
 -- no-op on an existing table and will not add the column. Metadata-only, instant,
 -- safe to re-run. Same statement works applied by hand to a pre-0024 database.
 ALTER TABLE ev_raw ADD COLUMN IF NOT EXISTS extra Map(LowCardinality(String), String) AFTER session_start_epoch;
+ALTER TABLE ev_raw ADD COLUMN IF NOT EXISTS video_resolution String ALIAS extra['video_resolution'] AFTER extra;
+ALTER TABLE ev_raw ADD PROJECTION IF NOT EXISTS proj_session_event_bounds
+(
+    SELECT video_session_id,
+           min(event_timestamp) AS min_event_ts,
+           max(event_timestamp) AS max_event_ts
+    GROUP BY video_session_id
+);
 
 -- ---------------------------------------------------------------------------
 -- Content dimension. Small and static -> also exposed as a DICTIONARY (20_dicts.sql)
@@ -72,9 +97,13 @@ CREATE TABLE IF NOT EXISTS content_dim
     category   LowCardinality(String),
     -- ADR 0024: same catch-all as ev_raw — a new catalog column (genre, rating, …)
     -- lands here instead of being dropped. 33k rows; the cost is nil.
-    extra      Map(LowCardinality(String), String)
+    extra      Map(LowCardinality(String), String),
+    -- Same promotion pattern as ev_raw.video_resolution. Old catalog files
+    -- return '' through the alias; the released unseen file populates it.
+    show_name  String ALIAS extra['show_name']
 )
 ENGINE = ReplacingMergeTree
 ORDER BY content_id;
 
 ALTER TABLE content_dim ADD COLUMN IF NOT EXISTS extra Map(LowCardinality(String), String) AFTER category;
+ALTER TABLE content_dim ADD COLUMN IF NOT EXISTS show_name String ALIAS extra['show_name'] AFTER extra;

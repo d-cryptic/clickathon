@@ -1,5 +1,10 @@
 # Codex Validation 008 — current-main upstream closure, genericity, and live-state audit
 
+> **Superseded on 2026-08-02 by Codex Validation 009.** This is a historical snapshot at `28c7e4a`,
+> before the official unseen data, `video_resolution`/`show_name`, accepted-row wiring and updated
+> ClickStack submission evidence contract were available. Its “private repository” and “Team
+> Captain” blockers were not present in the official submission rules and must not be used.
+
 > **Summary:** Re-audited `main` at `28c7e4a` on 2026-08-02 against every line of all four files in `docs/upstream/`, every tracked repository file, the supplied SonyLIV CSVs in a fresh local ClickHouse database, current test generators, and the live Cloud read path.
 > The v2 interval/run/delta algorithm is computationally exact under its declared policy: a fresh 905,558-row load produced 30,323 intervals, peak 2,917, and zero canonical reconcile mismatches.
 > It is not yet submission-ready: the live Cloud delta tier is duplicated (56,146 rows and peak 5,834 versus the correct 28,073 and 2,917), the repository is private, and no Team Captain is named.
@@ -84,7 +89,7 @@ Status meanings:
 | New columns / more dimensions | **PARTIAL** | Unknown CSV columns survive in raw `extra Map(String,String)`. They are not carried into intervals, deltas, hour aggregates, user buckets, or generic serving filters. |
 | Unseen-day execution | **PARTIAL** | A local synthetic unseen day reconciles exactly. The official runner is Cloud-write-only, omits the normalization/preprocessing SQL, and its cruel-data narratives are stale after recent decisions. |
 | 100× scale story | **NOT CURRENTLY VERIFIED** | Historical evidence is directionally useful, but current `tools/scale-test.sh` cannot load the current 5/14-column schemas and ignores those insertion failures. |
-| Private benchmark accuracy and latency | **UNVERIFIABLE** | No private ground truth, final unseen day, or official benchmark query set was available. No percentage-accuracy claim is justified. |
+| Judge spot-check accuracy and latency | **UNVERIFIABLE AT THAT SNAPSHOT** | The final unseen data and clarified result classes were not yet available. No percentage-accuracy claim was justified. |
 
 ## 4. Fresh local results on the supplied dataset
 

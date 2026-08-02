@@ -4,7 +4,7 @@
 > Measured, that ships a correctness hole: `WHERE audio_language = 'hin'` answers **1,768** for peak
 > Hindi concurrency when the true answer is **2,180** — it drops **23.3%**. The fix is a query-time
 > **rule** (`sql/15_normalise.sql`: pure UDFs + views), not a rewrite and not a mapping table. Storage
-> stays raw so a raw-matched ground truth still answers exactly as today. Query cost is **zero** —
+> stays raw so raw-event spot-checks still answer exactly as today. Query cost is **zero** —
 > both filters read the same 28,101 rows / 137 KiB. Normalising *inside* the derivation was built and
 > measured and is **worse**: it degrades 202 intervals onto a sentinel. Status: accepted, 2026-08-01.
 
@@ -115,7 +115,7 @@ columns that matter to this ADR agree exactly.)*
 
 ## 3 · The decision, and the tension it has to survive
 
-The graded ground truth is **private**, and it may itself be un-normalised. If it is, and we rewrite
+Judge filter semantics are unspecified and may be un-normalised. If we rewrite
 `hin-hindi` to `hin` in storage, we are wrong on every filtered answer — and we would never see it.
 That is not a hypothetical to be waved past; it is the reason ADR 0008 kept the values raw, and it was
 right to.
@@ -125,7 +125,7 @@ right to.
 Normalising *in storage* is a bet: it destroys the raw string, so it can answer only one of the two
 possible questions, and it has to be the right one. Normalising *on read* is not a bet: the raw column
 is untouched, so a raw-matched query answers **byte-identically to today**, and the normalised answer
-is strictly additional. There is no reading of the ground truth under which having both columns is
+is strictly additional. There is no judge interpretation under which having both columns is
 worse than having one.
 
 Three measurements make deferring free rather than merely safe:
@@ -364,7 +364,7 @@ measured differently. The direction is favourable, so it is a stale number rathe
 - Filtered concurrency by language becomes correct: peak Hindi **1,768 → 2,180**. Every unfiltered
   number is **unchanged** — peak 2,887, 30,769 intervals, 1,949.3 hours — and that invariance is the
   reason this is safe to add at any point, including after the unseen day drops.
-- The raw values remain in storage, byte for byte, so a raw-matched ground truth answers exactly as it
+- The raw values remain in storage, byte for byte, so a raw-event spot-check answers exactly as it
   does today. **Both answers are one `WHERE` clause apart**, and no rebuild sits between them.
 - `sql/30_build_intervals.sql` and `sql/10_intervals.sql` are untouched by this ADR.
 - The peak-by-dimension figures in ADR 0008 §Consequences now have a normalised counterpart. They

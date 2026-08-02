@@ -1,4 +1,4 @@
-property-test run — mode=compat seed0=20260802 cases=200 db=prop_t6
+property-test run — mode=compat seed0=20260802 cases=200 db=prop_main_final
 properties (docs/codex-validation/003.md §13.2):
   P1 state machine == reference interpreter
   P2 interval expansion == delta running sums

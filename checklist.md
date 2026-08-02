@@ -4,7 +4,8 @@
 > organiser's actual spec in [docs/upstream/](docs/upstream/). This file is the **scoring view**: what
 > judges grade, what we must be able to defend, and where each answer already lives. It deliberately
 > does **not** re-explain the model — that is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and the
-> ADRs. Task queue is [TODOS.md](TODOS.md); honest status is [WALKTHROUGH.md](WALKTHROUGH.md).
+> ADRs. The portal closes automatically at **12:00 PM IST on 2026-08-02**. Task queue is
+> [TODOS.md](TODOS.md); honest status is [WALKTHROUGH.md](WALKTHROUGH.md).
 > For the minimum shippable cut, see [V0_CHECKLIST.md](V0_CHECKLIST.md).
 
 **Golden rule:** optimize ingestion *and* querying while holding correctness, scalability and
@@ -21,11 +22,11 @@ Everything in this file exists to serve one of these.
 
 | # | Criterion | What judges actually check | Our state |
 |---|---|---|---|
-| C1 | **Correctness** | Benchmark answers vs private ground truth. Foreground-only means foreground-only; overcounting backgrounded time is *the* failure mode. | Gate passes vs `ev_raw` — [`evidence/reconcile.txt`](evidence/reconcile.txt) |
+| C1 | **Correctness** | Judges spot-check concurrency against raw events. Foreground-only means foreground-only; overcounting backgrounded time is *the* failure mode. | Gate passes vs accepted raw events — [`evidence/reconcile.txt`](evidence/reconcile.txt) |
 | C2 | **Query performance** | Latency at the given volume, **and what the queries read** — not just wall time. | 299 KB / 23 ms vs 2.55 MB / 56 ms (8.5×) |
 | C3 | **Update handling** | Open sessions + late heartbeats absorbed **incrementally**, or recomputed? | ✅ converges after the `388a845` schema fixes (`evidence/truncation.txt`, re-run 2026-08-01: all 1,579 minutes, peak 2,917). ⚠️ Incremental path covers `session_intervals`+`cc_minute_delta` only; hour/user tiers batch-rebuild, and the installed publisher has never committed a run on `sonyliv` — see §4/§5 |
 | C4 | **Design quality** | Schema/representation choices *and the reasoning*. "A team that can defend its trade-offs beats a team with a lucky benchmark." | ADRs 0001–0014 |
-| C5 | **The unseen day** | Results on the sealed dataset, with latencies **and pipeline evidence**. *No pipeline evidence, no credit.* | Rehearsed — `tools/unseen-run.sh`, ~2.5 min for a 1 GB day, `evidence/unseen-rehearsal.txt` |
+| C5 | **The unseen data** | Peak/average minute/hour/day results with filters, latencies **and pipeline evidence**. *No pipeline evidence, no credit.* | Official 7M local release path green: 64+38 date chunks, 3,201,716 reconciled minutes, 0 mismatches; `evidence/unseen/official-20260802-codex-validation.txt` |
 
 ### Hard requirements (not scored — gating)
 
@@ -36,6 +37,10 @@ Everything in this file exists to serve one of these.
       `sonyliv observe` emits our watermark lag / build timing / gate outcome over OTLP
       (docs/OBSERVABILITY.md). ⚠️ Two persisted user-tier sources select the wrong column —
       `docs/WORKTREE_QUEUE.md` Q13.
+- [ ] **Package the newly required ClickStack proof.** Commit deployment/integration and OTel
+      config, a secrets-redacted `.env.example`, name the destination ClickHouse service/tables,
+      put the dashboards/searches actually used in the README, and walk them through live in the
+      hosted demo and video. Screenshots alone are explicitly insufficient.
 - [ ] **No hand-computed answers.** Every number traceable to a query log or trace. *(Ongoing rule,
       re-checked at submission.)*
 - [ ] **No credentials in git.** *(Ongoing rule, re-checked at submission.)*
@@ -171,7 +176,7 @@ Measured at 1×, 10× and 100× — [evidence/scale.txt](evidence/scale.txt), re
 Released to all teams simultaneously in the final hours. **Build for it, not for the file we tuned on.**
 
 - [ ] `/unseen` runs end to end with **zero** hand edits, on a dataset never seen.
-- [ ] Benchmark answers + latencies captured.
+- [ ] Required peak/average minute/hour/day concurrency results + latencies captured.
 - [ ] Query-log / trace evidence packaged alongside. *No pipeline evidence, no credit.*
 - [ ] Nothing in the model is fitted to the tuning file's constants (gap threshold, tail, watermark
       are declared tunables in one place, and the sensitivity sweep is run).
@@ -196,7 +201,7 @@ show? Why this ordering key? Why materialized views, and what stays raw?
 
 **Data quality.** Duplicates, NULLs, empty strings, erroneous records — where in the pipeline, and why there?
 
-**Evidence.** Which benchmark queries, which metrics, what did they read? Show the query log.
+**Evidence.** Which required concurrency queries, which metrics, what did they read? Show the query log.
 
 **Business.** What decision does this change? Naive counting says 2,976.9 h of watch time; the
 foreground-only model says 1,978.1 h — **33.6% of apparent watch time is backgrounded or paused**, and
@@ -216,4 +221,6 @@ for +94% storage. Measured, documented, deliberately not shipped.)
 - [ ] Deck: 15 slides mapped to C1–C5.
 - [ ] Demo rehearsed twice — replay a live-event day: ingest → curve builds → apply a filter →
       minute-grain answers instantly.
-- [ ] **Team Captain confirmed and awake before the freeze.** Only they can submit.
+- [ ] Hosted demo link and recorded 2–3 minute video are present in the team README.
+- [ ] Self-contained team folder contains source, README, architecture, pitch PDF and ClickStack
+      evidence, then is submitted in one PR titled `[Submission] Team Name`.

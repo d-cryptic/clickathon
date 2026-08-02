@@ -1,13 +1,13 @@
 # WALKTHROUGH — where this project actually stands
 
 > **Summary:** Click-a-thon India 2026 · SonyLIV **foreground-only concurrency**. Built end to end on
-> ClickHouse Cloud: session, user and content concurrency off a hour-clipped delta serving layer,
-> rolling/tumbling windows, ClickStack both charting and self-observing. All 7 raw dimensions are carried
-> in the interval/delta tier; the hour/day, user, window and stateless paths expose platform/country/
-> content_id only (§5 scope limits). Incremental publication ([ADR 0013](docs/adr/0013-continuous-publication-by-incremental-finalizer.md))
-> is proven byte-identical to a rebuild for `session_intervals`+`cc_minute_delta` in a scratch DB — but
-> the graded database is still **batch-rebuilt**: the installed publisher has never committed a run
-> there, and it has no path for the hour/user tiers anywhere. Peak **2,917 @ 2026-07-26 10:56**; naive
+> ClickHouse Cloud: session, user and content concurrency off an hour-clipped delta serving layer,
+> rolling/tumbling windows, ClickStack charting and self-observing, and four-tier incremental
+> publication proven in scratch. The official 7-million-row unseen release adds dynamic dimensions
+> and spans 102 output dates; the portal closes automatically at **12:00 PM IST on 2026-08-02**.
+> Current closure status and blockers are in Codex Validation 009.
+> The graded database remains batch-built: the installed publisher has never committed a run there.
+> The original-data peak is **2,917 @ 2026-07-26 10:56**; naive
 > session-span says 3,708. The gate compares **every minute in the data — 17,028, idle ones included —
 > 0 mismatched**, negative-tested. Rebuild `make model`; prove it `make reconcile`.
 
@@ -24,8 +24,8 @@ Full session record, including every bug found and every claim corrected: [`docs
 Count viewers **actively watching** each minute — excluding backgrounded, paused and
 heartbeat-missing time — from session start/end plus player telemetry. It must serve dashboard-grade
 queries from a **serving layer**, not by rescanning session history, and must absorb still-open
-sessions and late arrivals. Scored against a **private ground truth** plus an **unseen day** released
-in the final hours.
+sessions and late arrivals. Judges spot-check against raw events; the released unseen data requires
+peak/average results at minute, hour and day grain with filters, latency and pipeline evidence.
 
 Full statement: [`docs/upstream/PROBLEM_STATEMENT.md`](docs/upstream/PROBLEM_STATEMENT.md).
 
@@ -240,7 +240,8 @@ numbers; all of them bound what "supported" may honestly mean:
   conservative number with an old permissive one would invent a delta across two derivations.
 - **Local container schema drift** — local `cc_minute_stateless` is `uniq`, Cloud is `uniqExact`.
   Fixing needs `docker compose down -v`, which destroys the local volume.
-- **Team Captain** — only they can submit.
+- **Submission operator** — must assemble the official team folder and open the mandatory PR; the
+  published rules do not make this Captain-only.
 
 ### Measured and rejected
 

@@ -109,7 +109,7 @@ about separately.**
 > (610,889 rows), `HIN` (69,033), `hin-hindi` (23,095) and `hin-Hindi` (507). English is another four,
 > Malayalam three, Japanese four (`jap`, `jpn`, `JPN`, `jpn-japanese`).
 >
-> **The question:** in your ground truth, is a query filtered to Hindi audio counting all four
+> **The question:** in judge spot-checks, is a query filtered to Hindi audio counting all four
 > spellings as one language, or is each string its own filter value?
 >
 > We ask because we measured both. Treating the four as one gives a peak Hindi concurrency of
@@ -128,7 +128,7 @@ about separately.**
 
 ## Why this is worth mentor time
 
-**Because it is unfittable and it is submitted.** The ground truth is private, both readings produce
+**Because it is unfittable and it is submitted.** Judge normalization semantics are unspecified; both readings produce
 an internally consistent curve, and — critically — **`/reconcile` cannot catch this.** Our gate proves
 the serving layer matches our own interval derivation; it recomputes truth from `ev_raw` using the
 same strings, so it agrees with itself by construction whichever reading we pick. A 23.3% error on a

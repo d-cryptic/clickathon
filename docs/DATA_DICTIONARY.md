@@ -1,11 +1,12 @@
 # DATA_DICTIONARY — the SonyLIV event stream
 
-> **Summary:** Field-by-field reference for `ch-hackathon-raw-data.csv` (905,558 events) and
-> `ch-hackathon-content-data.csv` (~33K titles), plus the **measured** shape of the provided file and
-> the traps that decide whether the model survives the unseen day. `event_timestamp` is epoch
-> **milliseconds**. Backgrounding is **universal** (every session has one) and background/foreground
-> events are **not guaranteed to pair**. `VideoHeartbeat` is **not a 60-second beat** — it is 41
-> sub-streams, three of which tick at **40 s** (trap 6). Read [#traps](#traps) before any interval logic.
+> **Summary:** Field-by-field reference for both the original SonyLIV files and the official 7M-event
+> unseen release. The unseen raw file adds `video_resolution`; its content file adds `show_name`.
+> Unknown future columns land losslessly in `extra Map(String,String)` and selected hot fields are
+> promoted through aliases and named filter views. `event_timestamp` is epoch **milliseconds**.
+> Background/foreground markers are not guaranteed to pair, while heartbeat gaps have a strong
+> 40-second mode in both releases. The official unseen data also contains multi-incarnation session
+> IDs, time-varying resolution, exact duplicates, out-of-order rows, and three quarantined timestamps.
 
 Both files are gitignored (223 MB). Get them with `tools/fetch_data.sh` — checksum-pinned against the
 [organiser repo](https://github.com/sidagarwal04/click-a-thon-2026/tree/main/SonyLiv/data).
@@ -25,6 +26,8 @@ Both files are gitignored (223 MB). Get them with `tools/fetch_data.sh` — chec
 | `country` | LowCardinality(String) | filter dimension · **only 1 value in the provided file** |
 | `audio_language`, `subtitle_language` | LowCardinality(String) | filter dimensions |
 | `session_start_epoch` | DateTime64(3) | session start, repeated on every event of the session. **Stored, never modeled** — the derivation takes run starts from the min/gap-split event timestamps instead. On this file that is provably harmless (every session's value matches its `VideoSessionStart` timestamp exactly, 0 mismatches, max diff 0 ms); it is *not* a validated invariant for an unseen file ([codex-validation/002.md](codex-validation/002.md) §3.3) |
+| `extra` | Map(LowCardinality(String), String) | all source columns beyond the known contract, keyed by header name; carried into accepted intervals by a deterministic per-key vote |
+| `video_resolution` | String ALIAS | `extra['video_resolution']`; mandatory unseen filter dimension, 2,071 raw spellings and highly time-varying |
 
 ### `event_type` enum, with measured counts
 
@@ -53,8 +56,34 @@ only `pause` (27,340 rows) and `resume` (31,780) are matched; look-alikes such a
 
 ## Content dimension — `content_dim`
 
-`content_id` · `title` · `video_type` · `category`. Small and static, so it is also loaded as a
-**dictionary** — `dictGet` measured 34× faster than a `JOIN` on a comparable workload.
+`content_id` · `title` · `video_type` · `category` · `extra`, with `show_name` exposed as
+`extra['show_name']`. The table is small (~33K rows). A dictionary remains an optional Cloud
+accelerator, but serving correctness uses `LEFT ANY JOIN content_dim FINAL`: a self-source dictionary
+failed authentication on a fresh secured local ClickHouse instance, while the direct join is portable
+and exposes catalog corrections immediately.
+
+## Official unseen release — measured, not inferred
+
+| Property | Measured result |
+|---|---:|
+| raw rows / sessions / users | 7,000,000 / 108,486 / 82,958 |
+| content rows / used content IDs / orphans | 33,326 / 15,094 / 0 |
+| declared day | 2026-07-31 |
+| rows outside that date | 63,848 |
+| exact duplicate rows | about 24,964 |
+| physical-order backwards timestamp pairs | 355,121 global; 281,502 within session |
+| session IDs with multiple start epochs / users / content IDs / platforms | 159 / 303 / 23 / 448 |
+| raw resolution spellings / blank rows | 2,071 / 15,961 |
+| sessions with more than one resolution | 93,205 |
+| adjacent resolution changes | 440,646 |
+| semantic quarantine | 3 `ts_out_of_range`; 6,999,997 accepted model rows |
+
+The file label says one day, but timestamps span outside it. Date filters must be explicit and the
+model must not derive its policy or target day from physical CSV order. Resolution attribution is an
+open semantic contract: deterministic per-interval modal attribution differs from a latest-event
+as-of-minute interpretation in **209,778 of 1,370,363 session-minute cells (15.31%)**. The current
+filter surface uses modal attribution and keeps buckets additive; it must not be described as private
+judge spot-check expectations until the organiser confirms the intended mid-minute/change semantics.
 
 ## Measured shape of the provided file
 
@@ -88,9 +117,11 @@ of hour crossings in ADR 0003 as unverified, while its hour-clipping **design** 
 **1 · Background/foreground events do not pair.** 14,700 backgrounds vs 14,321 foregrounds — **379
 unmatched**, and 418 sessions background and never come back. The dictionary says outright they
 "are not guaranteed events and sometimes depend on the system." Any model that reconstructs inactivity
-by pairing `AppBackgrounded` → `AppForegrounded` is wrong on ~4% of sessions here, and wrong by a
-different amount on the unseen day. **Use heartbeat gaps as the primary signal** — for
-*backgrounding*. Gaps do not find a pause; see trap 7.
+by blindly pairing `AppBackgrounded` → `AppForegrounded` needs a defined unmatched-marker policy.
+Heartbeat gaps are the current primary signal, but that does not prove an observed background marker
+should be ignored. On unseen data, removing the background gate alone changed only 3.38 active hours;
+the much larger research-model difference came from heartbeat-only liveness. Evaluate those two axes
+separately. Gaps do not find a pause; see trap 7.
 
 **2 · Backgrounding is universal, not an edge case.** Every one of the 10,866 sessions has at least one
 background event. Foreground-only exclusion is the entire problem, not a correction term.
@@ -125,7 +156,7 @@ which is how this repo once concluded "there is no cadence". Separated, three of
 
 Consequences: the cadence is **40 s**, so `GAP_S = 150` is 3.75 missed beats (not "3× a p99 of 49 s")
 and `TAIL_S = 60` is 1.5 cadences, not the "one cadence" its comment claims. Which cadence the private
-ground truth assumed is unanswerable from the data — dossier and the exact question to ask:
+judge interpretation is unanswerable from the data — dossier and the exact question to ask:
 [doubts/01](../doubts/01-heartbeat-cadence.md), which **supersedes Q17** in
 [MENTOR_QUESTIONS.md](MENTOR_QUESTIONS.md). Do not use the heartbeat as a "reliable periodic activity
 signal": gaps detect backgrounding, and pause must be subtracted explicitly (trap 7).

@@ -5,7 +5,7 @@
 > earlier reading — recorded in ADR 0007 and Q17 as "there is no cadence, it is bursty noise" — was an
 > artefact of measuring all 41 `VideoHeartbeat` sub-events **mixed together**; separated, three of them
 > are metronomes. Both of our activity tunables (`GAP_S = 150`, `TAIL_S = 60`) are functions of a
-> cadence, so if the private ground truth assumed 60 s, every interval boundary we produce is offset.
+> cadence, so if judge spot-checks assume 60 s, every interval boundary we produce is offset.
 > **Supersedes Q17 in [docs/MENTOR_QUESTIONS.md](../docs/MENTOR_QUESTIONS.md).**
 
 **Status:** open · **Evidence measured:** 2026-08-01, local `csv_audit.raw_str`, fresh CSV load,
@@ -93,7 +93,7 @@ Against a real 40 s pulse: `GAP_S = 150` is **3.75 missed beats** (not 3× a p99
 > forty seconds**, p50 and p90 both 40.0. Mixed together they look like noise, which is what fooled us
 > at first; separated, they're metronomes. `network-bandwidth` runs at 120 seconds.
 >
-> **Question one:** when the private ground truth decides whether a viewer was active, does it assume a
+> **Question one:** when judges decide whether a viewer was active, do they assume a
 > sixty-second cadence — for example 'active for the 60 seconds after each heartbeat', or an inactivity
 > timeout expressed as N missed 60-second beats — or was it derived from the forty-second pulse that is
 > actually in the data?
@@ -115,7 +115,7 @@ internally consistent**. The file ticks at 40 s; the spec says 60 s. If the gene
 and the delivery pipeline resampled, we have tuned to an artefact. If the generator emitted at 40 s
 and the doc is stale, our current `TAIL_S = 60` over-credits every interval by half a cadence.
 
-It cannot be measured our way out of: the ground truth is private, so a wrong guess is silently wrong
+It cannot be measured our way out of: the judge interpretation is unspecified, so a wrong guess is silently wrong
 on **every** benchmark answer and on the unseen day, and nothing looks broken.
 
 ## How the answer changes what we build

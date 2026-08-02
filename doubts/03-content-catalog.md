@@ -150,7 +150,7 @@ The orphan question is the one with teeth for the unseen day. Zero orphans today
 contract; a fresh day with new or late catalog entries can reference ids absent from the catalog, and
 an `INNER JOIN` would then delete those events **silently** — concurrency drops and nothing errors.
 
-The cost of asking is low and the cost of guessing is a whole category of benchmark answers.
+The cost of asking is low and the cost of guessing is a whole category of filtered results.
 
 ## How the answer changes what we build
 

@@ -1,14 +1,16 @@
 # PREPROCESSING — what happens to hostile input, per class
 
-> **Summary:** Runtime preprocessing (ADR 0025) is a three-way policy applied by `sql/15_normalise.sql`
-> on every load/build: **reject** nothing (a discarded row is invisible to every check we have),
+> **Summary:** Runtime preprocessing (ADR 0025) is now the canonical model-input boundary applied by
+> `sql/15_normalise.sql` before every build: **reject** nothing silently,
 > **quarantine** only rows the model cannot use correctly (no session identity / no usable timestamp)
 > into `ev_quarantine` with one reason code per row, **keep-and-count** everything else suspicious
 > (`v_preprocess_flags`), and **normalise on read** for value defects (ADR 0011, extended with a
 > unicode scrub). One stage EARLIER, at the cast boundary, **ADR 0030**'s all-`String` landing table
 > catches what the type system rejects at the door and `q_reason` therefore never sees. Measured: the
-> provided file quarantines **0** rows, flags **0**, and casts **0** to the ledger; the sweep costs
-> **327 ms / 122.63 MiB**. Evidence: `evidence/preprocessing.txt`, `evidence/landing/identity.txt`.
+> original file quarantines **0** rows, while the official unseen file quarantines **3** out-of-range
+> timestamps and sends **6,999,997** rows to SQL30/SQL90. Raw remains lossless and every verdict is
+> reversible. Evidence: `evidence/preprocessing.txt`, `evidence/landing/identity.txt`, and the current
+> Codex unseen validation report.
 
 ## The one-table answer
 
@@ -47,8 +49,10 @@ a kept-but-counted row is still in the answer if the key wants it.
 ## How it runs, and what it costs
 
 The classifier (`q_reason`, `q_flags`), the sweep `INSERT`, and all views live in
-`sql/15_normalise.sql`, which `tools/build-model.sh` applies as **stage 6/6** — so preprocessing runs
-on every load/build with no new tooling. The sweep is **idempotent**: `ev_quarantine` is a
+`sql/15_normalise.sql`. `tools/build-model.sh` applies it before SQL30 establishes the accepted-row
+view, then re-applies it after the serving tiers to refresh read-side normalisation views.
+`tools/unseen-run.sh`, the independent gate, generation build, and publisher use the same boundary.
+The sweep is **idempotent**: `ev_quarantine` is a
 `ReplacingMergeTree` keyed on `(reason, src_hash)` where `src_hash` hashes all 13 raw columns, so a
 re-run replaces rather than duplicates (verified by applying the file twice — identical table).
 Byte-identical source duplicates collapse to one row carrying `copies`.
@@ -83,12 +87,10 @@ spellings grouped with `hin` on read. Full transcript: [evidence/preprocessing.t
    cover, and what still belongs here: a *castable but wrong* value (seconds where milliseconds were
    meant) is a valid `UInt64`, so no cast can object — that one is caught by `ts_out_of_range` in
    this file, which means it depends on gap 2 below. Evidence: `evidence/landing/identity.txt`.
-2. **`v_ev_model_input` is not wired into the model or the gate.** `sql/30_build_intervals.sql` and
-   `sql/90_reconcile.sql` both read `ev_raw` directly; switching them is a two-file change that must
-   land together (a model that skips a row the gate still counts is a mismatch the gate will —
-   correctly — fail on). Both files are owned elsewhere; the wiring diff is in ADR 0025. Until then,
-   on any day where the quarantine is non-empty, quarantined rows **do** reach the model, and
-   `v_quarantine_summary` is the measure of how much that matters.
+2. ~~**`v_ev_model_input` is not wired into the model or the gate.**~~ **CLOSED:** SQL30, SQL90,
+   batch builds, generation builds, and incremental derivation now consume the accepted-row view.
+   A focused five-row test produced 3 accepted + 2 quarantined, one valid interval, and zero gate
+   mismatches. The official unseen rerun is the release gate for the 7M-row proof.
 3. **T2's cruel generator had not landed when this was built.** The classifier was designed from the
    brief's four classes (empty, unicode-mangled, out-of-range, type mismatch) and self-tested with
    synthesized bytes. When `tools/cruel-gen.sh` lands, run its output through

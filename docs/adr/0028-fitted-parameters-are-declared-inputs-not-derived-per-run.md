@@ -58,7 +58,7 @@ whose own inputs move 3.4×.**
 *It makes two runs incomparable.* This is the disqualifying one. A judge compares our unseen-day
 answer to our benchmark answer; under a derived parameter those are two different models. We would
 be unable to say what our model *is* without also shipping the day it ran on. Against an exact
-private ground truth this trades a small, explainable, one-signed error for an unexplainable one.
+exact judge spot-checking this trades a small, explainable, one-signed error for an unexplainable one.
 
 *It cannot be made efficient.* `arraySplit` needs `GAP_S` before it can run; `GAP_S` needs the full
 distribution. That ordering cannot be collapsed, so deriving per run means **a second full pass over

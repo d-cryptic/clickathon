@@ -1,22 +1,24 @@
 # CLICKSTACK — the OSS integration, and where the concurrency chart comes from
 
-> **Panel reference:** what each of the 53 tiles on the seven dashboards shows and how to read it is
-> in [CLICKSTACK_DASHBOARDS.md](CLICKSTACK_DASHBOARDS.md), captured live from the running service.
+> **Summary:** ClickStack observes pipeline lag and query cost over OTLP and serves the concurrency UI.
+> The 2026-08-01 live capture proves 24 sources, seven dashboards, 53 tiles and eight working filters.
+> The current candidate exposes all 12 declared dataset filters and generic map-backed future fields.
+> Existing named sources now converge by full-replacement PUT instead of retaining stale select SQL.
+> Cloud deployment, signed-in filter verification, screenshots and a live demo/video remain required.
 
-> **Summary:** ClickStack does **two** jobs — it observes our pipeline over OTLP (ingestion lag,
-> query latency) and it *is* the concurrency visualization the statement asks for, so we ship no
-> custom frontend. **Two ways to run it. We use Option B:** HyperDX built into ClickHouse Cloud
-> (confirm via the `hyperdx-alert-internal` user) reads `sonyliv` directly — no connection string, no
-> IP allowlist. It is **fully scriptable** — `tools/clickstack-cloud.sh` provisions 24 sources,
-> **SEVEN dashboards** (headline · drilldown-with-filters · content · time-window trend · pipeline
-> health · query cost · user-level) and saved searches over the Cloud control-plane API; the
-> `connection` id it needs comes once from the clickstack MCP into `.env` as
-> `CLICKSTACK_CONNECTION_ID`; `CLICKSTACK_SKIP_APPLY=1` makes the run control-plane-only (no DDL).
-> **Option A** is the local all-in-one (`make stack-up && make clickstack`). Charts read plain views
-> (`sql/20_views.sql`, `sql/87_viz.sql`) — no chart tool can read an `AggregateFunction` column.
-> Data ends **2026-07-26**: the default 15-minute window renders empty (dashboards 1–4 and 7; 5–6 run
-> on operator time). Verified live: `evidence/clickstack-dashboards.txt` ·
-> `evidence/clickstack/tile-verification-2026-08-01.txt` (all 53 tiles, signed-in).
+> **Panel reference:** [CLICKSTACK_DASHBOARDS.md](CLICKSTACK_DASHBOARDS.md) records every captured tile.
+
+We use HyperDX built into ClickHouse Cloud: it reads `sonyliv` directly with no separate connection
+string or IP allowlist. `tools/clickstack-cloud.sh` provisions the seven dashboards (headline,
+drilldown, content, time-window trend, pipeline health, query cost and user-level) plus their sources
+and saved searches. Its connection id comes once from the ClickStack MCP into `.env` as
+`CLICKSTACK_CONNECTION_ID`; `CLICKSTACK_SKIP_APPLY=1` makes a run control-plane-only.
+
+The local alternative is `make stack-up && make clickstack`. Both modes chart plain views from
+`sql/20_views.sql` and `sql/87_viz.sql`; a chart tool cannot read an `AggregateFunction` state column.
+Data ends **2026-07-26**, so the default 15-minute window is empty for dashboards 1–4 and 7; 5–6 use
+operator time. Historical evidence: `evidence/clickstack-dashboards.txt` and
+`evidence/clickstack/tile-verification-2026-08-01.txt` (all 53 captured tiles, signed-in).
 
 ## Why ClickStack is the chart, not just the telemetry
 
@@ -25,6 +27,22 @@ time is enough to demo" ([PROBLEM.md](PROBLEM.md), Out of scope). ClickStack is 
 integration we are asked to use. Pointing HyperDX at our own serving layer satisfies both with one
 component and zero UI code, and every chart is backed by a real query against the graded service
 rather than a screenshot of a number someone typed.
+
+## Submission evidence gate added by upstream
+
+The updated common submission README makes ClickStack evidence explicit. The submission folder must
+contain the committed wiring (Compose/deployment configuration, redacted `.env.example`, collector
+and integration configuration), name the ClickHouse service and tables ClickStack reads or writes,
+and include screenshots of the dashboards/searches actually used. A screenshot is still insufficient
+on its own: the hosted demo and the 2–3 minute video must walk through ClickStack live and explain its
+role in the architecture.
+
+The code candidate is ready for that capture, but this session deliberately did not mutate Cloud.
+Before recording, an operator must run `tools/clickstack-cloud.sh`; it first converges the metadata
+migrations in `sql/00_schema.sql` and `sql/10_intervals.sql` plus `sql/87_viz.sql`, then PUTs the 27
+named sources and 12-filter drilldown. Verify every filter changes the concurrency curve in a signed-in
+browser, then capture the UI for the submission README. Until those steps happen, only the older
+24-source/eight-filter deployment is proven live.
 
 ## Bring it up
 
@@ -94,19 +112,21 @@ Then set the time range to **2026-07-14 → 2026-07-26** before concluding anyth
 | Script | Job |
 |---|---|
 | `tools/clickstack-bootstrap.sh` | registers the team and prints `CLICKSTACK_INGESTION_KEY`. OTLP 4317/4318 do **not** bind until a team exists |
-| `tools/clickstack-sources.sh` | self-hosted: registers a ClickHouse connection + sources. Idempotent |
-| `tools/clickstack-cloud.sh` | hosted: sources + dashboard + saved searches over the Cloud API. Idempotent |
+| `tools/clickstack-sources.sh` | self-hosted: registers a ClickHouse connection and converges named sources with full-replacement PUTs |
+| `tools/clickstack-cloud.sh` | hosted: converges sources + dashboards and creates saved searches over the Cloud API |
 
 ## The sources
 
-24 registered, all by `tools/clickstack-cloud.sh`. The load-bearing ones:
+The live 2026-08-01 capture has 24 sources. The current script declares 27, adding resolution and
+generic event/content-dimension surfaces. The load-bearing ones:
 
 | Source | View | Why this shape |
 |---|---|---|
 | `Concurrency ACCURATE (minute)` | `v_concurrency_minute_delta_total` | the headline — gap + pause model off the delta serving path |
 | `Concurrency total (minute)` | `v_concurrency_minute_total` | stateless baseline, charted beside it |
 | `Concurrency NAIVE session-span (minute)` | `v_concurrency_minute_naive` (87_viz) | the third model — the over-count made visible (peak 3,743) |
-| `Session minutes (drilldown)` | `v_session_minutes` (87_viz) | session-minute grain, user_id + all 7 dims + title — `count_distinct` is correct under ANY filter |
+| `Session minutes (drilldown)` | `v_session_minutes` (87_viz) | session-minute grain with all 12 declared filter dimensions: content_id, title, video_type, category, show_name, platform, country, app_version, audio/subtitle language, player_version and video_resolution |
+| `Dynamic event/content dimensions` | `v_dynamic_*_dimension_values` (87_viz) | generic EAV fallback: a future map key is queryable before it earns a named, optimized filter |
 | `Concurrency by platform/country/app_version/audio_language/subtitle_language/player_version` | `v_cc_by_*` (87_viz) | one source per dimension AT ITS OWN GRAIN, so `max()` is a genuine peak |
 | `User concurrency (minute)` | `v_user_concurrency_minute_total` | value column is **`concurrent_users`**, not `concurrent` |
 | `Concurrency by title/video_type/category` + `Content NOW by *` | `v_concurrency_minute_*`, `v_concurrency_*_now` (80_content) | content tier; NOW sources are timestamped by `as_of` |
@@ -167,7 +187,7 @@ tile** stating the trap a viewer would otherwise fall into (peaks not summable: 
 | Dashboard | Time range to set | What it proves |
 |---|---|---|
 | **SonyLIV concurrency** | 2026-07-14 → 07-26 | the three models side by side — accurate **2,917** vs stateless 2,894 vs naive **3,743** — the over-count VISIBLE, never merged behind one name |
-| **SonyLIV drilldown — sessions & users** | 2026-07-14 → 07-26 | **8 working filters** (platform, country, title, content_id + the four ADR 0008 dimensions) via `appliesToSourceIds`; sessions-vs-users tile reads 2,917 / 2,844 at the peak minute |
+| **SonyLIV drilldown — sessions & users** | 2026-07-14 → 07-26 | Live capture: **8 working filters**. Candidate: all **12 declared dimensions**, adding `video_resolution`, `show_name`, `video_type` and `category`, pending deployment/capture. All use `appliesToSourceIds`; generic map-backed sources support later unknown keys. |
 | **SonyLIV content** | 2026-07-14 → 07-26 | title / video_type / category curves + the NOW panel (`v_concurrency_*_now`) |
 | **SonyLIV time-window trend** | 2026-07-14 → 07-26 | rolling 5/15/60 peaks & averages; tumbling 15-min via a **raw-SQL tile** calling the parameterised view; tumbling 1-hour straight from `cc_hour_agg` |
 | **SonyLIV pipeline health (cloud)** | **last 24 h** | watermark lag (source stamped `now()`), build-stage timing & rows from `system.query_log` (the exact `internal/pipelinehealth` filters), reconcile-gate runs |
@@ -193,8 +213,9 @@ holds only for an alert anchored to `now()`; these anchor every window to
 `v_cc_watermark.sealed_watermark`, the data's own clock, which is the correct anchor on a frozen file
 and on a live stream alike.
 
-A re-run **PUTs** every dashboard rather than skipping it, so the definition in the script is the
-source of truth and a hand-edit in the UI cannot silently outlive it. It runs each payload through `POST /clickstack/dashboards/validate` *before*
+A re-run sends a full-replacement **PUT for every existing named source and dashboard** rather than
+skipping it, so a stale select expression or hand-edit cannot silently outlive the committed
+definition. It runs each dashboard payload through `POST /clickstack/dashboards/validate` *before*
 creating, so a malformed tile fails with a JSON path rather than as a blank panel mid-demo.
 
 Schema notes, from the spec rather than guesswork: `ClickStackCreateDashboardRequest` requires

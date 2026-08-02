@@ -36,7 +36,7 @@ generators, and result metadata must all name that version."*
 It is not adaptivity. ADR 0028 already rejected deriving these per run on three measured grounds and
 that decision stands: the derivation rule is *less stable than the constant* (p99 swings 3.4× on
 whether 55.75% same-second pairs count as arrivals), a derived parameter makes two runs incomparable
-against a fixed private ground truth, and `arraySplit` needs the parameter before the distribution
+under fixed judge spot-check semantics, and `arraySplit` needs the parameter before the distribution
 that would produce it exists, so it costs a second full pass — ~6.5 GiB of extra reads at 100×.
 
 It is also not a retune. The measured sensitivity says `GAP_S` sits on a flat region (±20% → 10

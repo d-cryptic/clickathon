@@ -75,6 +75,7 @@ EV_COLS="$(q "SELECT arrayStringConcat(groupArray(name), ', ') FROM system.colum
 qdb "INSERT INTO ev_raw ($EV_COLS) SELECT $EV_COLS FROM default.ev_raw" >/dev/null
 
 apply sql/10_intervals.sql
+apply sql/15_normalise.sql
 qdb "TRUNCATE TABLE IF EXISTS session_intervals" >/dev/null
 apply sql/30_build_intervals.sql
 

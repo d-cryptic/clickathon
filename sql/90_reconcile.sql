@@ -1,8 +1,8 @@
 -- ============================================================================
--- 90_reconcile.sql — THE GATE. Recompute concurrency from ev_raw and compare
+-- 90_reconcile.sql — THE GATE. Recompute concurrency from accepted raw events and compare
 -- against the serving layer.
 --
--- "Truth" is derived from ev_raw ONLY. It never reads session_intervals or
+-- "Truth" is derived from v_ev_model_input ONLY. It never reads session_intervals or
 -- cc_minute_delta, so it exercises the whole pipeline rather than agreeing with
 -- itself. It also uses a DIFFERENT implementation of the same spec: runs are
 -- detected with window functions where 30_build_intervals.sql uses arraySplit,
@@ -70,7 +70,7 @@ WITH
     distinct_ts AS
     (
         SELECT DISTINCT video_session_id, toUInt32(event_timestamp) AS ts
-        FROM ev_raw
+        FROM v_ev_model_input
     ),
     numbered AS
     (
@@ -103,7 +103,7 @@ WITH
             video_session_id,
             arraySort(groupArrayIf(toUInt32(event_timestamp), event = 'pause'))  AS ps,
             arraySort(groupArrayIf(toUInt32(event_timestamp), event = 'resume')) AS rs
-        FROM ev_raw
+        FROM v_ev_model_input
         GROUP BY video_session_id
     ),
     windowed AS
@@ -194,7 +194,7 @@ WITH
     (
         SELECT toStartOfMinute(min(event_timestamp)) AS lo,
                toStartOfMinute(max(event_timestamp)) AS hi
-        FROM ev_raw
+        FROM v_ev_model_input
     ),
     spine AS
     (

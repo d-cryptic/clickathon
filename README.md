@@ -1,8 +1,11 @@
 # Foreground-only concurrency at streaming scale
 
 > Click-a-thon India 2026 · **SonyLIV track** · ClickHouse Cloud is the primary datastore and
-> analytical engine; ClickStack is the observability integration. **Judges: start here, then
-> [SUBMISSION.md](SUBMISSION.md)** — every claim there is mapped to the evidence file that proves it.
+> analytical engine; ClickStack is the dashboard and observability integration. **Judges: start
+> here, then [SUBMISSION.md](SUBMISSION.md)** — every claim there is mapped to evidence. Submission
+> status on 2026-08-02: the portal closes automatically at **12:00 PM IST**; wiring exists, but
+> hosted-demo/video links, live ClickStack walkthrough and the self-contained team package are still
+> missing and are not claimed complete.
 
 **The question:** how many people are *actually watching* at each minute? An open app is not a
 watching viewer. Sessions sit backgrounded, paused, or silent with no heartbeat, and counting that
@@ -40,6 +43,20 @@ end-to-end on 2026-08-01, 11 s of machine time, every beat with a committed fall
 (`evidence/demo/rehearsal.txt`). The gate needs a loaded database (setup below); `TARGET=cloud
 tools/reconcile.sh` runs it read-only against the graded service.
 
+## Official submission status
+
+- **Hosted demo:** not yet published.
+- **Required 2–3 minute video:** not yet recorded; the existing five-minute script is an engineering
+  walkthrough and is not the final submission video.
+- **ClickStack wiring:** committed in `docker-compose.yml`, `.env.example`, `internal/otelemit/`,
+  `cmd/sonyliv/observe.go`, and `tools/clickstack-*.sh`.
+- **ClickStack data path:** the local all-in-one service receives OTLP into its bundled ClickHouse
+  tables `otel_metrics_gauge`, `otel_logs`, and `otel_traces`. Hosted HyperDX has no OTLP path; it
+  reads the graded ClickHouse Cloud `sonyliv` serving views and `system.query_log` directly.
+- **Still required for the official folder:** actual ClickStack dashboard/search screenshots in the
+  team README and a live walkthrough in both hosted demo and video. Generated previews and query
+  transcripts are supplemental only; the official contract says screenshots alone are insufficient.
+
 ## The model, in one picture
 
 ```
@@ -61,7 +78,7 @@ ev_raw   905,558 events · 10,866 sessions · 2026-07-14 15:43 → 2026-07-26 11
   ├─▶ cc_user_minute                       USER concurrency — uniqExact states, not deltas
   │     (one user can hold several sessions; summing session deltas would double-count them)
   │
-  ├─▶ windows + content   rolling / tumbling / range views; title/type/category via dictionary
+  ├─▶ windows + content   rolling / tumbling / range views; content metadata via direct join
   │
   └─▶ cc_minute_stateless 91,292 rows      session-INDEPENDENT baseline for comparison
         (uniqExact of sessions seen active; peak 2,894 vs the session-aware 2,917)
@@ -115,12 +132,13 @@ rebuilds — details in [SUBMISSION.md](SUBMISSION.md).
 ## What we know is still wrong
 
 We keep a live list of open problems rather than hiding them — the model is only as good as its
-assumptions, and some are unverifiable without the organisers' ground truth:
+assumptions, and some remain semantic policy choices that judge raw-event spot-checks may expose:
 
 - **`resume` semantics are worth 9.7% of the headline** — the largest measured fork
   ([doubts/02](doubts/02-resume-semantics.md)). Six evidence-backed questions live in
   [doubts/](doubts/), each with a decision table per possible answer.
-- **The benchmark query set is our reconstruction** — the official set was never released.
+- **The 13-query matrix is our reconstruction** — the organiser specifies required peak/average
+  minute/hour/day results with filters, not fixed SQL.
 - **The graded database is batch-rebuilt**, not publisher-maintained (above).
 - The full list, with evidence: [SUBMISSION.md § known limitations](SUBMISSION.md) and
   [docs/MENTOR_QUESTIONS.md](docs/MENTOR_QUESTIONS.md).

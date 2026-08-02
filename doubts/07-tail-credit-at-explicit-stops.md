@@ -98,7 +98,7 @@ Only partially — the **trailing-pause half (−59 / −2.0%) is an internal in
 defend fixing without a ruling: the model's own comment states the principle, and the code misses
 one case of it. The **`VideoSessionEnd` half (−113 / −3.9%)** is a genuine convention: an answer key
 built from the same telemetry may well credit nothing after an explicit end, and a key built from
-"lease" semantics may credit a cadence. Under an exact private ground truth, 141 viewers is far
+"lease" semantics may credit a cadence. Under exact raw-event spot-checks, 141 viewers is far
 outside plausible noise.
 
 ## How the answer changes what we build

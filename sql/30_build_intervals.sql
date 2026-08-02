@@ -70,6 +70,7 @@
 INSERT INTO session_intervals
     (video_session_id, user_id, content_id, platform, country,
      app_version, audio_language, subtitle_language, player_version,
+     extra_dimensions,
      interval_start, interval_end, is_open, build_version)
 WITH
     -- ---- THE POLICY (ADR 0032) ------------------------------------------
@@ -193,7 +194,8 @@ WITH
             arraySort(groupArray((
                 toUnixTimestamp(event_timestamp),
                 app_version, audio_language, subtitle_language, player_version,
-                user_id, content_id, platform, country
+                user_id, content_id, platform, country,
+                CAST(extra, 'Map(String, String)')
             ))) AS dim_events,
             arraySort(groupArrayIf(toUnixTimestamp(event_timestamp), event = 'pause'))  AS pauses,
             arraySort(groupArrayIf(toUnixTimestamp(event_timestamp), event = 'resume')) AS resumes,
@@ -201,7 +203,7 @@ WITH
             -- emit events up to 2,081s AFTER their end event (ADR 0007), so
             -- "ended" is not the same as "sealed".
             countIf(event_type = 'VideoSessionEnd') = 0 AS is_open
-        FROM ev_raw
+        FROM v_ev_model_input
         GROUP BY video_session_id
     ),
 
@@ -324,9 +326,9 @@ WITH
         FROM windowed
     )
 
--- The outer projection lists exactly the 13 target columns. The inner SELECT
--- needs working aliases (the per-interval slice of dim_events, and the four
--- value arrays cut out of it) which must NOT reach the INSERT, hence the nest.
+-- The outer projection lists exactly the 14 target columns. The inner SELECT
+-- needs working aliases (the per-interval slice of dim_events and the value
+-- arrays cut out of it) which must NOT reach the INSERT, hence the nest.
 SELECT
     video_session_id,
     user_id,
@@ -337,6 +339,7 @@ SELECT
     audio_language,
     subtitle_language,
     player_version,
+    extra_dimensions,
     interval_start,
     interval_end,
     is_open,
@@ -376,6 +379,30 @@ FROM
         arrayMap(x -> x.7, seg_events) AS v_content,
         arrayMap(x -> x.8, seg_events) AS v_platform,
         arrayMap(x -> x.9, seg_events) AS v_country,
+        arrayMap(x -> x.10, seg_events) AS v_extra,
+
+        -- Attribute future fields independently. Voting on a whole Map couples
+        -- unrelated keys: adding or reordering one field can otherwise change
+        -- which video_resolution wins. Presence is part of the vote so an
+        -- absent key stays distinct from an explicitly empty value; a frequency
+        -- tie prefers present, then the lexicographically smaller raw value.
+        arraySort(arrayDistinct(arrayFlatten(arrayMap(m -> mapKeys(m), v_extra)))) AS extra_keys,
+        arrayMap(k ->
+            (
+                k,
+                arraySort(v ->
+                    (
+                        -toInt64(countEqual(
+                            arrayMap(m -> (toUInt8(mapContains(m, k)), m[k]), v_extra), v)),
+                        -toInt64(v.1),
+                        v.2
+                    ),
+                    arrayDistinct(arrayMap(m -> (toUInt8(mapContains(m, k)), m[k]), v_extra))
+                )[1]
+            ),
+            extra_keys
+        ) AS extra_winners,
+        arrayFilter(x -> x.2.1 = 1, extra_winners) AS present_extra_winners,
 
         -- Dominant value: sort the DISTINCT values by (-frequency, value) and
         -- take the first. The second sort term is what makes this deterministic
@@ -396,7 +423,11 @@ FROM
         arraySort(v -> (-toInt64(countEqual(v_user,     v)), v), arrayDistinct(v_user))[1]     AS user_id,
         arraySort(v -> (-toInt64(countEqual(v_content,  v)), v), arrayDistinct(v_content))[1]  AS content_id,
         arraySort(v -> (-toInt64(countEqual(v_platform, v)), v), arrayDistinct(v_platform))[1] AS platform,
-        arraySort(v -> (-toInt64(countEqual(v_country,  v)), v), arrayDistinct(v_country))[1]  AS country
+        arraySort(v -> (-toInt64(countEqual(v_country,  v)), v), arrayDistinct(v_country))[1]  AS country,
+        mapFromArrays(
+            arrayMap(x -> x.1, present_extra_winners),
+            arrayMap(x -> x.2.2, present_extra_winners)
+        ) AS extra_dimensions
     FROM folded
     ARRAY JOIN
         -- The final segment (cursor, run_end), and the POINT_ACTIVITY_COUNTS

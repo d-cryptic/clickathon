@@ -134,7 +134,7 @@ all of them.
 > more than just un-pausing — it looks like it also fires after seeks, buffering recovery, or
 > foregrounding.
 >
-> **The question:** when a viewer pauses, what ends the paused period in your ground truth? Is it the
+> **The question:** when a viewer pauses, what ends the paused period under judge spot-check semantics? Is it the
 > very next `resume` event, or does the model require the resume to actually correspond to that pause —
 > and if so, how does it tell them apart?
 >

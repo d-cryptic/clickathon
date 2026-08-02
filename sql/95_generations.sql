@@ -132,6 +132,8 @@ CREATE TABLE IF NOT EXISTS gen_session_intervals
     audio_language    LowCardinality(String),
     subtitle_language LowCardinality(String),
     player_version    LowCardinality(String),
+    extra_dimensions  Map(LowCardinality(String), String) DEFAULT map(),
+    video_resolution  String ALIAS extra_dimensions['video_resolution'],
     interval_start   DateTime64(3),
     interval_end     DateTime64(3),
     is_open          UInt8,
@@ -142,6 +144,10 @@ ENGINE = ReplacingMergeTree(build_version)
 PARTITION BY generation
 ORDER BY (generation, video_session_id, interval_start)
 SETTINGS min_bytes_for_wide_part = 0;
+
+ALTER TABLE gen_session_intervals
+    ADD COLUMN IF NOT EXISTS extra_dimensions Map(LowCardinality(String), String) DEFAULT map() AFTER player_version,
+    ADD COLUMN IF NOT EXISTS video_resolution String ALIAS extra_dimensions['video_resolution'] AFTER extra_dimensions;
 
 CREATE TABLE IF NOT EXISTS gen_cc_minute_delta
 (
@@ -217,7 +223,8 @@ SETTINGS min_bytes_for_wide_part = 0;
 -- ---------------------------------------------------------------------------
 
 CREATE OR REPLACE VIEW p_session_intervals AS
-SELECT * EXCEPT generation
+SELECT * EXCEPT generation,
+       extra_dimensions['video_resolution'] AS video_resolution
 FROM gen_session_intervals FINAL
 WHERE generation = (SELECT generation FROM v_active_generation);
 

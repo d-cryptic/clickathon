@@ -1,11 +1,14 @@
 # Codex Validation 005 — Whole-dev landing audit
 
+> **Historical terminology notice:** this audit predates upstream `c1e1c69`; current evaluation uses
+> required result classes and judge raw-event spot-checks, not a fixed private answer key.
+
 > **Summary:** Reviewed `dev` at `c85dcd2` after merging it into `docs/dev-audit`; every ClickHouse Cloud operation in this audit was a `SELECT` against `sonyliv`.
 > The live database is coherent now: 905,558 raw rows, 30,323 intervals, 28,073 delta rows, peak 2,917, and the 17,028-minute reconcile has zero mismatches.
 > Two P0 paths remain: direct `apply-sql.sh` INSERT/CREATE files and `load.sh --replace` can still write the graded database without a graded-write acknowledgement; and the advertised one-command unseen run does not invoke the source-contract gate, so seconds-as-milliseconds can still produce a 1970 answer under a green reconcile.
 > The headline measurements hold under independent read-only reconstruction: `TAIL_S` is 7.2x more elastic than `GAP_S`; 8,978 intervals take tail; the live edge has 65 wrong cells of 542,537, all final by age 240 s; and the spike evidence is exactly 2,917 + N.
 > Q34's published live sizing is false: current serving has 82 user-greater-than-session cells, not 28, and 63 have users with zero sessions; the worst excess remains +1 and totals remain safe.
-> Q35 is real: the spec interpreter over current Cloud rows gives peak 2,927 versus model-compatible 2,917, 80 changed minutes, max delta 16, and +18,127 seconds; the private semantic choice is still unresolved.
+> Q35 is real: the spec interpreter over current Cloud rows gives peak 2,927 versus model-compatible 2,917, 80 changed minutes, max delta 16, and +18,127 seconds; the judge semantic choice is still unresolved.
 > The synthetic golden cohorts and default reference interpreter are genuinely independent, but the organiser-file cohort is only a regression pin, the decline-alert classifier's claimed semantic anchors do not hold, and the business document contains stale and arithmetically false statements despite its correct CPM calculation.
 
 ## 1. Verdict
@@ -233,7 +236,7 @@ reconcile as `PIN`. It then calls `derive_intervals(..., model_compat=True)` at
 `tools/golden-gen.sh:429-456`. The compat function explicitly describes itself as the shipped segment
 fold and a "knowing port" (`tools/reference_interpreter.py:161-185`). Agreement among that port, a pin
 created by an older SQL run, and current SQL is a valuable regression check; it cannot establish that
-the shared semantics match private ground truth.
+the shared semantics match judge spot-check expectations.
 
 The documentation partially admits this in the results table (`docs/GOLDEN.md:25,41`) but overclaims
 independence in its title, summary, and rationale (`docs/GOLDEN.md:1-16,54-57`).

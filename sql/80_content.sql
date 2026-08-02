@@ -6,16 +6,19 @@
 -- a core aggregation ("Understand demand by title or content identifier...
 -- Metadata enrichment and join consistency"). content_dim (33,464 rows) was
 -- loaded on day one and referenced nowhere since. This file is additive only:
--- it creates ONE dictionary and a handful of views. It does not touch
+-- it creates one optional dictionary accelerator and a handful of views. It does not touch
 -- ev_raw / session_intervals / cc_minute_delta / cc_hour_agg or any existing
 -- view — those are the graded, reconciled model and stay exactly as they are.
 --
 -- Everything here reads FROM cc_minute_delta (the DELTA serving layer, ADR
 -- 0003), never by expanding session_intervals to one row per (session,
 -- minute) — that expansion is the O(sessions x minutes) collapse mode the
--- problem statement calls out by name. dictGet resolves title/video_type/
--- category at query time; nothing is denormalized into the delta table itself,
--- so the dictionary's LIFETIME reload is the only place metadata can go stale.
+-- problem statement calls out by name. The serving views use a LEFT ANY JOIN
+-- to content_dim FINAL at query time. This is deliberately credential-free:
+-- a CLICKHOUSE-source dictionary needs source-user credentials on a secured
+-- local server and otherwise fails only when queried. The small dictionary is
+-- still installed as an optional Cloud accelerator, but correctness does not
+-- depend on it and catalog changes are visible immediately.
 -- ============================================================================
 
 
@@ -127,7 +130,8 @@ CREATE OR REPLACE DICTIONARY dict_content
     content_id Int64,
     title      String DEFAULT '(unknown)',
     video_type String DEFAULT '(unknown)',
-    category   String DEFAULT '(unknown)'
+    category   String DEFAULT '(unknown)',
+    show_name  String DEFAULT '(unknown)'
 )
 PRIMARY KEY content_id
 SOURCE(CLICKHOUSE(TABLE 'content_dim'))
@@ -327,10 +331,15 @@ FROM
         FROM
         (
             SELECT
-                minute,
-                delta,
-                dictGet('dict_content', 'title', tuple(content_id)) AS title_raw
-            FROM cc_minute_delta
+                d.minute,
+                d.delta,
+                if(c.has_catalog = 0, '(unknown)', c.title) AS title_raw
+            FROM cc_minute_delta AS d
+            LEFT ANY JOIN
+            (
+                SELECT content_id, title, toUInt8(1) AS has_catalog
+                FROM content_dim FINAL
+            ) AS c ON d.content_id = c.content_id
         )
         GROUP BY minute, title_raw
     ) AS a
@@ -395,10 +404,15 @@ FROM
     FROM
     (
         SELECT
-            minute,
-            delta,
-            dictGet('dict_content', 'video_type', tuple(content_id)) AS video_type_raw
-        FROM cc_minute_delta
+            d.minute,
+            d.delta,
+            if(c.has_catalog = 0, '(unknown)', c.video_type) AS video_type_raw
+        FROM cc_minute_delta AS d
+        LEFT ANY JOIN
+        (
+            SELECT content_id, video_type, toUInt8(1) AS has_catalog
+            FROM content_dim FINAL
+        ) AS c ON d.content_id = c.content_id
     )
     GROUP BY minute, video_type
 );
@@ -431,10 +445,15 @@ FROM
     FROM
     (
         SELECT
-            minute,
-            delta,
-            dictGet('dict_content', 'category', tuple(content_id)) AS category_raw
-        FROM cc_minute_delta
+            d.minute,
+            d.delta,
+            if(c.has_catalog = 0, '(unknown)', c.category) AS category_raw
+        FROM cc_minute_delta AS d
+        LEFT ANY JOIN
+        (
+            SELECT content_id, category, toUInt8(1) AS has_catalog
+            FROM content_dim FINAL
+        ) AS c ON d.content_id = c.content_id
     )
     GROUP BY minute, category
 );
@@ -448,8 +467,8 @@ FROM
 -- dimension level) AND no two assets are merged under one label — title here
 -- is a DECORATION, not a grouping key, and two rows may legitimately carry the
 -- same title. Built by decorating the EXISTING v_concurrency_minute view
--- (20_views.sql, untouched) with dictGet rather than re-deriving the running
--- sum a second time.
+-- (20_views.sql, untouched) with the same credential-free LEFT ANY JOIN rather
+-- than re-deriving the running sum a second time.
 --
 -- NOTE THE GRAIN: (minute, platform, country, content_id). A per-asset answer
 -- sums `concurrent` across platform and country — which is valid here, because
@@ -459,18 +478,21 @@ FROM
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE VIEW v_concurrency_minute_content AS
 SELECT
-    minute,
-    platform,
-    country,
-    content_id,
-    if(dictGet('dict_content', 'title', tuple(content_id)) = '',
-       '(blank)', dictGet('dict_content', 'title', tuple(content_id)))      AS title,
-    if(dictGet('dict_content', 'video_type', tuple(content_id)) = '',
-       '(blank)', dictGet('dict_content', 'video_type', tuple(content_id))) AS video_type,
-    if(dictGet('dict_content', 'category', tuple(content_id)) = '',
-       '(blank)', dictGet('dict_content', 'category', tuple(content_id)))   AS category,
-    concurrent
-FROM v_concurrency_minute;
+    v.minute,
+    v.platform,
+    v.country,
+    v.content_id,
+    if(c.has_catalog = 0, '(unknown)', if(c.title = '', '(blank)', c.title)) AS title,
+    if(c.has_catalog = 0, '(unknown)', if(c.video_type = '', '(blank)', c.video_type)) AS video_type,
+    if(c.has_catalog = 0, '(unknown)', if(c.category = '', '(blank)', c.category)) AS category,
+    if(c.has_catalog = 0, '(unknown)', if(c.show_name = '', '(blank)', c.show_name)) AS show_name,
+    v.concurrent
+FROM v_concurrency_minute AS v
+LEFT ANY JOIN
+(
+    SELECT content_id, title, video_type, category, show_name, toUInt8(1) AS has_catalog
+    FROM content_dim FINAL
+) AS c ON v.content_id = c.content_id;
 
 -- ---------------------------------------------------------------------------
 -- "Current" concurrency: the running-sum value at the LATEST minute the delta
