@@ -60,6 +60,30 @@ A model built on gaps alone silently counts every paused viewer as watching. Ful
 
 Evidence: [`evidence/unseen/official-20260802-codex-validation.txt`](../evidence/unseen/official-20260802-codex-validation.txt).
 
+### The unseen day is 2026-07-31 UTC
+
+The file is described as one day and contains events on 189 calendar dates, which derive intervals on
+102. That is not a contradiction — **one date holds 99.088% of the data** and the rest is a straggler
+tail:
+
+| Date | Events | Share | Peak concurrency |
+|---|---:|---:|---:|
+| **2026-07-31** | **6,936,152** | **99.088%** | **23,324** |
+| 2026-07-30 | 42,913 | 0.613% | 23 |
+| 2026-07-29 | 10,952 | 0.156% | 7 |
+| 2026-07-28 | 4,692 | 0.067% | 4 |
+| all 98 others | < 3,100 each | 0.076% total | ≤ 3 |
+
+The peak is not a close call: **23,324 against a next-best of 23**, a factor of a thousand. The day
+runs `2026-07-31 00:00:02.815` → `23:59:53.831` — a clean UTC calendar day, so no timezone-alignment
+question arises for the headline figures. It carries **106,306 sessions and 81,602 users**, against
+108,486 and 82,958 across the whole file: about 2% of sessions touch a neighbouring date.
+
+**We model all 102 dates rather than filtering to the one.** The tail is real data — late arrivals,
+long-running sessions and out-of-range timestamps — and dropping it would be a choice to report a
+number we found convenient. It is also what forced the Cloud-legal chunked build, since 102 daily
+partitions exceed the hosted 100-partition insert limit.
+
 ### Required results
 
 | | Session tier | User tier (distinct users) |
