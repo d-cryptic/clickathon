@@ -81,6 +81,19 @@ Backgrounding and pausing look identical on a dashboard but are opposite in the 
 A gap-only model silently counts paused time as watching. Ours subtracts explicit pause→resume
 windows *and* closes on gaps; the two mechanisms are independent and both necessary.
 
+## Two known defects in our own model
+
+**Q35** — a viewer who generated exactly one event counts as watching nothing. 182 runs; counting
+them moves the peak **2,917 → 2,927**. We answer "nothing" by accident, not by choice, and our own
+correctness gate cannot see it because it shares the filter. **2,917 is our submitted number**;
+this is the one internal question that would change it.
+
+**Q34** — user concurrency exceeds session concurrency in 82 cells, worst excess +1, no total
+affected.
+
+Both are ours, not mentor questions. Full list in [`SUBMISSION.md`](SUBMISSION.md); eleven measured
+questions for the organisers in [`doubts/`](doubts/).
+
 ## Performance and updates, in one paragraph each
 
 **Queries.** 13 benchmark-shaped queries (peak + average at minute/hour/day grain, with dimension

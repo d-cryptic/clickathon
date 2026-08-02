@@ -188,6 +188,22 @@ timing and the reconcile gate, landing in 6 provisioned dashboards / 41 tiles.
 
 ## Known limitations and open questions — the honest list
 
+**0. Two known defects in our own model, disclosed before anything else.** Both were found by our own
+property suite and confirmed independently; neither is a mentor question, both are ours.
+
+- **Q35 · A viewer who generated exactly one event is counted as watching nothing.** A single-event
+  run produces a zero-length segment that is dropped *before* the 60 s tail is applied. **182 runs**
+  are affected, and counting them moves the peak **2,917 → 2,927** and adds **5.0 h** (80 changed
+  minutes, +18,127 s, confirmed against live rows). We answer "counts nothing" **by accident** — it
+  is a side effect of an `arrayFilter`, not a rule anyone chose. **Our gate cannot see it**, because
+  `sql/90_reconcile.sql` carries the same filter. Unresolved and stated deliberately:
+  **2,917 is our submitted number**, and this is the one internal question that would change it.
+- **Q34 · User concurrency exceeds session concurrency in 82 cells**, worst excess **+1**, no total
+  affected — the headline pair 2,844 ≤ 2,917 is correct. An invariant that "mostly holds" is not an
+  invariant, so it is listed rather than dismissed.
+
+
+
 None of these are hidden in footnotes; each has evidence and, where possible, a measured cost.
 
 1. **The benchmark set is our reconstruction** (§2). If the official shapes differ, our latencies
