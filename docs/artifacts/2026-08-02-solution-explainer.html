@@ -1,0 +1,888 @@
+<title>SonyLIV foreground concurrency — the whole solution, explained</title>
+<style>
+:root{
+  --paper:#f6f7f5; --card:#fcfcfb; --ink:#171b1c; --ink2:#4f5854; --mute:#87908a;
+  --line:#e2e4df; --hair:rgba(11,11,11,.10);
+  --blue:#2a78d6; --blue-deep:#1c5cab; --blue-wash:#e3eefc;
+  --orange:#eb6834; --orange-wash:#fdece4;
+  --aqua:#1baf7a; --violet:#4a3aa7;
+  --good:#0ca30c; --good-text:#006300; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
+  --good-wash:#e7f4e7; --warn-wash:#fdf3dc; --serious-wash:#fceee8; --crit-wash:#fae5e5;
+  --grid:#e1e0d9; --axis:#c3c2b7;
+  --mono:"Cascadia Mono",Consolas,ui-monospace,SFMono-Regular,Menlo,monospace;
+  --serif:Cambria,Georgia,"Iowan Old Style",serif;
+  --sans:"Segoe UI",system-ui,-apple-system,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:where(:not([data-theme="light"])){
+    --paper:#111414; --card:#1a1d1c; --ink:#eef0ed; --ink2:#b6bfb9; --mute:#87908a;
+    --line:#2b2f2d; --hair:rgba(255,255,255,.10);
+    --blue:#3987e5; --blue-deep:#86b6ef; --blue-wash:#17273b;
+    --orange:#d95926; --orange-wash:#33201a;
+    --aqua:#199e70; --violet:#9085e9;
+    --good:#0ca30c; --good-text:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
+    --good-wash:#16281a; --warn-wash:#2e2712; --serious-wash:#2f1f18; --crit-wash:#301616;
+    --grid:#2c2c2a; --axis:#383835;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#111414; --card:#1a1d1c; --ink:#eef0ed; --ink2:#b6bfb9; --mute:#87908a;
+  --line:#2b2f2d; --hair:rgba(255,255,255,.10);
+  --blue:#3987e5; --blue-deep:#86b6ef; --blue-wash:#17273b;
+  --orange:#d95926; --orange-wash:#33201a;
+  --aqua:#199e70; --violet:#9085e9;
+  --good:#0ca30c; --good-text:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
+  --good-wash:#16281a; --warn-wash:#2e2712; --serious-wash:#2f1f18; --crit-wash:#301616;
+  --grid:#2c2c2a; --axis:#383835;
+}
+:root[data-theme="light"]{
+  --paper:#f6f7f5; --card:#fcfcfb; --ink:#171b1c; --ink2:#4f5854; --mute:#87908a;
+  --line:#e2e4df; --hair:rgba(11,11,11,.10);
+  --blue:#2a78d6; --blue-deep:#1c5cab; --blue-wash:#e3eefc;
+  --orange:#eb6834; --orange-wash:#fdece4;
+  --aqua:#1baf7a; --violet:#4a3aa7;
+  --good:#0ca30c; --good-text:#006300; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
+  --good-wash:#e7f4e7; --warn-wash:#fdf3dc; --serious-wash:#fceee8; --crit-wash:#fae5e5;
+  --grid:#e1e0d9; --axis:#c3c2b7;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.6 var(--sans)}
+main{max-width:1100px;margin:0 auto;padding:44px 24px 90px}
+h1{font-family:var(--serif);font-size:clamp(34px,5.4vw,58px);line-height:1.04;margin:.25em 0 .35em;text-wrap:balance}
+h2{font-family:var(--serif);font-size:clamp(24px,3.2vw,34px);line-height:1.15;margin:0 0 10px;text-wrap:balance}
+h3{font-size:18px;margin:26px 0 8px}
+p{max-width:74ch}
+section{margin-top:72px}
+.eyebrow{font-family:var(--mono);font-size:12.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--blue);margin:0 0 6px}
+.lede{font-size:19.5px;color:var(--ink2);max-width:66ch}
+.k{font-family:var(--mono)}
+code{font-family:var(--mono);font-size:.88em;background:var(--blue-wash);color:var(--ink);padding:1px 5px;border-radius:4px}
+a{color:var(--blue)}
+.statrow{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:26px 0 6px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.stat .v{font-size:30px;font-weight:650;letter-spacing:-.01em}
+.stat .l{font-size:13.5px;color:var(--ink2);margin-top:2px}
+.stat .s{font-family:var(--mono);font-size:11.5px;color:var(--mute);margin-top:6px}
+.figure{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 18px 10px;margin:22px 0}
+.figure figcaption{font-size:13.5px;color:var(--ink2);padding:8px 4px 6px;max-width:none}
+.figure svg{width:100%;height:auto;display:block}
+.tablewrap{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:12px;margin:16px 0}
+table{border-collapse:collapse;width:100%;min-width:640px;font-size:14.5px}
+th,td{text-align:left;padding:10px 13px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-family:var(--mono);font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink2);background:transparent}
+tr:last-child td{border-bottom:0}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;font-family:var(--mono);font-size:13.5px;white-space:nowrap}
+.chip{display:inline-block;font-family:var(--mono);font-size:11.5px;font-weight:700;letter-spacing:.05em;padding:2px 9px;border-radius:99px;white-space:nowrap}
+.chip.pass{background:var(--good-wash);color:var(--good-text)}
+.chip.partial{background:var(--warn-wash);color:#7a5500}
+:root[data-theme="dark"] .chip.partial{color:var(--warn)}
+@media (prefers-color-scheme: dark){:root:where(:not([data-theme="light"])) .chip.partial{color:var(--warn)}}
+.chip.fail{background:var(--crit-wash);color:var(--crit)}
+.chip.note{background:var(--blue-wash);color:var(--blue-deep)}
+.chip.open{background:var(--serious-wash);color:#9a4620}
+:root[data-theme="dark"] .chip.open{color:var(--serious)}
+@media (prefers-color-scheme: dark){:root:where(:not([data-theme="light"])) .chip.open{color:var(--serious)}}
+.callout{border:1px solid var(--line);border-left:4px solid var(--blue);background:var(--card);border-radius:10px;padding:14px 18px;margin:18px 0}
+.callout.warn{border-left-color:var(--warn)}
+.callout.crit{border-left-color:var(--crit)}
+.callout.good{border-left-color:var(--good)}
+.callout p{margin:.35em 0}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;margin:16px 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.card h4{margin:0 0 6px;font-size:15px}
+.card p{font-size:14px;color:var(--ink2);margin:0}
+.card .adr{font-family:var(--mono);font-size:11px;color:var(--mute);letter-spacing:.08em}
+details{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:0;margin:14px 0}
+summary{cursor:pointer;padding:13px 18px;font-weight:600;font-size:15px}
+summary:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+details>div{padding:0 18px 14px}
+.flow{display:flex;flex-direction:column;gap:0;margin:18px 0}
+.legend{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--ink2);padding:2px 4px 8px}
+.legend .sw{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.small{font-size:13.5px;color:var(--ink2)}
+.footer{margin-top:80px;border-top:1px solid var(--line);padding-top:18px;font-size:13px;color:var(--mute)}
+.step{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;overflow-x:auto}
+.step h4{margin:0 0 4px;font-size:14.5px}
+.step h4 .tn{font-family:var(--mono);font-size:12.5px;background:var(--blue-wash);color:var(--blue-deep);padding:1px 8px;border-radius:6px;margin-right:8px}
+.step .why{font-size:12.5px;color:var(--ink2);margin:6px 0 10px;max-width:none}
+.saarrow{text-align:center;font-family:var(--mono);font-size:12px;color:var(--mute);padding:7px 0}
+.mini{border-collapse:collapse;font-family:var(--mono);font-size:12px;min-width:0}
+.mini th,.mini td{padding:4px 10px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap;font-variant-numeric:tabular-nums}
+.mini th{color:var(--mute);font-weight:600;font-size:11px;letter-spacing:.04em;text-transform:uppercase}
+.mini tr:last-child td{border-bottom:0}
+.mini .pos{color:var(--good-text);font-weight:700}
+.mini .neg{color:var(--crit);font-weight:700}
+.mini .dim{color:var(--mute)}
+.mini .hl td{background:var(--blue-wash)}
+@media (max-width:820px){.statrow{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:520px){.statrow{grid-template-columns:1fr}}
+@media (prefers-reduced-motion: no-preference){
+  .hero-draw{stroke-dasharray:2400;stroke-dashoffset:2400;animation:draw 1.6s ease-out forwards}
+  @keyframes draw{to{stroke-dashoffset:0}}
+}
+</style>
+
+<main>
+<header>
+<p class="eyebrow">Click-a-thon India 2026 · SonyLIV · ClickHouse Cloud 26.2</p>
+<h1>Count the people who are actually watching.</h1>
+<p class="lede">A cricket match is streaming — how many viewers <em>right now</em>? The app being open is not the same as someone watching. This page explains the whole pipeline, every assumption and constant, every design decision and its rejected alternative — and then grades our own checklists for the unseen day and for query performance, against the evidence actually on disk.</p>
+
+<div class="statrow">
+  <div class="stat"><div class="v k" style="color:var(--blue)">2,917</div><div class="l">true peak concurrency — the naive read says <span class="k" style="color:var(--orange)">3,708</span> (791 phantom viewers, +21.3%)</div><div class="s">evidence/reconcile.txt</div></div>
+  <div class="stat"><div class="v k">33.6%</div><div class="l">of apparent watch time is backgrounded or paused, and excluded</div><div class="s">2,976.9 h naive → 1,978.1 h counted</div></div>
+  <div class="stat"><div class="v k">17,028 / 0</div><div class="l">minutes reconciled against raw events / mismatches</div><div class="s">gate re-run after every model change</div></div>
+  <div class="stat"><div class="v k" style="color:var(--blue)">23,324</div><div class="l">peak on the official unseen file — 3,201,716 minutes reconciled, 0 mismatches</div><div class="s">7M events · ~55 s end to end</div></div>
+</div>
+
+<figure class="figure">
+<svg viewBox="0 0 1060 300" role="img" aria-label="Schematic peak-day concurrency: the naive session-span curve peaks at 3,708 while the foreground-only curve peaks at 2,917; the shaded gap is phantom viewing">
+  <line x1="60" y1="250" x2="1030" y2="250" stroke="var(--axis)" stroke-width="1.5"/>
+  <line x1="60" y1="250" x2="60" y2="30" stroke="var(--axis)" stroke-width="1.5"/>
+  <g stroke="var(--grid)" stroke-width="1"><line x1="60" y1="190" x2="1030" y2="190"/><line x1="60" y1="130" x2="1030" y2="130"/><line x1="60" y1="70" x2="1030" y2="70"/></g>
+  <g font-family="Cascadia Mono,Consolas,monospace" font-size="11" fill="var(--mute)">
+    <text x="54" y="254" text-anchor="end">0</text><text x="54" y="194" text-anchor="end">1k</text><text x="54" y="134" text-anchor="end">2k</text><text x="54" y="74" text-anchor="end">3k</text>
+    <text x="110" y="272">09:00</text><text x="380" y="272">10:00</text><text x="650" y="272">11:00</text><text x="920" y="272">12:00</text>
+  </g>
+  <path d="M60,248 C180,244 260,230 340,196 C420,160 480,92 560,58 C600,44 630,42 655,46 C720,58 800,130 880,190 C950,232 1000,244 1030,247"
+        fill="none" stroke="var(--orange)" stroke-width="2" stroke-dasharray="6 5"/>
+  <path d="M60,249 C180,246 260,236 340,210 C420,182 480,128 560,96 C600,84 630,82 655,86 C720,98 800,158 880,208 C950,240 1000,247 1030,249 L1030,250 L60,250 Z"
+        fill="var(--blue-wash)"/>
+  <path class="hero-draw" d="M60,249 C180,246 260,236 340,210 C420,182 480,128 560,96 C600,84 630,82 655,86 C720,98 800,158 880,208 C950,240 1000,247 1030,249"
+        fill="none" stroke="var(--blue)" stroke-width="2.5"/>
+  <line x1="640" y1="44" x2="640" y2="84" stroke="var(--mute)" stroke-width="1" stroke-dasharray="2 3"/>
+  <circle cx="640" cy="84" r="4.5" fill="var(--blue)" stroke="var(--card)" stroke-width="2"/>
+  <circle cx="640" cy="44" r="4" fill="none" stroke="var(--orange)" stroke-width="2"/>
+  <g font-family="Cascadia Mono,Consolas,monospace" font-size="12.5">
+    <text x="655" y="40" fill="var(--orange)">3,708 naive — “a session exists”</text>
+    <text x="655" y="106" fill="var(--blue)" font-weight="700">2,917 actually watching · 10:56</text>
+    <text x="740" y="140" fill="var(--ink2)" font-size="11.5">gap = paused + backgrounded “viewers”</text>
+  </g>
+</svg>
+<figcaption><b>The thesis, in one curve.</b> Schematic shape of the graded peak day (2026-07-26 holds 93.85% of all events); the marked values are the measured ones. Every minute of the blue curve is reproducible from raw events — the gap to the dashed line is 791 people whose app was open but who were paused or had it backgrounded at 10:56.</figcaption>
+</figure>
+</header>
+
+<!-- ============================ 1 · WHY NAIVE IS WRONG ============================ -->
+<section>
+<p class="eyebrow">§1 · The problem</p>
+<h2>Why the obvious answer over-counts by a fifth</h2>
+<p>The input is session starts/ends, 1-minute heartbeats, and app/player state events. The obvious model — “a session is watching from start to end” — books three kinds of dead time as viewing: the phone in the pocket (backgrounded), the pause that never resumed, and the crash that never sent an end. The two ways of <em>not</em> watching behave in <b>opposite</b> ways, which is why the model needs <b>two signals</b>, not one:</p>
+
+<figure class="figure">
+<svg viewBox="0 0 1060 240" role="img" aria-label="Heartbeat rates: 4.72 pings per minute while actively watching, 0.756 while paused, 0.047 while backgrounded">
+  <g font-family="Segoe UI,system-ui,sans-serif" font-size="14" fill="var(--ink)">
+    <text x="20" y="30" font-weight="600">Measured heartbeats per minute, by real state</text>
+  </g>
+  <g font-family="Cascadia Mono,Consolas,monospace" font-size="12.5">
+    <rect x="20" y="55" width="708" height="30" rx="5" fill="var(--blue)"/>
+    <text x="24" y="47" fill="var(--ink2)" font-family="Segoe UI,sans-serif">actively watching</text>
+    <text x="736" y="75" fill="var(--ink)" font-weight="700">4.72/min</text>
+    <rect x="20" y="120" width="113" height="30" rx="5" fill="var(--serious)"/>
+    <text x="24" y="112" fill="var(--ink2)" font-family="Segoe UI,sans-serif">paused — heartbeats survive a pause</text>
+    <text x="141" y="140" fill="var(--ink)" font-weight="700">0.756/min → invisible to any gap rule</text>
+    <rect x="20" y="185" width="8" height="30" rx="3" fill="var(--crit)"/>
+    <text x="24" y="177" fill="var(--ink2)" font-family="Segoe UI,sans-serif">backgrounded — heartbeats collapse 100×</text>
+    <text x="36" y="205" fill="var(--ink)" font-weight="700">0.047/min → a silence gap detects it</text>
+  </g>
+</svg>
+<figcaption>ADR 0007's gate experiment. Backgrounding is detectable by silence (100× drop). A pause pings every ~79 s — <em>inside</em> any sane gap threshold — so pause/resume windows must be subtracted explicitly. A gap-only model would have shipped, passed every test, and been ~10% wrong: paused time alone is worth a net <span class="k">286.2 h</span>, “the single most valuable rule we have.”</figcaption>
+</figure>
+
+<h3>One session, dissected</h3>
+<figure class="figure">
+<svg viewBox="0 0 1060 250" role="img" aria-label="A session timeline: active runs count, the pause window and the background gap do not, and each run earns 60 seconds of tail credit">
+  <line x1="40" y1="150" x2="1030" y2="150" stroke="var(--axis)" stroke-width="2"/>
+  <g font-family="Cascadia Mono,Consolas,monospace" font-size="11.5" fill="var(--mute)">
+    <text x="36" y="172">20:00</text><text x="270" y="172">20:10</text><text x="500" y="172">20:20</text><text x="730" y="172">20:30</text><text x="960" y="172">20:40</text>
+  </g>
+  <rect x="40" y="95" width="245" height="38" rx="7" fill="var(--blue)"/>
+  <rect x="285" y="95" width="150" height="38" rx="7" fill="var(--serious)"/>
+  <rect x="435" y="95" width="185" height="38" rx="7" fill="var(--blue)"/>
+  <rect x="620" y="95" width="190" height="38" rx="7" fill="var(--crit)" opacity=".85"/>
+  <rect x="810" y="95" width="130" height="38" rx="7" fill="var(--blue)"/>
+  <rect x="940" y="95" width="26" height="38" rx="7" fill="var(--blue)" opacity=".45"/>
+  <g font-family="Segoe UI,system-ui,sans-serif" font-size="13" fill="#fff" font-weight="600">
+    <text x="105" y="119">watching</text>
+    <text x="305" y="119">paused</text>
+    <text x="480" y="119">watching</text>
+    <text x="640" y="119">gap &gt; 150 s</text>
+    <text x="833" y="119">watching</text>
+  </g>
+  <g font-family="Cascadia Mono,Consolas,monospace" font-size="11.5" fill="var(--ink2)">
+    <text x="285" y="82">explicit pause…resume window — subtracted</text>
+    <text x="620" y="82">silence closes the run (backgrounded)</text>
+    <text x="850" y="215">+60 s tail credit after the last event</text>
+  </g>
+  <line x1="953" y1="140" x2="953" y2="200" stroke="var(--mute)" stroke-width="1" stroke-dasharray="2 3"/>
+  <g font-family="Cascadia Mono,Consolas,monospace" font-size="12" fill="var(--ink)">
+    <text x="40" y="230">active := runs of events with no gap &gt; GAP_S(150) − pause windows + TAIL_S(60) grace · intervals are half-open [start, end)</text>
+  </g>
+</svg>
+<figcaption>The state machine in <code>sql/30_build_intervals.sql</code>. Half-open intervals kill boundary off-by-ones (a 20:40:00 stop must not count minute 20:40). A resume in the pause's own second closes the pause — timestamps truncate to whole seconds, and the strict-inequality version silently missed <span class="k">9.86%</span> of all pauses (ADR 0009: fixing it moved the peak 2,887 → 2,917).</figcaption>
+</figure>
+
+<div class="callout">
+<p><b>What the file actually looks like.</b> <span class="k">905,558</span> events · <span class="k">10,866</span> sessions · <span class="k">9,618</span> users · 13 columns · 2026-07-14 → 07-26. It is violently skewed: <span class="k">93.85%</span> of events land on 07-26, and two clock hours hold <span class="k">88.25%</span> of everything. Traps that bite: <code>event_timestamp</code> is epoch <b>milliseconds</b>; background/foreground events are not guaranteed to pair (379 unmatched); <span class="k">111</span> sessions emit <span class="k">740</span> events <em>after</em> their own <code>VideoSessionEnd</code>, up to <span class="k">2,081 s</span> later — “ended” is a client's claim, not a fact; duplicates are 0.46% of rows.</p>
+</div>
+</section>
+
+<!-- ============================ 2 · PIPELINE ============================ -->
+<section>
+<p class="eyebrow">§2 · The pipeline</p>
+<h2>Every artifact, and why it exists</h2>
+<p>ClickHouse is the primary datastore: all modeling and concurrency computation is SQL; the Go binary orchestrates and observes, it computes nothing. The flow follows the organiser's five mandated stages — ingest, enrich, filter+clean, aggregate, publish.</p>
+
+<figure class="figure">
+<svg viewBox="0 0 1060 560" role="img" aria-label="Pipeline flow from CSV files through landing, raw, intervals, deltas to the serving tiers and dashboard">
+  <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--mute)"/></marker></defs>
+  <g font-family="Segoe UI,system-ui,sans-serif" font-size="13.5">
+    <!-- row 1: ingest -->
+    <rect x="20" y="20" width="200" height="64" rx="10" fill="var(--card)" stroke="var(--line)"/>
+    <text x="34" y="45" font-weight="600" fill="var(--ink)">raw + content CSV</text>
+    <text x="34" y="66" fill="var(--ink2)" font-size="12">905,558 events · 33,464 titles</text>
+    <rect x="290" y="20" width="230" height="64" rx="10" fill="var(--card)" stroke="var(--line)"/>
+    <text x="304" y="45" font-weight="600" fill="var(--ink)">ev_landing · all-String</text>
+    <text x="304" y="66" fill="var(--ink2)" font-size="12">one bad row costs a row, not the file</text>
+    <rect x="590" y="20" width="210" height="64" rx="10" fill="var(--card)" stroke="var(--line)"/>
+    <text x="604" y="45" font-weight="600" fill="var(--ink)">typed cast forward</text>
+    <text x="604" y="66" fill="var(--ink2)" font-size="12">per-row; rejects quarantined</text>
+    <rect x="860" y="20" width="180" height="64" rx="10" fill="var(--serious-wash)" stroke="var(--serious)"/>
+    <text x="874" y="45" font-weight="600" fill="var(--ink)">quarantine</text>
+    <text x="874" y="66" fill="var(--ink2)" font-size="12">reason-coded, never silent</text>
+    <line x1="220" y1="52" x2="288" y2="52" stroke="var(--mute)" stroke-width="1.5" marker-end="url(#arr)"/>
+    <line x1="520" y1="52" x2="588" y2="52" stroke="var(--mute)" stroke-width="1.5" marker-end="url(#arr)"/>
+    <line x1="800" y1="52" x2="858" y2="52" stroke="var(--mute)" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#arr)"/>
+    <!-- row 2: raw truth -->
+    <rect x="290" y="130" width="330" height="72" rx="10" fill="var(--blue-wash)" stroke="var(--blue)"/>
+    <text x="304" y="155" font-weight="700" fill="var(--ink)">ev_raw — immutable event truth</text>
+    <text x="304" y="175" fill="var(--ink2)" font-size="12">MergeTree · PARTITION day · ORDER (hour, platform,</text>
+    <text x="304" y="191" fill="var(--ink2)" font-size="12">session, ts) — measured 17.3× on the dashboard shape</text>
+    <rect x="700" y="130" width="340" height="72" rx="10" fill="var(--card)" stroke="var(--line)"/>
+    <text x="714" y="155" font-weight="600" fill="var(--ink)">content_dim → dict_content</text>
+    <text x="714" y="175" fill="var(--ink2)" font-size="12">COMPLEX_KEY_HASHED — the only layout that survives</text>
+    <text x="714" y="191" fill="var(--ink2)" font-size="12">the poison content_id −987654322</text>
+    <line x1="455" y1="84" x2="455" y2="128" stroke="var(--mute)" stroke-width="1.5" marker-end="url(#arr)"/>
+    <!-- row 3: model -->
+    <rect x="120" y="250" width="380" height="72" rx="10" fill="var(--card)" stroke="var(--line)"/>
+    <text x="134" y="275" font-weight="700" fill="var(--ink)">session_intervals — the state machine's output</text>
+    <text x="134" y="295" fill="var(--ink2)" font-size="12">30,323 active stretches · all 7 raw dims, dominant-value</text>
+    <text x="134" y="311" fill="var(--ink2)" font-size="12">ReplacingMergeTree(build_version) — shrinkable, not just extendable</text>
+    <rect x="560" y="250" width="380" height="72" rx="10" fill="var(--blue-wash)" stroke="var(--blue)"/>
+    <text x="574" y="275" font-weight="700" fill="var(--ink)">cc_minute_delta — THE serving layer</text>
+    <text x="574" y="295" fill="var(--ink2)" font-size="12">28,073 rows · +1 open / −1 close · hour-clipped ·</text>
+    <text x="574" y="311" fill="var(--ink2)" font-size="12">SimpleAggregateFunction(sum, Int64) absorbs corrections</text>
+    <line x1="455" y1="202" x2="330" y2="248" stroke="var(--mute)" stroke-width="1.5" marker-end="url(#arr)"/>
+    <line x1="500" y1="286" x2="558" y2="286" stroke="var(--mute)" stroke-width="1.5" marker-end="url(#arr)"/>
+    <!-- row 4: tiers -->
+    <rect x="20" y="380" width="240" height="76" rx="10" fill="var(--card)" stroke="var(--line)"/>
+    <text x="34" y="404" font-weight="600" fill="var(--ink)">cc_hour_agg — 8-level cube</text>
+    <text x="34" y="423" fill="var(--ink2)" font-size="12">peak · peak_minute · integral per</text>
+    <text x="34" y="439" fill="var(--ink2)" font-size="12">(dims, hour); cube_level in the key</text>
+    <rect x="290" y="380" width="230" height="76" rx="10" fill="var(--card)" stroke="var(--line)"/>
+    <text x="304" y="404" font-weight="600" fill="var(--ink)">cc_user_minute</text>
+    <text x="304" y="423" fill="var(--ink2)" font-size="12">uniqExact states — a user holds</text>
+    <text x="304" y="439" fill="var(--ink2)" font-size="12">many sessions (one holds 301)</text>
+    <rect x="550" y="380" width="230" height="76" rx="10" fill="var(--card)" stroke="var(--line)"/>
+    <text x="564" y="404" font-weight="600" fill="var(--ink)">cc_minute_stateless</text>
+    <text x="564" y="423" fill="var(--ink2)" font-size="12">mandated session-independent</text>
+    <text x="564" y="439" fill="var(--ink2)" font-size="12">twin: 2,894 vs 2,917 at the peak</text>
+    <rect x="810" y="380" width="230" height="76" rx="10" fill="var(--card)" stroke="var(--line)"/>
+    <text x="824" y="404" font-weight="600" fill="var(--ink)">windows + content views</text>
+    <text x="824" y="423" fill="var(--ink2)" font-size="12">5/15/60-min rolling (RANGE frames),</text>
+    <text x="824" y="439" fill="var(--ink2)" font-size="12">title/type/category via dictionary</text>
+    <line x1="640" y1="322" x2="180" y2="378" stroke="var(--mute)" stroke-width="1.5" marker-end="url(#arr)"/>
+    <line x1="680" y1="322" x2="430" y2="378" stroke="var(--mute)" stroke-width="1.5" marker-end="url(#arr)"/>
+    <line x1="750" y1="322" x2="900" y2="378" stroke="var(--mute)" stroke-width="1.5" marker-end="url(#arr)"/>
+    <line x1="455" y1="202" x2="640" y2="378" stroke="var(--mute)" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#arr)"/>
+    <!-- row 5 -->
+    <rect x="290" y="496" width="480" height="48" rx="10" fill="var(--blue)" />
+    <text x="530" y="526" text-anchor="middle" fill="#fff" font-weight="700">dashboard + ClickStack — filter first, then hour-local running sum</text>
+    <line x1="140" y1="456" x2="380" y2="494" stroke="var(--mute)" stroke-width="1.5" marker-end="url(#arr)"/>
+    <line x1="405" y1="456" x2="480" y2="494" stroke="var(--mute)" stroke-width="1.5" marker-end="url(#arr)"/>
+    <line x1="665" y1="456" x2="580" y2="494" stroke="var(--mute)" stroke-width="1.5" marker-end="url(#arr)"/>
+    <line x1="925" y1="456" x2="680" y2="494" stroke="var(--mute)" stroke-width="1.5" marker-end="url(#arr)"/>
+  </g>
+  <g font-family="Cascadia Mono,Consolas,monospace" font-size="9.5" fill="var(--mute)" letter-spacing=".08em" text-anchor="end">
+    <text x="212" y="14">FILES</text>
+    <text x="512" y="14">TABLE</text>
+    <text x="792" y="14">BATCH JOB</text>
+    <text x="1032" y="14">TABLES</text>
+    <text x="612" y="124">TABLE</text>
+    <text x="1032" y="124">TABLE + DICTIONARY</text>
+    <text x="492" y="244">TABLE · BATCH-BUILT</text>
+    <text x="932" y="244">TABLE · BATCH + DIFF</text>
+    <text x="252" y="374">TABLE</text>
+    <text x="512" y="374">TABLE</text>
+    <text x="772" y="374">TABLE · MV-FED</text>
+    <text x="1032" y="374">VIEWS</text>
+    <text x="762" y="490">QUERIES</text>
+  </g>
+</svg>
+<figcaption>Solid arrows are the build path; dashed ones are exception paths (cast rejects → quarantine) or the stateless twin fed directly off <code>ev_raw</code> by a true incremental materialized view. No benchmark query ever reads <code>ev_raw</code> — verified in <code>system.query_log</code>.</figcaption>
+</figure>
+
+<h3>The same flow, with one real session</h3>
+<figure class="figure">
+<svg viewBox="0 0 1060 500" role="img" aria-label="One session traced through the pipeline: seven raw events become one run with a pause carved out and tail credit added, then two intervals, then six hour-clipped delta rows, then seven counted minutes">
+  <defs><marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--mute)"/></marker></defs>
+  <!-- minute grid -->
+  <g stroke="var(--grid)" stroke-width="1">
+    <line x1="100" y1="46" x2="100" y2="408"/><line x1="215" y1="46" x2="215" y2="408"/><line x1="330" y1="46" x2="330" y2="408"/><line x1="445" y1="46" x2="445" y2="408"/><line x1="675" y1="46" x2="675" y2="408"/><line x1="790" y1="46" x2="790" y2="408"/><line x1="905" y1="46" x2="905" y2="408"/>
+  </g>
+  <line x1="560" y1="40" x2="560" y2="440" stroke="var(--violet)" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <g font-family="Cascadia Mono,Consolas,monospace" font-size="10.5" fill="var(--mute)">
+    <text x="88" y="36">10:56</text><text x="203" y="36">10:57</text><text x="318" y="36">10:58</text><text x="433" y="36">10:59</text><text x="548" y="36" fill="var(--violet)" font-weight="700">11:00</text><text x="663" y="36">11:01</text><text x="778" y="36">11:02</text><text x="893" y="36">11:03</text>
+    <text x="568" y="452" fill="var(--violet)">hour boundary</text>
+  </g>
+  <!-- band labels -->
+  <g font-family="Cascadia Mono,Consolas,monospace" font-size="10.5" fill="var(--ink2)">
+    <text x="14" y="80">1 · events</text>
+    <text x="14" y="165">2 · one run</text>
+    <text x="14" y="248">3 · intervals</text>
+    <text x="14" y="318">4 · deltas</text>
+    <text x="14" y="388">5 · minutes</text>
+  </g>
+  <!-- band 1: events on ev_raw -->
+  <line x1="100" y1="88" x2="960" y2="88" stroke="var(--axis)" stroke-width="1.5"/>
+  <g>
+    <circle cx="100" cy="88" r="5" fill="var(--blue)"/>
+    <circle cx="177" cy="88" r="4" fill="var(--blue)"/>
+    <circle cx="234" cy="88" r="5" fill="var(--serious)"/>
+    <circle cx="388" cy="88" r="4" fill="var(--serious)"/>
+    <circle cx="541" cy="88" r="5" fill="var(--good)"/>
+    <circle cx="618" cy="88" r="4" fill="var(--blue)"/>
+    <circle cx="733" cy="88" r="4" fill="var(--blue)"/>
+  </g>
+  <g font-family="Cascadia Mono,Consolas,monospace" font-size="10">
+    <text x="96" y="62" fill="var(--blue)">Start</text>
+    <text x="163" y="110" fill="var(--ink2)">hb :40</text>
+    <text x="222" y="62" fill="var(--serious)">Pause :10</text>
+    <text x="352" y="110" fill="var(--serious)">hb (paused!)</text>
+    <text x="505" y="62" fill="var(--good-text)">Resume :50</text>
+    <text x="604" y="110" fill="var(--ink2)">hb :30</text>
+    <text x="719" y="110" fill="var(--ink2)">hb :30</text>
+    <text x="758" y="62" fill="var(--crit)">…then silence forever</text>
+  </g>
+  <!-- band 2: run + pause carve + tail -->
+  <rect x="100" y="150" width="633" height="26" rx="6" fill="var(--blue)" opacity=".35"/>
+  <rect x="234" y="150" width="307" height="26" rx="6" fill="var(--serious)"/>
+  <rect x="733" y="150" width="115" height="26" rx="6" fill="var(--blue)" opacity=".7"/>
+  <g font-family="Cascadia Mono,Consolas,monospace" font-size="10.5">
+    <text x="104" y="144" fill="var(--ink2)">gaps all ≤ 150 s → ONE run 10:56:00–11:01:30</text>
+    <text x="300" y="167" fill="#fff" font-weight="700">pause window − subtracted</text>
+    <text x="737" y="144" fill="var(--blue-deep)">+60 s tail</text>
+    <text x="856" y="167" fill="var(--crit)">gap &gt; 150 s ends it</text>
+  </g>
+  <!-- band 3: intervals -->
+  <rect x="100" y="232" width="134" height="26" rx="6" fill="var(--blue)"/>
+  <rect x="541" y="232" width="307" height="26" rx="6" fill="var(--blue)"/>
+  <g font-family="Cascadia Mono,Consolas,monospace" font-size="10.5">
+    <text x="104" y="226" fill="var(--ink2)">A [10:56:00, 10:57:10)</text>
+    <text x="545" y="226" fill="var(--ink2)">B [10:59:50, 11:02:30) — crosses 11:00 → clipped</text>
+  </g>
+  <!-- band 4: delta rows -->
+  <g font-family="Cascadia Mono,Consolas,monospace" font-size="11.5" font-weight="700">
+    <rect x="78" y="300" width="60" height="22" rx="11" fill="var(--good-wash)"/><text x="88" y="316" fill="var(--good-text)">+1 :56</text>
+    <rect x="308" y="300" width="60" height="22" rx="11" fill="var(--crit-wash)"/><text x="318" y="316" fill="var(--crit)">−1 :58</text>
+    <rect x="423" y="300" width="60" height="22" rx="11" fill="var(--good-wash)"/><text x="433" y="316" fill="var(--good-text)">+1 :59</text>
+    <rect x="480" y="330" width="68" height="22" rx="11" fill="var(--crit-wash)"/><text x="488" y="346" fill="var(--crit)">−1 11:00</text>
+    <rect x="572" y="330" width="68" height="22" rx="11" fill="var(--good-wash)"/><text x="580" y="346" fill="var(--good-text)">+1 11:00</text>
+    <rect x="883" y="300" width="60" height="22" rx="11" fill="var(--crit-wash)"/><text x="893" y="316" fill="var(--crit)">−1 :03</text>
+  </g>
+  <g font-family="Cascadia Mono,Consolas,monospace" font-size="10" fill="var(--ink2)">
+    <text x="452" y="368">interval B closes in hour 10's ledger and reopens in hour 11's</text>
+  </g>
+  <!-- band 5: minute strip -->
+  <g font-family="Cascadia Mono,Consolas,monospace" font-size="12" font-weight="700" text-anchor="middle">
+    <rect x="102" y="392" width="111" height="30" rx="6" fill="var(--blue-wash)"/><text x="157" y="412" fill="var(--blue-deep)">1</text>
+    <rect x="217" y="392" width="111" height="30" rx="6" fill="var(--blue-wash)"/><text x="272" y="412" fill="var(--blue-deep)">1</text>
+    <rect x="332" y="392" width="111" height="30" rx="6" fill="var(--card)" stroke="var(--line)"/><text x="387" y="412" fill="var(--mute)">0</text>
+    <rect x="447" y="392" width="111" height="30" rx="6" fill="var(--blue-wash)"/><text x="502" y="412" fill="var(--blue-deep)">1</text>
+    <rect x="562" y="392" width="111" height="30" rx="6" fill="var(--blue-wash)"/><text x="617" y="412" fill="var(--blue-deep)">1</text>
+    <rect x="677" y="392" width="111" height="30" rx="6" fill="var(--blue-wash)"/><text x="732" y="412" fill="var(--blue-deep)">1</text>
+    <rect x="792" y="392" width="111" height="30" rx="6" fill="var(--blue-wash)"/><text x="847" y="412" fill="var(--blue-deep)">1</text>
+    <rect x="907" y="392" width="53" height="30" rx="6" fill="var(--card)" stroke="var(--line)"/><text x="933" y="412" fill="var(--mute)">0</text>
+  </g>
+  <g font-family="Segoe UI,system-ui,sans-serif" font-size="11" fill="var(--ink2)">
+    <text x="333" y="442">10:58 fully paused →</text>
+    <text x="333" y="456">not counted (naive counts it)</text>
+    <text x="794" y="442">11:02 counted only</text>
+    <text x="794" y="456">thanks to tail credit</text>
+    <text x="908" y="470">11:03 half-open:</text>
+    <text x="908" y="484">ends AT :03, excluded</text>
+  </g>
+</svg>
+<figcaption><b>Seven events in, seven counted minutes out.</b> ① The raw events land in <code>ev_raw</code> — note the heartbeat at 10:58:30 that keeps ticking <em>during</em> the pause (why silence alone can't detect pausing). ② All gaps are ≤ 150 s, so this is one run; the explicit pause window is carved out and the last event earns 60 s of tail before the &gt;150 s silence (backgrounding) ends it. ③ What survives becomes two rows in <code>session_intervals</code>. ④ Each interval emits +1/−1 rows into <code>cc_minute_delta</code>, and B — which crosses 11:00 — is clipped: closed in hour 10, reopened in hour 11, so each hour's running sum starts from zero. ⑤ The running sum yields this session's contribution per minute: the dashboard's count at 10:57 includes it, at 10:58 it doesn't. <code>cc_hour_agg</code> then compresses band ⑤ per hour (peak, peak-minute, integral), and the same +1/−1 ledger is what a late event corrects by diff.</figcaption>
+</figure>
+
+<h3>Row by row: what actually lands in each table</h3>
+<p class="small">Same session as above (<span class="k">S1</span>, viewer <span class="k">U1</span>), plus a second session <span class="k">S2</span> — <em>the same viewer</em> on a second device, watching 10:57:00 → 11:01:00 with a clean end event — so the counts reach 2 and the user tier has something to prove.</p>
+
+<div class="step">
+<h4><span class="tn">CSV → ev_landing</span>Everything lands as text — the file can never fail to load</h4>
+<p class="why">All 13 columns are <code>String</code>; each load is tagged with a <code>load_id</code>. Note the timestamp: epoch <b>milliseconds</b>, still just text here.</p>
+<table class="mini">
+<tr><th>event_timestamp</th><th>event</th><th>session</th><th>user</th><th>platform</th><th>load_id</th></tr>
+<tr><td>"1784112960000"</td><td>"VideoSessionStart"</td><td>"S1"</td><td>"U1"</td><td>"ANDROID_PHONE"</td><td class="dim">L42</td></tr>
+<tr><td>"1784113030000"</td><td>"PauseVideo"</td><td>"S1"</td><td>"U1"</td><td>"ANDROID_PHONE"</td><td class="dim">L42</td></tr>
+<tr><td>"1784113020000"</td><td>"VideoSessionStart"</td><td>"S2"</td><td>"U1"</td><td>"ANDROID_TV"</td><td class="dim">L42</td></tr>
+<tr><td class="dim" colspan="6">… 12 rows for S1 + S2 in total — plus any garbage row, which still loads (as text)</td></tr>
+</table>
+</div>
+<div class="saarrow">↓ &nbsp;typed cast forward — good rows continue, bad rows → quarantine with a reason code</div>
+
+<div class="step">
+<h4><span class="tn">ev_raw</span>Typed, sorted, immutable — the permanent evidence</h4>
+<p class="why">Real <code>DateTime</code> and <code>Int64</code> now. Partitioned by day; sorted by (hour, platform, session, ts) so the sparse index can skip blocks. Never edited again.</p>
+<table class="mini">
+<tr><th>event_ts</th><th>event</th><th>session</th><th>user</th><th>platform</th><th>content_id</th></tr>
+<tr><td>10:56:00</td><td>VideoSessionStart</td><td>S1</td><td>U1</td><td>ANDROID_PHONE</td><td>741</td></tr>
+<tr><td>10:57:10</td><td>PauseVideo</td><td>S1</td><td>U1</td><td>ANDROID_PHONE</td><td>741</td></tr>
+<tr><td>10:58:30</td><td>Heartbeat <span class="dim">(during pause)</span></td><td>S1</td><td>U1</td><td>ANDROID_PHONE</td><td>741</td></tr>
+<tr><td>10:59:50</td><td>ResumeVideo</td><td>S1</td><td>U1</td><td>ANDROID_PHONE</td><td>741</td></tr>
+<tr><td>10:57:00</td><td>VideoSessionStart</td><td>S2</td><td>U1</td><td>ANDROID_TV</td><td>741</td></tr>
+<tr><td>11:01:00</td><td>VideoSessionEnd</td><td>S2</td><td>U1</td><td>ANDROID_TV</td><td>741</td></tr>
+<tr><td class="dim" colspan="6">… heartbeats omitted for space</td></tr>
+</table>
+</div>
+<div class="saarrow">↓ &nbsp;state machine per session: cut at gaps &gt; 150 s · subtract pause windows · +60 s tail · cap at explicit end</div>
+
+<div class="step">
+<h4><span class="tn">session_intervals</span>One row per continuous stretch of real watching</h4>
+<p class="why">S1 splits into two stretches around its pause and earns tail (no end event — silence closed it). S2 is one stretch, capped by its clean <code>VideoSessionEnd</code>, so no tail. <code>build_version</code> is how a late event replaces these rows later.</p>
+<table class="mini">
+<tr><th>session</th><th>interval_start</th><th>interval_end</th><th>is_open</th><th>platform</th><th>build_v</th></tr>
+<tr><td>S1</td><td>10:56:00</td><td>10:57:10</td><td>0</td><td>ANDROID_PHONE</td><td class="dim">7</td></tr>
+<tr><td>S1</td><td>10:59:50</td><td>11:02:30 <span class="dim">(+60 s tail)</span></td><td>0</td><td>ANDROID_PHONE</td><td class="dim">7</td></tr>
+<tr><td>S2</td><td>10:57:00</td><td>11:01:00 <span class="dim">(clean end, no tail)</span></td><td>0</td><td>ANDROID_TV</td><td class="dim">7</td></tr>
+</table>
+</div>
+<div class="saarrow">↓ &nbsp;each interval emits +1 at start, −1 after end — clipped at the 11:00 hour boundary</div>
+
+<div class="step">
+<h4><span class="tn">cc_minute_delta</span>Only the changes, hour-clipped — rows with the same minute sum themselves</h4>
+<p class="why">S1's second interval and S2 both cross 11:00, so each closes in hour 10 and reopens in hour 11. The table's sum-columns merge rows automatically — which is also how a late correction (insert the old rows negated) heals it.</p>
+<table class="mini">
+<tr><th>hour</th><th>minute</th><th>delta</th><th>from</th></tr>
+<tr><td>10</td><td>10:56</td><td class="pos">+1</td><td class="dim">S1-A opens</td></tr>
+<tr><td>10</td><td>10:57</td><td class="pos">+1</td><td class="dim">S2 opens</td></tr>
+<tr><td>10</td><td>10:58</td><td class="neg">−1</td><td class="dim">S1-A closed (paused)</td></tr>
+<tr><td>10</td><td>10:59</td><td class="pos">+1</td><td class="dim">S1-B opens (resume)</td></tr>
+<tr><td>10</td><td>11:00</td><td class="neg">−2</td><td class="dim">clip: S1-B + S2 close hour 10</td></tr>
+<tr class="hl"><td>11</td><td>11:00</td><td class="pos">+2</td><td class="dim">clip: both reopen in hour 11</td></tr>
+<tr><td>11</td><td>11:01</td><td class="neg">−1</td><td class="dim">S2 ends at 11:01 (half-open)</td></tr>
+<tr><td>11</td><td>11:03</td><td class="neg">−1</td><td class="dim">S1-B tail expires</td></tr>
+</table>
+</div>
+<div class="saarrow">↓ &nbsp;query time: filter first → running sum per hour (each hour starts from zero)</div>
+
+<div class="step">
+<h4><span class="tn">running sum</span>The concurrency curve — never stored, always exact</h4>
+<table class="mini">
+<tr><th>minute</th><td>10:56</td><td>10:57</td><td>10:58</td><td>10:59</td><td>11:00</td><td>11:01</td><td>11:02</td><td>11:03</td></tr>
+<tr><th>watching</th><td class="pos">1</td><td class="pos">2</td><td>1</td><td class="pos">2</td><td class="pos">2</td><td>1</td><td>1</td><td class="dim">0</td></tr>
+<tr><th class="dim">who</th><td class="dim">S1</td><td class="dim">S1+S2</td><td class="dim">S2 only — S1 paused</td><td class="dim">S1+S2</td><td class="dim">S1+S2</td><td class="dim">S1</td><td class="dim">S1 tail</td><td class="dim">—</td></tr>
+</table>
+</div>
+<div class="saarrow">↓ &nbsp;per hour and per dimension-combo, pre-compute peak · peak-minute · integral</div>
+
+<div class="step">
+<h4><span class="tn">cc_hour_agg</span>The hourly shelf — big ranges without touching minutes</h4>
+<p class="why">Ties break to the <b>earliest</b> minute (hour 10 hits 2 at both 10:57 and 10:59 → stored as 10:57). The integral is concurrency-<em>seconds</em> — what time-weighted averages are built from. <code>cube_level</code> says which dimensions this row aggregates over; each of the 8 combos gets its own row, because peaks don't add.</p>
+<table class="mini">
+<tr><th>hour</th><th>cube_level</th><th>peak</th><th>peak_minute</th><th>integral (s)</th></tr>
+<tr><td>10:00</td><td class="dim">total</td><td class="pos">2</td><td>10:57</td><td>360</td></tr>
+<tr><td>11:00</td><td class="dim">total</td><td class="pos">2</td><td>11:00</td><td>240</td></tr>
+<tr><td>10:00</td><td class="dim">by platform</td><td>1 <span class="dim">ANDROID_PHONE</span> · 1 <span class="dim">ANDROID_TV</span></td><td class="dim">per-platform rows</td><td class="dim">…</td></tr>
+</table>
+<p class="why" style="margin-bottom:0">↑ the dimension trap, visible in miniature: per-platform peaks are 1 + 1 = 2 only by luck here — on the real file the sum of per-platform peaks is 2,988 against a true 2,917, because platforms peak at different minutes.</p>
+</div>
+<div class="saarrow">↓ &nbsp;separately: distinct people per minute (sets, not deltas)</div>
+
+<div class="step">
+<h4><span class="tn">cc_user_minute</span>People, not sessions — the same viewer counts once</h4>
+<p class="why">At 10:57 there are <b>2 sessions</b> but only <b>1 human</b> — both S1 and S2 belong to U1. The row stores a compressed <em>set</em> of user ids (<code>uniqExact</code> state); sets can't be corrected by +/− (no way to "un-union"), so this tier is wholesale-replaced on update, not diffed.</p>
+<table class="mini">
+<tr><th>minute</th><th>users (set)</th><th>distinct users</th><th class="dim">vs sessions</th></tr>
+<tr><td>10:57</td><td>{U1}</td><td class="pos">1</td><td class="dim">2</td></tr>
+<tr><td>10:58</td><td>{U1}</td><td class="pos">1</td><td class="dim">1</td></tr>
+</table>
+<p class="why" style="margin-bottom:0">And the mandated naive twin, <code>cc_minute_stateless</code>, would count <b>2</b> at 10:58 — S1's paused heartbeat at 10:58:30 fools it. The gap between the twins (2,894 vs 2,917 at the real peak) is the measured worth of the state machine.</p>
+</div>
+
+<details>
+<summary>The full artifact ledger — engine, key, and the reason for each (14 artifacts)</summary>
+<div class="tablewrap"><table>
+<tr><th>Artifact</th><th>Engine / key</th><th>Why this shape</th></tr>
+<tr><td><code>ev_landing</code>, <code>content_landing</code></td><td>MergeTree · ORDER BY (load_id)</td><td>All-String landing (ADR 0030): a typed <code>input()</code> made one unparseable value fatal — exit 27, <b>zero</b> rows loaded, content half-loaded. Now a cast failure costs a row. Cost accepted: +70% bytes read at load, +123% ingest storage.</td></tr>
+<tr><td><code>ev_cast_quarantine</code>, <code>ev_quarantine</code></td><td>ReplacingMergeTree · (source/reason, src_hash)</td><td>ADR 0025: hostile rows are quarantined with a reason code, never silently dropped — “a discarded row is invisible to every check we have.” Only unusable identity/timestamps leave the model; value defects are normalised on read.</td></tr>
+<tr><td><code>ev_raw</code></td><td>MergeTree · PARTITION day · ORDER (toStartOfHour(ts), platform, session, ts)</td><td>Immutable evidence. Key measured, not guessed (ADR 0002): 17.3× on hour+platform reads, 2.0× on an hour slice, identical on full rebuild. Session-hash-first is the classic cardinality anti-pattern — the sparse index would skip nothing.</td></tr>
+<tr><td><code>content_dim</code> → <code>dict_content</code></td><td>ReplacingMergeTree · content_id; COMPLEX_KEY_HASHED dictionary</td><td>Simple-key layouts key on UInt64 and throw <code>Code: 70</code> on the negative poison id; FLAT would try to allocate a 2-billion-slot array. Views name no database so an unseen-day DB can never silently read production's catalog (ADR 0010).</td></tr>
+<tr><td>normalisation UDFs + views</td><td>views over <code>ev_raw</code> / deltas</td><td>ADR 0011: value folding (<code>hin</code>/<code>Hindi</code>/<code>HIN</code>) happens at query time; storage stays raw. Normalising inside derivation was built, measured, and is worse. An un-normalised language filter under-answered by 23.3%.</td></tr>
+<tr><td><code>session_intervals</code></td><td>ReplacingMergeTree(<b>build_version</b>) · (session, interval_start)</td><td>30,323 contiguous active stretches. Versioned on build number, not <code>interval_end</code> — re-derivation can legitimately <em>shrink</em> an interval (tail overshoot), and the old scheme let a stale longer row win forever (316 intervals stuck too long).</td></tr>
+<tr><td><code>cc_minute_delta</code></td><td>AggregatingMergeTree · PARTITION day · ORDER (7 dims…, minute)</td><td>The serving layer: 28,073 rows. Signed, hour-clipped deltas; <code>Int64</code> because a negative corrective row on <code>UInt64</code> wraps to 1.8×10¹⁹ and hides the bug (happened; fixed).</td></tr>
+<tr><td><code>cc_minute_stateless</code></td><td>AggregatingMergeTree, fed by a real incremental MV</td><td>The mandated session-independent comparison: uniqExact per minute straight off raw. 2,894 vs the session-aware 2,917 at the peak minute — the difference is what session stitching is worth.</td></tr>
+<tr><td><code>cc_user_minute</code></td><td>ReplacingMergeTree(computed_at) · (platform, country, content_id, minute)</td><td>Distinct users, not summed deltas — 772 users hold &gt;1 concurrent session. Replacing, because set-union has no inverse: replacement is the cheapest representation in which retraction exists (ADR 0016). User peak 2,844.</td></tr>
+<tr><td><code>cc_hour_agg</code></td><td>ReplacingMergeTree(computed_at) · (…dims, <b>cube_level</b>, hour) · PARTITION month</td><td>Per (dims, hour): peak, peak_minute (earliest on ties — ADR 0014), integral. An 8-level cube: each dimension subset gets its own curve because peak is not summable. <code>cube_level</code> is in the key — a −1 sentinel once merged a real session whose id <em>is</em> −1 into the rollup (ADR 0022).</td></tr>
+<tr><td>window views (9)</td><td>views · RANGE frames 240/840/3540s</td><td><code>RANGE</code>, never <code>ROWS</code> — deltas store only change rows, so row-count frames are meaningless. Verified against a brute-force self-join: 0 mismatches at 5/15/60 min.</td></tr>
+<tr><td>publish queue (<code>session_dirty</code>, batches, lease, runs)</td><td>MergeTree family, TTL 7 days</td><td>The incremental finalizer's crash-safe state machine (ADR 0013/0016/0019): which sessions each INSERT touched, claimed under a fenced lease, corrected by diff.</td></tr>
+<tr><td><code>model_generation</code> + <code>gen_*</code> tables</td><td>generation leads PARTITION and ORDER</td><td>ADR 0034: a half-built model must be unservable (see §6). Proven in scratch; not yet applied to the graded DB.</td></tr>
+<tr><td><code>sql/90_reconcile.sql</code></td><td>the gate</td><td>Recomputes truth from <code>ev_raw</code> on a dense minute spine and diffs the serving layer. Negative-tested: inject one bad delta row → exit 1.</td></tr>
+<tr><td><code>proj_by_session</code></td><td>projection on ev_raw</td><td>ADR 0021: the finalizer's windowed re-derive drops 106,497 → 8,193 rows read (13×) for +92% storage on ev_raw. Kept.</td></tr>
+</table></div>
+</details>
+<h3>Data lineage on ClickHouse — what feeds what, and how</h3>
+<p class="small">Four kinds of objects, four kinds of edges. <b>Thick arrows</b> are true ClickHouse <b>materialized views</b> — they fire automatically on every INSERT, no orchestration. <b>Solid arrows</b> are <b>batch <code>INSERT SELECT</code> jobs</b> — deterministic, ordered, gated by <code>/reconcile</code>. <b>Dotted arrows</b> are exception paths or query-time reads. Views (bottom) store nothing at all.</p>
+
+<figure class="figure">
+<pre class="mermaid">
+flowchart LR
+  classDef tbl fill:#e3eefc,stroke:#2a78d6,color:#171b1c
+  classDef mvfed fill:#fdece4,stroke:#eb6834,color:#171b1c
+  classDef job fill:#f0f0ee,stroke:#87908a,color:#171b1c,stroke-dasharray:6 3
+  classDef vw fill:#fcfcfb,stroke:#a9b0aa,color:#171b1c
+  classDef dic fill:#ece8fb,stroke:#4a3aa7,color:#171b1c
+
+  CSV[/"raw + content CSV"/]:::job
+  LAND["ev_landing / content_landing<br/>TABLE · MergeTree, all-String"]:::tbl
+  CQ["ev_cast_quarantine<br/>TABLE"]:::tbl
+  RAW["ev_raw<br/>TABLE · MergeTree<br/>+ projection proj_by_session"]:::tbl
+  QQ["ev_quarantine<br/>TABLE"]:::tbl
+  CDIM["content_dim<br/>TABLE · ReplacingMergeTree"]:::tbl
+  DICT["dict_content<br/>DICTIONARY · in-memory lookup"]:::dic
+  DIRTY["session_dirty<br/>TABLE · queue, TTL 7d"]:::mvfed
+  SLESS["cc_minute_stateless<br/>TABLE · AggregatingMergeTree"]:::mvfed
+  SI["session_intervals<br/>TABLE · Replacing(build_version)"]:::tbl
+  DELTA["cc_minute_delta<br/>TABLE · AggregatingMergeTree"]:::tbl
+  HOUR["cc_hour_agg<br/>TABLE · Replacing(computed_at)"]:::tbl
+  USER["cc_user_minute<br/>TABLE · Replacing(computed_at)"]:::tbl
+  PUB(("publisher<br/>tools/publish.sh")):::job
+  POL["v_model_policy<br/>VIEW · generated from policy file"]:::vw
+  VNORM["v_cc_minute_delta_norm<br/>VIEW · value normalisation"]:::vw
+  VWIN["9 window views<br/>v_cc_rolling_* · v_cc_tumbling_*<br/>v_cc_window_range · v_cc_watermark"]:::vw
+  VCONT["content views<br/>v_concurrency_minute_title / _video_type / _category"]:::vw
+  VNAIVE["v_concurrency_minute_naive<br/>VIEW · the 3,708 comparison line"]:::vw
+  GATE["reconcile gate<br/>sql/90 · recomputes truth from ev_raw"]:::job
+  DASH["dashboard · ClickStack · benchmark queries"]:::job
+
+  CSV -->|"load.sh"| LAND
+  LAND -->|"batch: typed cast forward"| RAW
+  LAND -.->|"cast fails, reason-coded"| CQ
+  RAW -.->|"unusable identity / timestamp"| QQ
+  LAND -->|"batch cast"| CDIM
+  CDIM -->|"refreshed lookup"| DICT
+  RAW ==>|"MV mv_session_dirty<br/>fires on every INSERT"| DIRTY
+  RAW ==>|"MV mv_stateless<br/>fires on every INSERT"| SLESS
+  RAW -->|"batch: 30_build_intervals<br/>the state machine"| SI
+  SI -->|"batch: 40_deltas<br/>hour-clip, emit ±1"| DELTA
+  DELTA -->|"batch: 50_hour_agg<br/>peak · peak_minute · integral, 8-level cube"| HOUR
+  SI -->|"batch: 45_user<br/>uniqExact states"| USER
+  DIRTY -->|"claims dirty sessions"| PUB
+  PUB -->|"re-derive via projection"| SI
+  PUB -->|"append −old +new deltas"| DELTA
+  PUB -->|"hours phase"| HOUR
+  PUB -->|"users phase"| USER
+  POL -.->|"constants read as scalar subqueries"| SI
+  POL -.-> DELTA
+  POL -.-> GATE
+  DELTA -.-> VNORM
+  VNORM -.-> VWIN
+  DELTA -.-> VWIN
+  HOUR -.-> VWIN
+  DELTA -.-> VCONT
+  DICT -.->|"dictGet, no scan"| VCONT
+  RAW -.-> VNAIVE
+  RAW -.->|"truth side"| GATE
+  DELTA -.->|"serving side"| GATE
+  VWIN -.-> DASH
+  VCONT -.-> DASH
+  HOUR -.-> DASH
+  SLESS -.->|"session-independent comparison"| DASH
+</pre>
+<figcaption><b>Reading it:</b> blue = storage tables (MergeTree family) · orange = tables kept current <em>automatically</em> by a real materialized view · violet = the dictionary · dashed outline = jobs/queries that store nothing · white = query-time views. The benchmark path never touches <code>ev_raw</code> (verified in <code>system.query_log</code>) — dashboards read only the delta/hour tiers and views over them.</figcaption>
+</figure>
+
+<div class="callout">
+<p><b>Why only two true materialized views?</b> A ClickHouse MV sees <em>only the block of rows being inserted</em> — it cannot look back at other rows, and it can never retract what it already wrote. That's perfect for the two jobs that are purely additive: <code>mv_session_dirty</code> (append "this session was touched" to a queue) and <code>mv_stateless</code> (the mandated session-independent count). It is exactly wrong for everything else: interval building needs a session's <em>whole</em> history (cross-block state), and corrections need retraction. Two designs died on this rule — the heartbeat-lease MV tier (ADR 0005: leases renew straight through a pause, an 834 h overcount exposure) and <code>mv_user_minute</code> (retired in ADR 0016: a set union can't be un-unioned). So everything that can be wrong is built by <b>deterministic batch jobs</b> that re-run and converge, and kept current by the <b>diff-appending publisher</b> — with the reconcile gate diffing the two independent lineage branches (<code>ev_raw</code> → truth vs <code>session_intervals</code> → serving) after every change.</p>
+</div>
+</section>
+
+<!-- ============================ 3 · THE SWEEP LINE ============================ -->
+<section>
+<p class="eyebrow">§3 · The core representation</p>
+<h2>Hour-clipped signed deltas: exact, tiny, filterable</h2>
+<p>Storing every active session-minute would be correct but explodes: <span class="k">148,900</span> rows on this file, growing with every minute watched. Instead each active interval writes <b>+1</b> at its start and <b>−1</b> after its end — <em>clipped at hour boundaries</em>, so every hour's running sum is absolute. The same file needs only <span class="k">28,073</span> rows (5.3× smaller), and the row count is <b>hard-capped</b> at 36,930 for <em>any</em> number of dimensions — at most one open + one close per merged run per hour.</p>
+
+<figure class="figure">
+<svg viewBox="0 0 1060 260" role="img" aria-label="An interval crossing 11:00 emits +1 at 10:58, a close and reopen at 11:00, and −1 at 11:03; each hour's running sum starts from zero">
+  <line x1="60" y1="180" x2="1000" y2="180" stroke="var(--axis)" stroke-width="2"/>
+  <line x1="530" y1="60" x2="530" y2="200" stroke="var(--mute)" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <g font-family="Cascadia Mono,Consolas,monospace" font-size="12" fill="var(--mute)">
+    <text x="150" y="202">10:58</text><text x="510" y="202">11:00</text><text x="810" y="202">11:03</text>
+    <text x="538" y="76" fill="var(--ink2)">hour boundary — the interval is clipped</text>
+  </g>
+  <rect x="160" y="120" width="370" height="34" rx="7" fill="var(--blue)"/>
+  <rect x="530" y="120" width="290" height="34" rx="7" fill="var(--blue)" opacity=".7"/>
+  <g font-family="Cascadia Mono,Consolas,monospace" font-size="13" font-weight="700">
+    <text x="150" y="240" fill="var(--good-text)">+1 @10:58</text>
+    <text x="450" y="240" fill="var(--crit)">−1 @11:00</text>
+    <text x="560" y="240" fill="var(--good-text)">+1 @11:00</text>
+    <text x="800" y="240" fill="var(--crit)">−1 @11:03</text>
+  </g>
+  <text x="160" y="106" font-family="Segoe UI,sans-serif" font-size="13" fill="var(--ink2)">one interval [10:58, 11:03) → four delta rows, two per hour</text>
+  <text x="60" y="40" font-family="Segoe UI,sans-serif" font-size="14" font-weight="600" fill="var(--ink)">A query reads only the requested hours — no scan back to t=0, and partition pruning works.</text>
+</svg>
+<figcaption>ADR 0003. A day-grain peak reads 24 stored hour rows instead of 1,440 reconstructed minutes; the hour tier answers a whole-range peak in <span class="k">240 KiB</span> whether the range is 1 day or 13 (measured: identical 8,193 rows read).</figcaption>
+</figure>
+
+<div class="callout warn">
+<p><b>The dimension trap — the most likely place to be silently wrong.</b> Peak is <b>not summable across dimensions</b>: the true all-platform peak is <span class="k">2,917</span>, the sum of per-platform peaks is <span class="k">2,988</span> (+2.4%), the sum of per-content peaks is <span class="k">5,680</span> (+94.7%) — different dimensions peak at different minutes. So peak is never stored pre-combined: the pipeline filters first, sums deltas, runs the hour-local cumulative sum, and only then takes <code>max()</code>. Same discipline for the other two arithmetic rules: never sum a distinct count (measured 9× over-count), and averages are time-weighted with zeros kept in the denominator.</p>
+</div>
+</section>
+
+<!-- ============================ 4 · POLICY ============================ -->
+<section>
+<p class="eyebrow">§4 · Tuned constants</p>
+<h2>One policy file rules every number</h2>
+<p>Every tunable lives in <code>policy/model.policy</code> (ADR 0032) and is generated into <code>sql/01_policy.sql</code>; <code>tools/policy.sh check</code> fails the build if any consumer carries a literal. Before this, the constants were literals in six files across three languages — <em>including the reconcile gate and both data generators</em>, so “every instrument we own for detecting a wrong answer was calibrated with the number under suspicion.” The migration moved nothing: peak 2,917, identical fingerprints on all four tiers.</p>
+
+<div class="tablewrap"><table>
+<tr><th>Constant</th><th class="num">Value</th><th>What it does</th><th>Why this value — and its measured sensitivity</th></tr>
+<tr><td><code>GAP_S</code></td><td class="num">150 s</td><td>a heartbeat gap strictly greater than this closes an active run</td><td>Fitted to the file's inter-arrival distribution (p99 ≈ 45–155 s depending on same-second handling). <b>Nearly flat:</b> ±20% moves the peak by 10 viewers (0.34%). The constant everyone worried about is the safe one.</td></tr>
+<tr><td><code>TAIL_S</code></td><td class="num">60 s</td><td>grace credited after a run's last event</td><td>One heartbeat cadence of credit; 29.6% of intervals receive it. <b>The real exposure:</b> 7.2× more elastic than GAP_S at +2.41 viewers per tail-second. Known tension: measured cadence is 40 s, not 60 — flagged, upper bound 8.6% of hours.</td></tr>
+<tr><td><code>UNCLOSED_PAUSE_TO_RUN_END</code></td><td class="num">1</td><td>a pause that never resumes lasts to run end (conservative)</td><td>23% of pauses never resume; unknowable from the file. Conservative 1,978.1 h / peak 2,917 vs permissive 2,070.0 h / peak 3,036. Against a private ground truth, under-counting is explainable; over-counting invents viewers.</td></tr>
+<tr><td><code>POINT_ACTIVITY_COUNTS</code></td><td class="num">0</td><td>does a single lone event earn one cadence of credit?</td><td>ADR 0031 measured both: 0 → peak 2,917; 1 → peak 2,927 (+0.34%). The ADR <b>recommends 1</b> but ships 0, because flipping it moves an already-submitted number — an operator's signature, not an engineering call. Gate green at both.</td></tr>
+<tr><td><code>PUBLISH_*</code> (7 constants)</td><td class="num">5–7200 s</td><td>publisher settle, lookback, lease TTL, cover windows</td><td>Safety and freshness only — they can never move the answer. The cover windows once hid as <code>+241</code>/<code>+7201</code> literals inside <code>publish.sh</code>; the checker now asserts cover ≥ TAIL_S + 60 so raising the tail can't silently under-cover the publisher.</td></tr>
+<tr><td><code>QUEUE_TTL_DAYS</code></td><td class="num">7 d</td><td>retention of the dirty-session queue</td><td>Doubles as a correctness bound — work that outlives it expires silently. TTL is DDL and can't read a view, so the deployed TTL is asserted equal to the policy at check time.</td></tr>
+</table></div>
+
+<figure class="figure">
+<svg viewBox="0 0 1060 200" role="img" aria-label="Sensitivity: GAP_S is flat, TAIL_S is a ramp at 2.41 viewers per second">
+  <text x="20" y="28" font-family="Segoe UI,sans-serif" font-size="14" font-weight="600" fill="var(--ink)">Not fitted to the tuning file: the sensitivity sweep (evidence/params/sweep.tsv)</text>
+  <g font-family="Cascadia Mono,Consolas,monospace" font-size="12">
+    <text x="20" y="66" fill="var(--ink2)">GAP_S 45→465 s</text>
+    <rect x="220" y="52" width="700" height="16" rx="4" fill="var(--grid)"/>
+    <rect x="530" y="52" width="52" height="16" rx="4" fill="var(--blue)"/>
+    <text x="930" y="66" fill="var(--ink)">peak moves +1.75% / −0.89%</text>
+    <text x="20" y="116" fill="var(--ink2)">TAIL_S 0→120 s</text>
+    <rect x="220" y="102" width="700" height="16" rx="4" fill="var(--grid)"/>
+    <rect x="380" y="102" width="360" height="16" rx="4" fill="var(--orange)"/>
+    <text x="930" y="116" fill="var(--ink)">peak moves −5.45% / +4.46%</text>
+    <text x="20" y="168" fill="var(--good-text)" font-weight="700">peak_minute = 2026-07-26 10:56 for EVERY variant</text>
+    <text x="470" y="168" fill="var(--ink2)">— the answer's location is not a tuning artifact, only its height flexes with the tail.</text>
+  </g>
+</svg>
+<figcaption>Colored bands show how far the headline peak travels across each sweep (blue = GAP_S, orange = TAIL_S; wider = more elastic). This sweep is what backs checklist item 8.4: the constants are declared inputs (ADR 0028), not derived per run — a derive-per-run rule was measured to be <em>less</em> stable than the constant it would replace.</figcaption>
+</figure>
+</section>
+
+<!-- ============================ 5 · ASSUMPTIONS ============================ -->
+<section>
+<p class="eyebrow">§5 · The inclusion ledger</p>
+<h2>Every assumption, its reason, and what it prevents</h2>
+
+<div class="tablewrap"><table>
+<tr><th>State / rule</th><th>Counts?</th><th>Why — and the failure prevented</th></tr>
+<tr><td>Playing, foreground, heartbeating</td><td><span class="chip pass">YES</span></td><td>The viewer the impression was sold to.</td></tr>
+<tr><td>Paused (heartbeats continue)</td><td><span class="chip fail">NO</span></td><td>Renders no frames. Worth 286.2 h net — the rule a gap-only model cannot express.</td></tr>
+<tr><td>Backgrounded (heartbeats stop)</td><td><span class="chip fail">NO</span></td><td>The largest exclusion: 862.2 h. Detected by silence, not by the (unreliable) bg/fg events themselves — ADR 0001.</td></tr>
+<tr><td>Buffering / seeking</td><td><span class="chip pass">YES</span></td><td>That's the platform failing the viewer. Excluding it would let a CDN incident <em>reduce</em> reported audience — the dashboard would go quiet exactly when it should be screaming. (Worth −10.7% of peak if read the other way.)</td></tr>
+<tr><td>Ad break</td><td><span class="chip pass">YES</span></td><td>The break is the inventory. Matched by exact lowercase <code>pause</code>/<code>resume</code>, so <code>AdPause</code>/<code>AdResume</code> deliberately don't pause the viewer.</td></tr>
+<tr><td>Errored, events still arriving</td><td><span class="chip pass">YES</span></td><td>Measured nearly inert: deleting every <code>VideoError</code> row changes the run count by exactly one.</td></tr>
+<tr><td>Events after <code>VideoSessionEnd</code></td><td><span class="chip note">NEW RUN</span></td><td>“Ended” is a client's claim: 111 sessions emit up to 2,081 s after their own end. The run closes; later evidence opens a new interval. This measurement sets the watermark.</td></tr>
+<tr><td>Open at file end (<code>is_open</code>)</td><td><span class="chip pass">YES</span></td><td>Live dashboards are mostly these. Caveat honestly recorded: zero graded sessions are open at file end, so this path is exercised by the truncation harness, not by graded data.</td></tr>
+<tr><td>Single lone event (zero-span run)</td><td><span class="chip open">POLICY</span></td><td><code>POINT_ACTIVITY_COUNTS=0</code>: counts nothing (182 runs). The 2,917 vs 2,927 question — see §4.</td></tr>
+<tr><td>Unknown / new event type</td><td><span class="chip open">FAILS OPEN</span></td><td>The one deliberately risky default: a chatty non-playback event would inflate liveness. Mitigated by the read-only source-contract gate (ADR 0026, 47-pair vocabulary) that runs as step zero on any new file.</td></tr>
+<tr><td>Duplicates (0.46%)</td><td><span class="chip note">DERIVED-ONLY</span></td><td>Collapsed in derivation, never in <code>ev_raw</code> — raw stays evidence. Proven inert for totals/peak; known to move 6 attributions at filter grain (documented, scoped).</td></tr>
+<tr><td>Session ≠ user</td><td><span class="chip note">TWO TIERS</span></td><td>Concurrency is sessions (deltas); users are uniqExact states. Confusing them is the measured 9× error class.</td></tr>
+</table></div>
+
+<h3>Where 998.8 hours went</h3>
+<figure class="figure">
+<svg viewBox="0 0 1060 240" role="img" aria-label="Waterfall from 2,976.9 naive hours: minus 862.2 gaps, plus 149.6 tail credit, minus 286.2 pause windows, equals 1,978.1 counted hours">
+  <g font-family="Cascadia Mono,Consolas,monospace" font-size="12.5">
+    <rect x="40"  y="40"  width="330" height="34" rx="5" fill="var(--orange)"/>
+    <text x="380" y="62" fill="var(--ink)">2,976.9 h — naive session span</text>
+    <rect x="136" y="84"  width="96" height="34" rx="5" fill="var(--crit)"/>
+    <text x="242" y="106" fill="var(--ink)">−862.2 h silence gaps &gt; 150 s (backgrounded)</text>
+    <rect x="136" y="128" width="17" height="34" rx="4" fill="var(--good)"/>
+    <text x="163" y="150" fill="var(--ink)">+149.6 h tail credit (60 s × 8,978 run ends)</text>
+    <rect x="121" y="172" width="32" height="34" rx="5" fill="var(--crit)"/>
+    <text x="163" y="194" fill="var(--ink)">−286.2 h pause windows (net of silence already removed)</text>
+    <rect x="40"  y="216" width="219" height="20" rx="5" fill="var(--blue)"/>
+    <text x="269" y="231" fill="var(--ink)" font-weight="700">= 1,978.1 h counted — reproduces the live total to the decimal</text>
+  </g>
+</svg>
+<figcaption>Bar lengths to scale (1 px ≈ 9 h). Notes that keep this honest: 7.6% of counted time is tail credit; 39.2% of runs forfeit even that by ending inside an unresumed pause; raw pause windows total 834.1 h but most overlap silence already excluded.</figcaption>
+</figure>
+
+<div class="callout">
+<p><b>What the number is for.</b> Ad load, capacity and content decisions are all made on this figure. At an illustrative ₹200 CPM and 8 impressions per viewer-hour, the naive read manufactures ≈ <span class="k">1,704 phantom impressions/hour per 1,000 reported concurrent</span> — at a million concurrent, ≈ ₹3.4 lakh/hour of inventory sold to nobody. The billing convention is stated, not implied: <em>a viewer is concurrent at a minute if they were actively watching for any part of it</em> (the instant-sampling alternative reads 14.1% lower and is equally defensible — the contract must pick one).</p>
+</div>
+</section>
+
+<!-- ============================ 6 · DECISIONS ============================ -->
+<section>
+<p class="eyebrow">§6 · Decisions & rejected alternatives</p>
+<h2>Judges grade the <em>why</em> — here it is, measured</h2>
+<p>33 ADRs on file. The load-bearing ones, each with the alternative it beat and the number that decided it:</p>
+
+<div class="cards">
+<div class="card"><span class="adr">ADR 0002</span><h4>Sort raw by truncated hour, then platform — not by session hash</h4><p>Measured 17.3× on the dashboard shape, 2.0× on an hour slice, identical on rebuild. A hash-first key is the vendored ClickHouse <code>schema-pk-cardinality-order</code> anti-pattern.</p></div>
+<div class="card"><span class="adr">ADR 0007</span><h4>Two signals, because pause and background are opposites</h4><p>The gate experiment: backgrounding drops heartbeats 100× (detectable by gap); a pause keeps pinging every ~79 s (invisible to any gap). Hybrid model or ~10% wrong.</p></div>
+<div class="card"><span class="adr">ADR 0006 · 0013</span><h4>Late data corrected by diff — never rebuilt, never mutated</h4><p>Re-derive only the touched sessions, append <code>−deltas(old)+deltas(new)</code>. Exactly as correct as a rebuild because it <em>is</em> one, of one session. Replay is arithmetically a no-op. Cost scales with stragglers, not history.</p></div>
+<div class="card"><span class="adr">ADR 0008 · 0009</span><h4>All 7 dimensions, dominant-value attribution, never <code>any()</code></h4><p>Only 1.13× more rows, hard-capped. <code>any()</code> mislabelled 73.5% of audio at the peak minute vs 3.6% — and hashed differently at different thread counts (non-deterministic answers).</p></div>
+<div class="card"><span class="adr">ADR 0005 — closed</span><h4>The heartbeat-lease hot tier was built, then killed</h4><p>Leases renew straight through a pause, so the tier counts paused time as watching — an 834 h exposure. Correction-by-diff made the whole two-tier split unnecessary (ADR 0004 → 0013).</p></div>
+<div class="card"><span class="adr">ADR 0014 · 0027</span><h4>Ties break to the earliest minute; “concurrency at hour H” is a pair</h4><p>A bare <code>argMax</code> gave 16 different answers in 20 runs (5 of 7 days have tied peaks). And peak vs average differ by 51× on this file (2,917 / 57) — every coarse answer returns peak + minute + average + integral.</p></div>
+<div class="card"><span class="adr">ADR 0029</span><h4>Provisional vs final is a label off the watermark, not a new tier</h4><p>Across 542,537 rebuilt minute-cells the live edge under-reports −14.8%, one minute back −1.7%, and nothing aged ≥ 240 s was ever wrong — bounded by the model's own revision horizon GAP_S+TAIL_S = 210 s. Cost: +1.0 ms.</p></div>
+<div class="card"><span class="adr">ADR 0030 · 0025 · 0026</span><h4>Fail closed at the door, loudly</h4><p>All-String landing (one bad row ≠ dead file), reason-coded quarantine, and a read-only source-contract gate that runs before anything is trusted — the unseen-day killers (one corrupt timestamp; seconds-vs-ms) both die here instead of under a green gate.</p></div>
+<div class="card"><span class="adr">ADR 0034</span><h4>A half-built model must be unservable</h4><p>A rebuild died after the delta insert: the additive table held exactly 2× and served peak 5,834 with a right exit code. Fix: generation-keyed tiers, a build commits only after its gates pass. Reproduced both ways in scratch. <b>Not yet applied to the graded DB.</b></p></div>
+</div>
+
+<details>
+<summary>Honest reversals and near-misses — what we measured against ourselves</summary>
+<div>
+<ul class="small">
+<li><b>“dictGet is 34× faster than JOIN” did not reproduce</b> — re-measured at 1.8× (memory 3.7× does reproduce). A figure inherited from a different dataset is a hypothesis, not a fact (<code>docs/VERIFIED.md</code>).</li>
+<li><b>The projection verdict flipped on better evidence:</b> first measured 1.00× on the wrong shape, re-measured 12.8× on the finalizer's real shape — the reason on record changed from “the optimizer can't” to “we choose to ship it” (ADR 0021).</li>
+<li><b>The gate proves consistency, not truth:</b> it recomputes from <code>ev_raw</code> with the same spec it tests, so a shared wrong convention goes green on both sides. That's why the golden suites and the sweep exist. The ADR 0009 bug lived exactly there — model and gate carried the identical strict inequality and agreed with each other.</li>
+<li><b>Graded DB corrupted twice in two days</b> — hence every write guard, the promotion gate that rejected 3 of 3 merge waves on real defects, and the generation-pinning design.</li>
+</ul>
+</div>
+</details>
+</section>
+
+<!-- ============================ 7 · UPDATES ============================ -->
+<section>
+<p class="eyebrow">§7 · Open sessions & late data</p>
+<h2>Updates are absorbed, not rebuilt</h2>
+
+<figure class="figure">
+<svg viewBox="0 0 1060 210" role="img" aria-label="Correction flow: insert marks dirty sessions, the finalizer re-derives them, appends the diff, and tiers converge">
+  <defs><marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--mute)"/></marker></defs>
+  <g font-family="Segoe UI,system-ui,sans-serif" font-size="13">
+    <rect x="20" y="40" width="215" height="80" rx="10" fill="var(--card)" stroke="var(--line)"/>
+    <text x="34" y="66" font-weight="600" fill="var(--ink)">INSERT (any lateness)</text>
+    <text x="34" y="86" fill="var(--ink2)" font-size="12">mv_session_dirty records</text>
+    <text x="34" y="102" fill="var(--ink2)" font-size="12">which sessions were touched</text>
+    <rect x="290" y="40" width="215" height="80" rx="10" fill="var(--card)" stroke="var(--line)"/>
+    <text x="304" y="66" font-weight="600" fill="var(--ink)">re-derive those sessions</text>
+    <text x="304" y="86" fill="var(--ink2)" font-size="12">full event-time history, one</text>
+    <text x="304" y="102" fill="var(--ink2)" font-size="12">session at a time, via projection</text>
+    <rect x="560" y="40" width="215" height="80" rx="10" fill="var(--blue-wash)" stroke="var(--blue)"/>
+    <text x="574" y="66" font-weight="600" fill="var(--ink)">append the diff</text>
+    <text x="574" y="86" fill="var(--ink2)" font-size="12">−deltas(old) + deltas(new),</text>
+    <text x="574" y="102" fill="var(--ink2)" font-size="12">staged, ONE insert block</text>
+    <rect x="830" y="40" width="210" height="80" rx="10" fill="var(--card)" stroke="var(--line)"/>
+    <text x="844" y="66" font-weight="600" fill="var(--ink)">tiers converge</text>
+    <text x="844" y="86" fill="var(--ink2)" font-size="12">hours + users phases re-derive</text>
+    <text x="844" y="102" fill="var(--ink2)" font-size="12">exactly the touched buckets</text>
+    <line x1="235" y1="80" x2="288" y2="80" stroke="var(--mute)" stroke-width="1.5" marker-end="url(#arr2)"/>
+    <line x1="505" y1="80" x2="558" y2="80" stroke="var(--mute)" stroke-width="1.5" marker-end="url(#arr2)"/>
+    <line x1="775" y1="80" x2="828" y2="80" stroke="var(--mute)" stroke-width="1.5" marker-end="url(#arr2)"/>
+    <text x="20" y="160" fill="var(--ink2)" font-size="13">Same path for every arrival class: normal order · still-open sessions (dirty every batch, no special case) · a straggler older than the watermark.</text>
+    <text x="20" y="182" fill="var(--ink2)" font-size="13">Proven: incremental output byte-identical to a from-scratch rebuild — 0 differing cells across bootstrap, growth, shrink, dimension change, a 46-minute straggler, 200 forced republications.</text>
+  </g>
+</svg>
+<figcaption>The watermark (W = 2,400 s) was <em>measured</em>, not guessed — set by the 2,081 s straggler tail; the earlier “~10 min” guess was 3.5× too narrow. Since correction-by-diff is the way back for any minute, W is no longer a gate at all — it survives only as the freshness label: buckets older than watermark − 210 s are stamped <code>final</code>, and nothing aged ≥ 240 s was ever observed wrong.</figcaption>
+</figure>
+
+<div class="callout crit">
+<p><b>Two honest ⚠ flags the judges should hear from us first.</b> (1) The incremental publisher is installed on the graded database but has <b>never committed a run</b> there — cursor at epoch; every live graded number so far comes from a batch rebuild. The machinery is proven in harness, the switch-on is a deliberate operator decision. (2) ADR 0034's generation-pinned serving — the fix for the “served 5,834 under a green exit code” incident — is implemented and reproduced in scratch, <b>not applied to the graded DB</b>. Both are one command away and both are consciously parked, not forgotten.</p>
+</div>
+</section>
+
+<!-- ============================ 8 · SCALE ============================ -->
+<section>
+<p class="eyebrow">§8 · Scale</p>
+<h2>What 100× does, and what breaks first</h2>
+<div class="tablewrap"><table>
+<tr><th></th><th class="num">1×</th><th class="num">10×</th><th class="num">100×</th><th>Reading</th></tr>
+<tr><td>events / sessions</td><td class="num">898k / 10.9k</td><td class="num">9.0M / 108.7k</td><td class="num">89.85M / 1.09M</td><td>synthetic stream keeps the real 85%-in-two-hours burst</td></tr>
+<tr><td>reconcile gate</td><td class="num">PASS</td><td class="num">PASS</td><td class="num">PASS · 6,799 min</td><td>correctness holds at every rung</td></tr>
+<tr><td>day-grain peak read (hour tier)</td><td class="num">240 KiB / 8,192 rows</td><td class="num">240 KiB / 8,192</td><td class="num">240 KiB / 8,192</td><td><b>scale-invariant serving</b> — ~2–4 ms at every scale</td></tr>
+<tr><td>minute-curve read</td><td class="num">329 KiB</td><td class="num">4.77 MiB</td><td class="num">45.5 MiB</td><td>grows with data, stays interactive (14.6 ms)</td></tr>
+<tr><td>delta rows vs hard cap</td><td class="num">96.0%… headroom</td><td class="num">93.2%</td><td class="num">88.7% of ceiling</td><td>the bound tightens the story: headroom <em>widens</em> with scale</td></tr>
+<tr><td>user-tier peak query (uniqExact)</td><td class="num">8.5 ms</td><td class="num">79.7 ms</td><td class="num">884 ms / 1.5 GiB</td><td>the only super-linear serving path — known, stated</td></tr>
+</table></div>
+<p class="small"><b>What breaks first, with the number:</b> interval derivation memory — not part counts (28 of 3,000), not merges, not the dictionary (17 MiB flat). Current <code>evidence/scale.txt</code>: at 100× the derivation needs spill + <code>max_threads=2</code> (3.57 GiB, 122 s); the older “2.59 GiB and faster” sweep quote is explicitly marked stale inside the file. Second in line at 100× is the publisher's hours+users phase (2.45 GiB for one session's correction) — tier maintenance is delta-flat but cube-proportional (ADR 0020).</p>
+</section>
+
+<!-- ============================ 9 · UNSEEN CHECKLIST ============================ -->
+<section>
+<p class="eyebrow">§9 · Checklist validation — the unseen day (C5)</p>
+<h2>The unseen file ran clean. The claim has a gap.</h2>
+
+<div class="callout good">
+<p><b>What the official 2026-08-02 run achieved</b> — surprise files <span class="k">7,000,000</span> raw + <span class="k">33,326</span> content rows, sha256-pinned: load 17 s (0 cast rejects) → build 18 s under the unchanged policy <span class="k">v1 e965954b23d4</span> (3 rows quarantined) → <span class="k">159,426</span> intervals over <span class="k">103,022</span> sessions → <b>reconcile PASS: 3,201,716 minutes, 0 mismatches</b> → headline peak <b>23,324 @ 2026-07-31 11:17</b>, user peak 22,279. Total ≈ 55 s. The file was <em>not</em> one day — its intervals span 102 dates (2021 → 2026); ClickHouse Cloud's read-only 100-partition insert cap was cleared legally by chunking into 64 + 38 date groups (Q39). Two brand-new columns (<code>video_resolution</code>, <code>show_name</code>) were absorbed into <code>extra[]</code> per ADR 0024 and their slice sums reconcile exactly to 23,324 at the peak minute. The graded <code>sonyliv</code> DB was never touched.</p>
+</div>
+
+<div class="tablewrap"><table>
+<tr><th>checklist.md §8 item</th><th>Verdict</th><th>Evidence & reasoning</th></tr>
+<tr><td>8.1 · <code>/unseen</code> end-to-end, zero hand edits</td><td><span class="chip fail">✗ FAIL as written</span></td><td>The run used a hand-assembled command sequence, not <code>tools/unseen-run.sh</code>; no <code>unseen-day-run-*</code> git tag. Substantively strong (every phase RC 0, contract gates green) — procedurally not the scripted path. Rehearsals <em>did</em> pass zero-hand-edits on non-official data (30k holdout 67 s, 850k replay 71 s → peak 2,917).</td></tr>
+<tr><td>8.2 · Benchmark answers + latencies captured</td><td><span class="chip partial">◐ PARTIAL</span></td><td>4 ad-hoc queries captured with latency/bytes (total 24 h curve <b>15 ms</b>; new-dimension filters 450–1,727 ms with a stated caveat). The 13-shape <code>/bench</code> set was never run against the unseen build.</td></tr>
+<tr><td>8.3 · Query-log / trace evidence packaged</td><td><span class="chip fail">✗ FAIL</span></td><td>No <code>system.query_log</code> export, no <code>log_comment</code> tagging, no ClickStack trace for this run; the raw phase logs lived in <code>/tmp</code> and are gone. The rubric's own words: <em>no pipeline evidence, no credit</em> — this is the highest-leverage gap.</td></tr>
+<tr><td>8.4 · Nothing fitted to the tuning file</td><td><span class="chip pass">✓ PASS</span></td><td>One policy declaration (ADR 0032), hash <span class="k">e965954b23d4</span> byte-identical on the unseen run; sensitivity sweep on file (§4); the same constants produced a clean 3.2M-minute reconcile on a corpus spanning five years and 2,071 unseen resolution values.</td></tr>
+</table></div>
+
+<div class="callout crit">
+<p><b>The finding that matters most: the run is currently unclaimable from <code>main</code>.</b> The official evidence file, the Codex validation doc, and the chunked-backfill tool exist only on an off-branch wip commit (<code>backup/chunked-backfill-wip</code> @ <span class="k">86e1094</span>, self-described “NOT reviewed, NOT a promotion”). <code>REMAINING.md</code> cites all three as if present on main. Worse, the run's own fingerprint block matches <b>only 5 of 19</b> pipeline files on any committed ref — the session ran with uncommitted SQL/tool state, and <code>main</code>'s <code>build-model.sh</code> contains no chunking logic at all, so the 64+38 build cannot be re-run from a committed ref. Also flagged: the ADR 0034 generation build was interrupted mid-run (explicitly “not a generation PASS” at 7M scale), the same input answered 2,887 on 08-01 and 2,917 on 08-02 across model changes, and runbook timings understate contract-first reality by 1.7–2.1×.</p>
+<p><b>The one action:</b> commit <span class="k">86e1094</span>'s artifacts to <code>main</code>, then — time permitting before the 12:00 IST portal close — re-run the official file through <code>tools/unseen-run.sh</code> from clean <code>main</code> with <code>/bench</code> + <code>log_comment</code>-tagged query-log capture. That single pass converts 8.1, 8.2 and 8.3 to PASS.</p>
+</div>
+</section>
+
+<!-- ============================ 10 · PERFORMANCE CHECKLIST ============================ -->
+<section>
+<p class="eyebrow">§10 · Checklist validation — query performance (C2)</p>
+<h2>Complete per-shape evidence — one stale, one unbacked claim</h2>
+
+<div class="tablewrap"><table>
+<tr><th>checklist.md §3 item</th><th>Verdict</th><th>Evidence & reasoning</th></tr>
+<tr><td>Serving answers without rescanning session history</td><td><span class="chip pass">✓ PASS</span></td><td><code>ev_raw</code> (905,558 rows) is <b>never</b> read by any benchmark shape — verified in <code>system.query_log</code>. b01 (1 day) and b10 (13 days) read identical 8,193 rows: O(1) in range length.</td></tr>
+<tr><td>Sort keys dimension-first, then time</td><td><span class="chip pass">✓ PASS</span></td><td>EXPLAIN index conditions confirm <code>(platform, country, content_id, …, time)</code> on both serving tables; proof it works: a platform prefix prunes to 2/4 granules (b07) where the unfiltered twin reads 4/4 (b06).</td></tr>
+<tr><td><code>/bench</code> on full shapes, latency + bytes per shape</td><td><span class="chip partial">◐ PARTIAL — complete but stale</span></td><td>All 13 shapes carry bytes, rows, server ms (median of 3), granules, query_id — nothing missing per shape, and all 13 are 3/3-stable. But the run (<span class="k">bench-20260801T165403Z</span>) predates <b>18 sql/ commits</b>, including two that changed the serving surface (cube_level marking; generation pinning). Honest label: reconstructed set, awaiting a re-run at HEAD.</td></tr>
+<tr><td>Granule-pruning evidence per shape</td><td><span class="chip pass">✓ PASS (same staleness)</span></td><td>13 × <code>EXPLAIN indexes=1</code> files with parts/granules selected-vs-total for PK, partition and MinMax indexes.</td></tr>
+<tr><td>Headline “299 KB / 23 ms vs 2.55 MB / 56 ms (8.5×)”</td><td><span class="chip fail">✗ UNBACKED</span></td><td>No file in <code>evidence/</code> contains these numbers; the citation chain ends at a TODO that says “not re-measured.” Measured substitutes exist (e.g. 319,464 B serving vs 617,827 B expansion in <code>evidence/query-modes/ranking.txt</code>) — the claim should be replaced or re-measured, not repeated.</td></tr>
+</table></div>
+
+<h3>The 13 measured shapes (tag <span class="k">bench-20260801T165403Z</span>, ClickHouse Cloud 26.2)</h3>
+<div class="tablewrap"><table>
+<tr><th>Shape</th><th>Grain · stat · filter</th><th class="num">server ms</th><th class="num">bytes read</th><th class="num">rows read</th><th>Pruning (parts · granules)</th></tr>
+<tr><td class="k">b01</td><td>day · peak+avg · none</td><td class="num">44.5</td><td class="num">240.0 KiB</td><td class="num">8,193</td><td>1/1 · 1/4 (minute branch 0/7 parts)</td></tr>
+<tr><td class="k">b02</td><td>day · peak+avg · platform</td><td class="num">40.6</td><td class="num">240.0 KiB</td><td class="num">8,193</td><td>1/4 granules on key prefix</td></tr>
+<tr><td class="k">b03</td><td>day · peak+avg · country</td><td class="num">24.4</td><td class="num">240.0 KiB</td><td class="num">8,193</td><td>1/4</td></tr>
+<tr><td class="k">b04</td><td>day · peak+avg · content_id</td><td class="num">37.6</td><td class="num">240.0 KiB</td><td class="num">8,193</td><td>1/4</td></tr>
+<tr><td class="k">b05</td><td>hour series · peak+avg</td><td class="num">12.2</td><td class="num">336.0 KiB</td><td class="num">8,192</td><td>1/4</td></tr>
+<tr><td class="k">b06</td><td>minute curve · none</td><td class="num">7.5</td><td class="num">312.0 KiB</td><td class="num">26,622</td><td>1/7 parts · 4/4</td></tr>
+<tr><td class="k">b07</td><td>minute curve · platform</td><td class="num">7.0</td><td class="num">208.0 KiB</td><td class="num">16,384</td><td>1/7 · <b>2/4 — prefix prunes</b></td></tr>
+<tr><td class="k">b08</td><td>day · peak+avg · video_type (IN-subquery)</td><td class="num">17.8</td><td class="num">814.1 KiB</td><td class="num">60,086</td><td>1/7 · 4/4 + 193-id set</td></tr>
+<tr><td class="k">b09</td><td>minute fallback · platform IN (2)</td><td class="num">9.4</td><td class="num">208.0 KiB</td><td class="num">16,384</td><td>1/7 · 2/4</td></tr>
+<tr><td class="k">b10</td><td>13-day range · peak+avg</td><td class="num">31.8</td><td class="num">240.0 KiB</td><td class="num">8,193</td><td><b>identical to b01</b> — flat in range length</td></tr>
+<tr><td class="k">b11</td><td>ragged 10:17→11:31 range</td><td class="num">40.3</td><td class="num">552.0 KiB</td><td class="num">34,815</td><td>hour 1/4 + minute 4/4 (partial hours)</td></tr>
+<tr><td class="k">b12</td><td>day series · all days</td><td class="num">13.0</td><td class="num">272.0 KiB</td><td class="num">8,192</td><td>1/4 (all-days rollup, no key pruning — expected)</td></tr>
+<tr><td class="k">b13</td><td>hour · top-10 content by peak</td><td class="num">14.3</td><td class="num">272.0 KiB</td><td class="num">8,192</td><td>1/4 + dictGet (no scan)</td></tr>
+</table></div>
+<p class="small">Cloud latency wobbles run-to-run (b01: 18.9 / 44.5 / 134.6 ms across its three runs) — which is exactly why the evidence ranks shapes by <b>bytes read</b>, the stable column, and keeps latency as the median of three.</p>
+
+<div class="callout warn">
+<p><b>Before submission, in order of leverage:</b> ① re-run <code>/bench</code> at HEAD against a single-generation database — <code>evidence/query-robustness</code> found the graded DB currently serving <b>three mutually inconsistent tier vintages</b> (hour tier 2,917 · minute tier 2,950 · intervals 2,681 for the same day: it would fail <code>/reconcile</code> right now), and <code>v_cc_window_range</code> still doesn't pin <code>cube_level</code> — the serving path of six shapes; ② replace or re-measure the 299 KB/23 ms headline; ③ add the missing shapes (minute-grain country/content filters, a range shape exposing <code>peak_minute</code>, and one user-tier shape — the only super-linear query lives nowhere in the bundle); ④ rewrite checklist §7's “what breaks first” text against the current <code>scale.txt</code>.</p>
+</div>
+</section>
+
+<!-- ============================ 11 · SCORECARD ============================ -->
+<section>
+<p class="eyebrow">§11 · Where we stand</p>
+<h2>The five graded criteria, honestly</h2>
+<div class="tablewrap"><table>
+<tr><th>Criterion</th><th>State</th><th>One line</th></tr>
+<tr><td>C1 · Correctness</td><td><span class="chip pass">✓ STRONG</span></td><td>17,028 minutes / 0 mismatches vs raw; gate negative-tested; tier agreements all zero; golden cohorts + sweep guard the definitional forks. Caveat owned: the gate proves consistency with the spec, not the private key — the ±envelope across forks is stated (2,917…2,927…3,036).</td></tr>
+<tr><td>C2 · Query performance</td><td><span class="chip partial">◐ EVIDENCED, STALE</span></td><td>Full per-shape bytes/latency/pruning bundle; serving is scale-invariant at day grain; needs one re-run at HEAD on a single-generation DB, and one unbacked headline retired.</td></tr>
+<tr><td>C3 · Update handling</td><td><span class="chip partial">◐ PROVEN, PARKED</span></td><td>Correction-by-diff converges to rebuild (0 differing cells, all four tiers); truncation replay of 447,081 withheld events converges. The publisher has never committed on the graded DB — a switch-on decision, stated as such.</td></tr>
+<tr><td>C4 · Design quality</td><td><span class="chip pass">✓ STRONG</span></td><td>33 ADRs with measured alternatives, two honest reversals, one open operator decision (2,917 vs 2,927) presented with both numbers.</td></tr>
+<tr><td>C5 · Unseen day</td><td><span class="chip partial">◐ RAN CLEAN, UNCLAIMED</span></td><td>7M rows → 3.2M minutes reconciled, 0 mismatches, peak 23,324 in ~55 s, schema evolution absorbed. Evidence sits off-branch; no query-log package. One commit + one scripted re-run fixes it.</td></tr>
+</table></div>
+</section>
+
+<p class="footer">Sources, all in-repo: <code>checklist.md</code> · <code>docs/EXPLAINER.md</code> · <code>docs/ARCHITECTURE.md</code> · <code>docs/BUSINESS_RULES.md</code> · <code>docs/VERIFIED.md</code> · <code>docs/adr/0001–0034</code> · <code>policy/model.policy</code> · <code>evidence/reconcile.txt</code> · <code>evidence/bench.txt</code> + <code>evidence/benchmark/results/</code> · <code>evidence/scale.txt</code> · <code>evidence/params/sweep.tsv</code> · <code>evidence/publish.txt</code> · <code>evidence/truncation.txt</code> · <code>evidence/unseen/</code> + the off-branch <code>backup/chunked-backfill-wip</code> official-run file · <code>evidence/query-robustness/</code>. Diagrams are schematic; every printed number is a measured value from those files. Page generated 2026-08-02.</p>
+</main>
