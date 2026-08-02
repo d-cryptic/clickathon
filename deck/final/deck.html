@@ -340,6 +340,14 @@ footer{padding:60px 7vw;color:var(--faint);font-family:var(--mono);font-size:12p
       it is the constant <span class="m">'india'</span> in all 7,000,000 rows. Say it before
       anyone asks.
     </div>
+    <div class="warnline" style="color:var(--muted)">
+      ⚠ <b style="color:var(--fg)">Latency on screen will not be 28 ms once you filter.</b> The
+      unfiltered curve comes off the promoted delta tier at <span class="m">28 ms</span>. A filtered
+      drilldown answers on arbitrary dimensions and takes <span class="m">~4.4 s</span>. Both are
+      real and both are ours — say which path you are on rather than letting the number surprise
+      you: <b style="color:var(--fg)">"that is the generic path, it answers on a column we never
+      pre-aggregated."</b>
+    </div>
   </div>
   <div class="time"><b>60–120s</b> — the flexible slide</div>
 </section>
