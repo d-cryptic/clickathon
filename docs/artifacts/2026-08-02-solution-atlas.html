@@ -647,6 +647,17 @@ footer{border-top:1px solid var(--rule-strong);padding:40px 0 72px;color:var(--f
     </tbody>
   </table>
 
+  <div class="note">
+    <b>One drift we are stating rather than smoothing.</b> The repository now declares
+    <span class="m">PARTITION BY toYYYYMM(minute)</span> — monthly — which would make the
+    chunking above unnecessary, since 102 days collapse to six partitions. <b>Both deployed
+    databases are still daily</b> (<span class="m">toYYYYMMDD</span>), including the build these
+    numbers come from. So the figures above describe what actually ran: daily partitions,
+    chunked. The monthly declaration is the better long-term answer and is not yet what served
+    this result. Declared and deployed are different questions, and an atlas that quoted the
+    declaration would be describing a database that does not exist.
+  </div>
+
   <div class="chart">
     <h4>Determinism across two very different machines — 27 queries, executed twice</h4>
     <div class="bars">

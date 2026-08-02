@@ -44,6 +44,7 @@ what is verified, what is broken, and what is still missing, in one page.
 | Resume a dead session | newest file in [docs/worksheets/](docs/worksheets/) |
 | Run something (query, bench, reconcile, load) | [tools/README.md](tools/README.md) |
 | **Know what every dashboard panel shows** | [docs/CLICKSTACK_DASHBOARDS.md](docs/CLICKSTACK_DASHBOARDS.md) — 6 dashboards, 41 tiles, captured live |
+| **Inspect hosted-panel SQL, metrics, schema and lineage to raw** | [docs/DASHBOARD_PROVENANCE.md](docs/DASHBOARD_PROVENANCE.md) — lazy, capped, deployed live |
 | **Bring up ClickStack / see the concurrency chart** | [docs/CLICKSTACK.md](docs/CLICKSTACK.md) — `make stack-up && make clickstack` |
 | **See ClickStack observing OUR pipeline (watermark lag, build timing, reconcile gate)** | [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) — `sonyliv observe -target cloud` |
 | **Alert on concurrency decline — and tell apart ended / broken / boring** | [docs/DECLINE_ALERTING.md](docs/DECLINE_ALERTING.md) — the spec's optional item. 3 live alerts; the discrimination is the deliverable, and one of the three classes is shipped **unvalidated** and says so |
@@ -53,6 +54,7 @@ what is verified, what is broken, and what is still missing, in one page.
 | **Change a tuned constant (gap, tail, unclosed-pause, point-activity, publisher bounds)** | [policy/model.policy](policy/model.policy) — the ONE declaration. Edit it, run `tools/policy.sh gen`, re-run the gate. Never edit `sql/01_policy.sql` (generated) and never re-add a literal; `tools/policy.sh check` fails both. [ADR 0032](docs/adr/0032-one-versioned-policy-declaration-read-by-every-consumer.md) |
 | Record a design decision | [docs/adr/](docs/adr/) |
 | **Decide whether the headline peak is 2,917 or 2,927** | [ADR 0031](docs/adr/0031-point-activity-user-attribution-and-the-densify-recipe.md) — the only open question that moves a submitted number. Both readings measured, gate green at each; needs an **operator sign-off**, not more engineering |
+| **Understand the whole solution in one page, with animated diagrams** | [docs/artifacts/2026-08-02-solution-atlas.html](docs/artifacts/2026-08-02-solution-atlas.html) — **start here.** Lineage, algorithm, model, query path, updates, scale, evidence and the disclosed limits. Self-contained, opens offline, no JavaScript. Retires the old `solution-explainer` |
 | **Present at a mentor checkpoint** | [docs/artifacts/2026-08-01-mentor-checkpoint.html](docs/artifacts/2026-08-01-mentor-checkpoint.html) — 11 diagrams: what we show, explain, and need answered |
 | **Understand the model in depth, with diagrams** | [docs/artifacts/](docs/artifacts/) — the 4-part deep dive: `deep-1-data` · `deep-2-model` · `deep-3-correctness` · `deep-4-scale-ops` |
 | Know what we must **ask a mentor** (and what we assumed meanwhile) | [docs/MENTOR_QUESTIONS.md](docs/MENTOR_QUESTIONS.md) ← **every unanswered one is a silent-failure risk** |
