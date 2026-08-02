@@ -142,11 +142,24 @@ repo keeps a record of the choices that *lost*, with the numbers that killed the
 
 ## 5 · The unseen day
 
-**Claim.** The pipeline is rehearsed for the drop: a full unseen-day run — schema, load,
-derivation, views, answers, gate — completed in **58 s** on a rehearsal file with 28× the
-holdout's events (projected ~2.5 min for a 1 GB day), because the path is fixed-cost dominated,
-not volume dominated. The runbook is written to be followed under time pressure, and answers come
-from the pipeline with query-log evidence — no hand computation.
+**Claim.** The pipeline is rehearsed for the drop, and the timings below are the **contract-first**
+ones — the path we would actually run, not the build alone:
+
+| | 6.9k events | 30k | 850k |
+|---|---:|---:|---:|
+| source-contract gate (throwaway DB) | 24 s | 26 s | 38 s |
+| build — schema, load, derivation, views, answers, gate | 66 s | 67 s | 82 s |
+| **total to plan against** | **90 s** | **93 s** | **120 s** |
+
+Fixed-cost dominated rather than volume dominated: **123× the events costs 1.3× the time.**
+
+⚠ An earlier version of this section claimed **58 s**, which was the build alone and predated the
+source-contract step. That understated the real path by 1.7–2.1×, and the understatement mattered
+more than the number: **the step an understated budget drops is the contract gate** — the one thing
+standing between a malformed file and a confidently wrong submission. Re-measured 2026-08-02.
+
+The runbook is written to be followed under time pressure, and answers come from the pipeline with
+query-log evidence — no hand computation.
 
 | Evidence | Regenerate |
 |---|---|
