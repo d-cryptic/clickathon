@@ -20,13 +20,23 @@ are a hosted demo, a 2–3 minute video, a final pitch PDF, and proof of the liv
 
 Final-package checklist:
 
-- [ ] **Secret scan the full history**, not just HEAD. Status as of 2026-08-01: `.env` was never
-      committed (`git log --all -- .env` is empty); the Cloud **password appears nowhere** in
-      tracked files or history; but the real Cloud **hostname appears in
-      `evidence/load-guard.txt`** and in history at commit `6355048`. A hostname alone grants no
-      access, but decide deliberately: scrub-and-rewrite, or accept and document. Re-run before
-      publishing: `gitleaks git .` (or `trufflehog git file://.`), plus
-      `git log --all -S"<your-host>.clickhouse.cloud" --oneline`.
+- [x] **Secret scan the full history**, not just HEAD. **Re-run 2026-08-02 against the live `.env`
+      values** — this is a measurement, not a recollection:
+      - `.env` was **never committed** — `git log --all -- .env` is empty. ✓
+      - The Cloud **password appears in 0 commits and 0 files at HEAD**
+        (`git log --all -S"$CH_PASSWORD"`, `git grep -F "$CH_PASSWORD" HEAD`). ✓
+      - The Cloud **hostname appears in 3 tracked files** — `evidence/load-guard.txt`,
+        `evidence/cruel/misscol.run.txt`, `evidence/cruel/newcol.run.txt` — up from the 1 file
+        recorded on 2026-08-01. It spreads because evidence files capture real command output.
+
+      **Do not reflexively scrub the hostname.** The common submission contract *requires* that we
+      "identify the ClickHouse service and tables" used as the destination. A hostname is therefore
+      a **deliverable here, not a leak** — scrubbing it would remove something the contract asks
+      for. A hostname alone grants no access; the credential that would is verified absent.
+
+      **The real control is rotation**, which is the next checklist item and should happen
+      regardless. Re-run before publishing if anything changes: `gitleaks git .` (or
+      `trufflehog git file://.`).
 - [ ] Rotate the ClickHouse Cloud password and any ClickStack/HyperDX API keys **after** the event
       regardless — they were pasted into local `.env` files on several machines.
 - [ ] Confirm `tools/fetch_data.sh` works from an anonymous clone (it pulls from the public
