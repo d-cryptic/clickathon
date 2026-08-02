@@ -148,6 +148,26 @@ echo "== 3/6  cc_minute_delta (hour-clipped, ADR 0003)"
 q "TRUNCATE TABLE cc_minute_delta" >/dev/null
 TARGET="$TARGET" APPLY_GRADED_DESTRUCTIVE="${REBUILD_GRADED:-}" tools/apply-sql.sh sql/40_deltas.sql >/dev/null
 q "SELECT concat('   delta rows: ', toString(count()), '  opens ', toString(sum(starts)), '  closes ', toString(sum(ends))) FROM cc_minute_delta FORMAT TSVRaw"
+# WHY NO EXTRA ASSERTION HERE, and why the doubling of 2026-08-02 was missed.
+#
+# The graded cc_minute_delta reached 56,146 rows — exactly 2x — and served a
+# peak of 5,834 against a true 2,917. The TRUNCATE above was present and ran;
+# two full inserts landed anyway.
+#
+# This script ALREADY has the check that catches it: the reconcile step below
+# compares the delta serving layer against interval expansion, every minute.
+# Doubled deltas double the running sum, so that comparison fails loudly.
+#
+# It did not fire because the run that caused the doubling DIED AT STAGE 4/6 on
+# a missing cube_level column, before reaching it. A half-finished build left a
+# doubled table and said nothing, and an external audit found it hours later.
+#
+# So the defect is not a missing assertion — it is that a FAILED build leaves a
+# silently-wrong model behind. An opens-vs-intervals check was tried here and is
+# WRONG: hour-clipping means the two legitimately differ (20,002 vs 30,323 on
+# the delivered file). The real fix belongs at the top: refuse to leave a
+# partially-built graded model, or re-run the reconcile even on failure.
+# Recorded rather than papered over.
 
 echo "== 4/6  cc_hour_agg (the hour tier, ADR 0003)"
 # A pre-ADR-0022 database has no `cube_level` column, and 50_hour_agg.sql's
