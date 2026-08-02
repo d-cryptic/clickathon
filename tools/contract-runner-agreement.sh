@@ -59,6 +59,7 @@
 # ============================================================================
 set -euo pipefail
 cd "$(dirname "$0")/.."
+. tools/evidence.sh
 REPO="$PWD"
 
 GATE_DB="sonyliv_q37_agree_gate"
@@ -248,5 +249,6 @@ say "Read the both-refuse rows as load-bearing: they are the proof that agreemen
 say "was reached by making the runner match the loader, not by making either stop"
 say "checking. If those rows ever read ACCEPT/ACCEPT, this script has stopped"
 say "testing anything."
+evidence_seal "$OUT"   # LAST thing a successful run does — see tools/evidence.sh
 echo
 echo "agreement PASSED · evidence written to $OUT"
