@@ -20,6 +20,33 @@ minutes, 0 mismatched, peak 2,917. `make ci` green.
 | **A2** | **No Team Captain is named.** | Only the Captain can submit. |
 | **A3** | **Q35 — adopt peak 2,927, or keep 2,917?** | A **decision**, not a bug. A run of one event yields a zero-length segment dropped before `TAIL_S` applies, so 182 runs earn nothing. Keeping them moves the peak **2,917 → 2,927** (+5.0 h; Codex confirmed 80 changed minutes, +18,127 s). We answer "not at all" **by accident, not by choice**. ADR 0031 is being written to present both readings; the signature is yours. |
 
+## 1b · Newly unblocked — the publisher can now safely run on the graded database
+
+Verified 2026-08-02 after the rebuild:
+
+```
+ cc_user_minute engine   SharedReplacingMergeTree   ← ADR 0016 shape, was AggregatingMergeTree
+ mv_user_minute          GONE                       ← retired, as ADR 0016 requires
+ cc_hour_agg.cube_level  present                    ← ADR 0022
+ cc_publish_runs         0 rows                     ← still never run
+```
+
+**The blocker is cleared.** Until the rebuild, running `tools/publish.sh` against `sonyliv` would
+have written replace-semantics rows into a set-union table — the reason its cursor was pinned at
+epoch and every doc said "keep it there". The graded database now carries the shape the publisher
+expects.
+
+**What this changes.** Codex 008 lists "continuous publication is not deployed on the current schema"
+as an operational gap. The *schema* half is now closed; only the *running* half remains, and that is
+an operator decision rather than an engineering one. The capability is proven byte-identical to a
+rebuild across four tiers in scratch (`evidence/publish.txt`); what is missing is a decision to let
+it maintain the graded numbers instead of a batch rebuild.
+
+**Not doing it unasked.** Every live number today comes from a batch rebuild, which is correct and
+verified. Switching the graded database to incremental publication changes how our submitted answers
+are maintained, and that is a call for a human — especially given a doubled tier was served for hours
+today from a *simpler* operation than this one.
+
 ## 2 · Open engineering — short
 
 **Q30 · Local `default.session_intervals` predates ADR 0012** (no `build_version`), so it cannot be
