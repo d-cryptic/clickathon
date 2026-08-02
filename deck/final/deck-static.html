@@ -133,8 +133,12 @@ footer{padding:60px 7vw;color:var(--faint);font-family:var(--mono);font-size:12p
 }
 @media print{
   html{scroll-snap-type:none}
-  .slide{min-height:auto;page-break-after:always;border:none}
-  .rail{display:none}
+  /* exactly one page per slide: the footer is screen furniture and would
+     otherwise spill a 13th page out of 12 slides. */
+  .slide{min-height:auto;page-break-after:always;break-after:page;border:none}
+  .slide:last-of-type{page-break-after:auto;break-after:auto}
+  .rail,footer{display:none}
+  .time{color:#646467}
 }
 </style>
 <style>
@@ -156,7 +160,7 @@ body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 
 <!-- ══════ 1 · TITLE ══════ -->
 <section class="slide">
-  <div class="num">01 / 12</div>
+  <div class="num">01 / 13</div>
   <div class="kick">CLICK-A-THON INDIA 2026 · SONYLIV · CLICKHOUSE + CLICKSTACK</div>
   <h1>Count the people who are actually watching.</h1>
   <p class="say" style="max-width:52ch">
@@ -174,7 +178,7 @@ body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 
 <!-- ══════ 3 · THE INSIGHT ══════ -->
 <section class="slide">
-  <div class="num">02 / 12</div>
+  <div class="num">02 / 13</div>
   <div class="kick">what we measured — and what it forced</div>
   <h2>Heartbeats <em style="color:var(--tan);font-style:normal">survive</em> a pause.<br>That one fact drove the design.</h2>
   <div class="bars">
@@ -198,7 +202,7 @@ body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 
 <!-- ══════ 4 · THE MODEL ══════ -->
 <section class="slide">
-  <div class="num">03 / 12</div>
+  <div class="num">03 / 13</div>
   <div class="kick">the model</div>
   <h2>Two numbers per interval,<br>clipped to every hour it touches.</h2>
   <svg viewBox="0 0 900 230" role="img" aria-label="An interval spanning three hours is clipped so each hour's running sum starts at zero and is absolute.">
@@ -242,7 +246,7 @@ body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 
 <!-- ══════ 5 · LINEAGE ══════ -->
 <section class="slide">
-  <div class="num">04 / 12</div>
+  <div class="num">04 / 13</div>
   <div class="kick">architecture</div>
   <h2>Every number traces to a raw event.</h2>
   <svg viewBox="0 0 980 300" role="img" aria-label="Lineage from CSV through landing, typed events, intervals and deltas to serving, with an independent gate reading raw.">
@@ -260,6 +264,10 @@ body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
     <path class="flow" d="M366,53 L408,53" stroke="#c9b07e" stroke-width="1.5" marker-end="url(#a)" fill="none"/>
     <g class="r3"><rect x="408" y="30" width="160" height="46" rx="4" fill="#0c0c0d" stroke="#262628"/>
       <text class="ttl" x="420" y="52">ev_raw typed</text><text class="lbl-s" x="420" y="68">+ extra Map</text></g>
+    <path class="flow" d="M488,76 L556,112" stroke="#b06a6a" stroke-width="1.4" marker-end="url(#a)" fill="none"/>
+    <g class="r4"><rect x="556" y="96" width="176" height="46" rx="4" fill="#0c0c0d" stroke="#2a2224"/>
+      <text class="ttl" x="568" y="118" fill="#b06a6a">quarantine</text>
+      <text class="lbl-s" x="568" y="134">3 · ts_out_of_range · kept, not dropped</text></g>
 
     <path class="flow" d="M488,76 L488,116" stroke="#6f9d7f" stroke-width="1.6" marker-end="url(#a)" fill="none"/>
     <g class="r4"><rect x="408" y="116" width="160" height="46" rx="4" fill="#0c0c0d" stroke="#262628"/>
@@ -287,9 +295,46 @@ body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
   <div class="time">~30s</div>
 </section>
 
+<!-- ══════ PREPROCESSING ══════ -->
+<section class="slide">
+  <div class="num">05 / 13</div>
+  <div class="kick">runtime preprocessing — every row gets a terminal state</div>
+  <h2>Nothing is dropped silently.</h2>
+  <div class="bars">
+    <div class="lab">landed as text</div>
+    <div class="track"><div class="bar" style="width:100%;background:var(--tan)">
+      <span class="v in">7,000,000 — lossless, all-String</span></div></div>
+    <div class="lab">cast rejects</div>
+    <div class="track"><div class="bar" style="width:0.4%;background:var(--maroon);animation-delay:.12s">
+      <span class="v">0 — every column typed cleanly</span></div></div>
+    <div class="lab">quarantined</div>
+    <div class="track"><div class="bar" style="width:0.4%;background:var(--maroon);animation-delay:.24s">
+      <span class="v">3 — <span class="m">ts_out_of_range</span>, kept in a table, not discarded</span></div></div>
+    <div class="lab">accepted to the model</div>
+    <div class="track"><div class="bar" style="width:99.9%;background:var(--live);animation-delay:.36s">
+      <span class="v in">6,999,997</span></div></div>
+    <div class="lab">exact replays collapsed</div>
+    <div class="track"><div class="bar" style="width:0.36%;background:var(--sage);animation-delay:.48s">
+      <span class="v">24,964 → 6,975,033 derivation rows</span></div></div>
+  </div>
+  <div class="cols">
+    <div class="r1"><h4>land first, type second</h4>
+      <p>All-String, header-aware. <b>A malformed row costs a row, not the file</b> — and a column
+      we have never seen survives instead of being dropped at the door.</p></div>
+    <div class="r2"><h4>quarantine, not deletion</h4>
+      <p>Unusable rows go to a table with a <b>reason</b>. Three timestamps out of range. They are
+      countable and inspectable — a judge can ask what we excluded and get an answer.</p></div>
+    <div class="r3"><h4>type-aware, not blanket cleanup</h4>
+      <p>12 case-drifted <span class="m">Pause</span> controls canonicalised. Identifiers, catalogue
+      prose and raw filter values are <b>not</b> rewritten — normalisation happens at query time, so
+      storage stays raw.</p></div>
+  </div>
+  <div class="time">~25s</div>
+</section>
+
 <!-- ══════ 6 · THE GATE ══════ -->
 <section class="slide">
-  <div class="num">05 / 12</div>
+  <div class="num">06 / 13</div>
   <div class="kick">how we know it is right</div>
   <h2>The gate will not agree with itself.</h2>
   <div class="big">0</div>
@@ -309,7 +354,7 @@ body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 
 <!-- ══════ 7 · THE NUMBERS ══════ -->
 <section class="slide">
-  <div class="num">06 / 12</div>
+  <div class="num">07 / 13</div>
   <div class="kick">the result · unseen day 2026-07-31 UTC</div>
   <h2>23,324 at 11:17.</h2>
   <div class="statrow">
@@ -336,7 +381,7 @@ body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 
 <!-- ══════ 8 · LIVE DEMO ══════ -->
 <section class="slide">
-  <div class="num">07 / 12</div>
+  <div class="num">08 / 13</div>
   <div class="kick" style="color:var(--tan)">▸ live demo — switch to the dashboard now</div>
   <h2>The curve, and filters that<br>actually move it.</h2>
   <div class="demo">
@@ -367,7 +412,7 @@ body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 
 <!-- ══════ 9 · DIMENSIONS ══════ -->
 <section class="slide">
-  <div class="num">08 / 12</div>
+  <div class="num">09 / 13</div>
   <div class="kick">new dimensions, same day</div>
   <h2>An unknown column becomes<br>a filter with no migration.</h2>
   <div class="bars">
@@ -391,7 +436,7 @@ body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 
 <!-- ══════ SCALE ══════ -->
 <section class="slide">
-  <div class="num">09 / 12</div>
+  <div class="num">10 / 13</div>
   <div class="kick">scale — measured at 1× / 10× / 100×</div>
   <h2>At 100× the build strains.<br>Serving does not move.</h2>
   <div class="bars">
@@ -427,7 +472,7 @@ body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 
 <!-- ══════ 10 · WHAT BROKE ══════ -->
 <section class="slide">
-  <div class="num">10 / 12</div>
+  <div class="num">11 / 13</div>
   <div class="kick">operations — what actually broke</div>
   <h2>The unseen file did not<br>go through cleanly.</h2>
   <div class="cols">
@@ -450,7 +495,7 @@ body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 
 <!-- ══════ 11 · HONESTY ══════ -->
 <section class="slide">
-  <div class="num">11 / 12</div>
+  <div class="num">12 / 13</div>
   <div class="kick">what we would tell you before you found it</div>
   <h2>The limits, stated.</h2>
   <div class="cols">
@@ -468,7 +513,7 @@ body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 
 <!-- ══════ 12 · CLOSE ══════ -->
 <section class="slide">
-  <div class="num">12 / 12</div>
+  <div class="num">13 / 13</div>
   <div class="kick">close</div>
   <h2>Foreground-only means<br>foreground-only.</h2>
   <p class="say" style="max-width:56ch">
@@ -489,7 +534,7 @@ body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 </section>
 
 <footer>
-  deck · 12 slides · 2–5 min · peak 23,324 @ 2026-07-31 11:17 UTC · 3,201,716 minutes reconciled,
+  deck · 13 slides · 2–5 min · peak 23,324 @ 2026-07-31 11:17 UTC · 3,201,716 minutes reconciled,
   0 mismatched<br>
   scroll-snap navigation — arrow keys, space, or swipe. No JavaScript. Print to PDF for a static copy.
 </footer>
