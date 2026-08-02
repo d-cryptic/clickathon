@@ -5,7 +5,7 @@
 #   tools/test-all.sh --fast     # skip the slow scale/timespan suites
 #   tools/test-all.sh --list     # show what would run, run nothing
 #
-# WHY THIS EXISTS. Fourteen test scripts accumulated over two days, each proving
+# WHY THIS EXISTS. Many test scripts accumulated over two days, each proving
 # something real, and NOTHING RAN THEM TOGETHER. `make test` is Go only. So the
 # honest answer to "do the tests pass?" was "which ones?" — and a suite nobody
 # runs as a whole rots one script at a time without anyone noticing.
@@ -41,10 +41,12 @@ policy|tools/policy.sh check|0|sql/01_policy.sql is current, the covers exceed T
 go-unit|make test|0|Go: the reconcile parser, config resolution, OTLP emitter, pipeline health
 golden|tools/golden-gen.sh|0|11 cohorts whose answers are computed OUTSIDE the pipeline
 property|PROP_COMPAT=1 tools/property-test.sh|0|random sessions vs an independent reference interpreter; batch invariance
-edge|tools/edge-test.sh|0|26 hand-derived boundary fixtures, each sabotage-checked
+edge|tools/edge-test.sh|0|32 hand-derived boundary fixtures, including users and dynamic fields
+publish-window|tools/publish-window-test.sh|0|a late beat recovers prior singleton history and dynamic fields exactly
 landing|tools/landing-test.sh|0|one bad row costs a row, not the file (ADR 0030)
 contract|tools/contract-runner-agreement.sh|0|the contract gate and the runner agree about a valid file
 truncation|tools/truncation-test.sh|0|open sessions absorbed without double-counting
+chunked-backfill|tools/chunked-backfill-test.sh|0|130 sparse dates stay below the Cloud partition cap with exact output
 load-guard|tools/load-guard-test.sh|0|the loader refuses to double a day
 publish|tools/publish-test.sh|1|all four tiers converge to a from-scratch rebuild
 query-robust|tools/query-robustness.sh|1|13 shapes x hostile filters; the arithmetic invariants
