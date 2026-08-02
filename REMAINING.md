@@ -3,12 +3,16 @@
 > **Summary:** Checked every open item in `TODOS.md`, `v2.todo.md` and `docs/WORKTREE_QUEUE.md`
 > against the live system and the released unseen/submission contracts on 2026-08-02. The old
 > “private repo” and “Team Captain” blockers were not in the official rules and are retired. The
-> real P0s are the hosted demo, 2–3 minute video, self-contained team folder/PR, final unseen
-> query-log evidence, and ClickStack-specific wiring plus a live walkthrough. Q35 remains an open
-> semantic choice; current-model validation and deployment evidence remain separate gates.
+> fixed benchmark set/private answer key were also retired: judges spot-check required concurrency
+> results against raw events. The portal closes automatically at **12:00 PM IST, 2026-08-02**. Real
+> P0s are the hosted demo/video, team folder/PR and live ClickStack evidence.
 
 **Verified:** 2026-08-02, against `main` at the merge of all 234 commits. Gate PASSED — 17,028
 minutes, 0 mismatched, peak 2,917. `make ci` green.
+
+**Official unseen update:** the current local release path loaded 7,000,000 rows, built 102 output
+dates in 64+38 chunks without a setting override, and reconciled 3,201,716 minutes with zero
+mismatches; see `evidence/unseen/official-20260802-codex-validation.txt`.
 
 ---
 
@@ -104,9 +108,28 @@ has since been released: 7,000,000 rows whose derived intervals span **102 disti
 measured the *old* 7-day sample, found 7 dates, and called a correct claim unsupported. The agent that
 raised it had the premise right and only the fix wrong.
 
-**This is therefore a P0, not a hypothetical.** The official unseen build **fails today** — the user
-stage dies with `TOO_MANY_PARTS`. There is no unseen answer to submit until it is fixed. Two fixes work
-on Cloud:
+**RESOLVED, same day — this entry is now history, not an open item.** The Codex session landed a
+bounded date-chunk build and ran the official file end to end
+(`evidence/unseen/official-20260802-codex-validation.txt`, 07:56):
+
+```
+No max_partitions_per_insert_block override was used. The canonical builder
+handled 102 output dates as two Cloud-legal chunks of 64 and 38 dates.
+ev_landing 7,000,000 = ev_raw 7,000,000 + cast rejects 0
+accepted input 6,999,997 / lossless raw 7,000,000; quarantined 3
+PASS; minutes_compared=3,201,716; mismatched=0; max_abs_diff=0
+```
+
+That is fix (a) below, and it is the right one: no setting override, and the gate reconciled 3.2M
+minutes with zero mismatches — so it proved **curve equivalence**, not merely that the INSERT
+succeeded, which is what this entry demanded of any fix. `tools/chunked-backfill.sh` and its suite
+(`130 sparse dates stay below the Cloud partition cap with exact output`) were **still untracked** as
+of `8dd7e0e`; they need committing before the number can be claimed from `main` rather than from one
+working tree.
+
+**What was true before it landed**, kept because the reasoning is what makes fix (b) still worth
+considering: the user stage died with `TOO_MANY_PARTS`, and there was no unseen answer to submit. Two
+fixes work on Cloud:
 
 - **(a) bounded date-chunk build** — drive each tier in slices of well under 100 dates. A `tools/`
   change, no schema change, needs no authorisation. 009 §9 calls this "the safe deadline option" and
