@@ -18,13 +18,15 @@ In Unix, almost all hardware and communication channels are abstracted as files,
 
 ![Batch processing with finite input vs. stream processing with continuously arriving data](assets/batch-vs-stream-processing.gif)
 
+> **Editable diagram:** [Open the Draw.io source](assets/batch-vs-stream-processing.drawio).
+
 ## Transmitting Event Streams
 
 There is some kind of input and output associated to all computer processes, similarly, there is for streams as well. An event is what goes into a stream as an input. But what is an event? The context of anything to be considered as an event is application dependent, but on the higher level, an event is a small, self-contained, immutable object containing the details of something that happened at some point time. It could creation of a new user profile on your application, or simply could be a click by the user on any UI component.
 
 Events could be represented as JSON, or text strings, or any binary format, which makes it compatible to be stored in any relation table or document (application specific storage). The storage of an event makes it easier in a distributed system for it be sent or replicated to a multi node set-up. A producer (publisher or sender) generates an event and potentially this event can be consumed by multiple consumers(subscribed or recipients). The unique identifier of an event, or related events, in a streaming system would be a topic or stream.
 
-> **Diagram placeholder:** A producer publishing events to a topic or stream, with multiple consumers subscribed to it.
+> **Editable diagram:** [A producer publishing events to a topic or stream, with multiple consumers subscribed to it](assets/producer-topic-multiple-consumers.drawio).
 
 At the simples level, a file or a datastore is sufficient to connect producers and consumers, a producer will write every event to the datastore and the consumer will periodically polls the datastore to check the occurrence of any new events. But as the application scales, and the uncertainty in the traffic being generated is introduced, the datastore bottlenecks could bring fallacies to the performance, while polling more often seems to be a one approach, but the more you poll a datastore, it becomes less likely to receive new events at the end of each poll.
 
@@ -40,7 +42,7 @@ The publish-subscribe models digress to a multiple possibilities of failover mec
 
 2. Crash down of nodes, or temporary downtime, message loss due to downtime: With databases, durability may require some combination of writing to disk and/or replication, which comes with cost. If the system can tolerate some message loss, then high throughput and low latency can be achieved with the same hardware.
 
-> **Diagram placeholder:** Producer and consumer speed mismatch, showing drop, queue, and backpressure options.
+> **Editable diagram:** [Producer and consumer speed mismatch, showing drop, queue, and backpressure options](assets/producer-consumer-speed-mismatch.drawio).
 
 ## Direct Messaging from Producers to Consumers
 
@@ -56,4 +58,4 @@ Depending upon the application requirements, these brokers can keep the messages
 
 The introduction of a message queue introduces asynchronicity into the system, as each producer or consumer, writes or consumes respectively to the message queue, eradicating the wait at the producer end for the message consumption.
 
-> **Diagram placeholder:** Multiple producers and consumers connected asynchronously through a message broker.
+> **Editable diagram:** [Multiple producers and consumers connected asynchronously through a message broker](assets/asynchronous-message-broker.drawio).
