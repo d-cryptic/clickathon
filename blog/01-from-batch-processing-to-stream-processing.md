@@ -16,7 +16,7 @@ A stream refers to data that is incrementally made available over time, just lik
 
 In Unix, almost all hardware and communication channels are abstracted as files, there are low level integers defined as File Descriptor, hence there are dedicated channels defined even before the process loads into the kernel. Unix streams abstract input and output so data can be processed byte-by-byte as it arrives, making them strictly sequential, which means once a byte is passed there no possibility of rewind or seek backward.
 
-> **Diagram placeholder:** Batch processing with finite input vs. stream processing with continuously arriving data.
+![Batch processing with finite input vs. stream processing with continuously arriving data](assets/batch-vs-stream-processing.gif)
 
 ## Transmitting Event Streams
 
