@@ -20,7 +20,7 @@ A single disk will have performance limitations, to scale it up, the logs can be
 
 Within each partition, each message will be assigned a sequentially increasing (monotonic) number. This way ordering of messages can be preserved in each partition, whereas ordering across different partitions is not guaranteed.
 
-> **Diagram placeholder:** One topic split into multiple log partitions on different machines, with monotonically increasing offsets and ordering guaranteed only within each partition.
+> **Editable diagram:** [What a partition is: topic routing, independent logs, offsets, ordering, and parallelism](assets/partition-fundamentals.drawio).
 
 ## Logs Compared to Traditional Messaging
 
@@ -49,3 +49,5 @@ Alerting can be set-up if the consumer lags behind the head of the lag, since th
 ## Replaying Old Messages
 
 The log based approach is more like a read only operation which does not change the log, the consumer offset always move forward. The offset being in consumer's control can be always manipulated, for example you change the offset with yesterday's offset to replay the messages, it increases the room of experimentation and easier recovery from errors and bugs.
+
+> **Editable diagram:** [How partitions fit into the larger streaming ecosystem](assets/partitioned-log-ecosystem.drawio).
