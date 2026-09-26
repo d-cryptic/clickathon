@@ -247,6 +247,7 @@ def phase08_event_processing_time(phase: float) -> Image.Image:
             ((x_value - 6) * SCALE, 139 * SCALE, (x_value + 6) * SCALE, 151 * SCALE),
             fill=TEAL,
         )
+    dot(draw, (190, 145), (900, 145), phase, "#62C7B5", 8)
     box(draw, (475, 285, 630, 375), RED_LIGHT, RED)
     text(draw, (552, 310), "PROCESSOR", 12, RED, True)
     text(draw, (552, 337), "restart", 11, RED)
@@ -260,6 +261,8 @@ def phase08_event_processing_time(phase: float) -> Image.Image:
             ((x_value - 6) * SCALE, 324 * SCALE, (x_value + 6) * SCALE, 336 * SCALE),
             fill=BLUE,
         )
+    if phase > 0.55:
+        dot(draw, (630, 330), (900, 330), (phase - 0.55) / 0.45, "#8FA7C0", 8)
     box(draw, (205, 425, 875, 485), WHITE, "#D9D6CF", 10)
     text(draw, (540, 447), "Events stayed steady", 12, TEAL, True)
     text(draw, (540, 471), "The visible dip came from processing delay, not real traffic.", 11, MUTED)
