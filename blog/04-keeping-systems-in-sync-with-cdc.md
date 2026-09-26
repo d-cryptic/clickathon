@@ -16,7 +16,7 @@ In case periodic full database dumps are too slow, dual writes, is an approach w
 
 Dual writes can make the application eco-system in consistent with race conditions, in the below representation, an update to value of X is triggered to A by client 1 and then to B by client 2, in the middle time, the database will show the value of X to be A whereas the search index is pointing to B, hence your system is at an inconsistent state.
 
-> **Diagram placeholder:** Two clients updating the same value through dual writes, leaving the database with X=A and the search index with X=B.
+> **Editable diagram:** [How concurrent dual writes leave the database with X=A and the search index with X=B](assets/dual-writes-race-condition.drawio).
 
 Another problem with dual writes, is the possibility of any of the write to the data storage could fail on the network, for which your application (with its components) should be fault tolerant.
 
@@ -28,7 +28,7 @@ Earlier in the days, the replication logs for a database were considered to be a
 
 CDC (Change Data Capture) came into the picture, whose sole purpose was to observe and extract the data changes and replicate them to other systems. CDC could be made available as a stream, into which the producer data storage (database) could publish the data changes as they are written and the other components in the system like search index can consume them and the same order of log changes are applied then the data presented in all the data storage systems would be sme and bringing consistency to your application.
 
-> **Diagram placeholder:** A database publishing ordered changes through CDC to a stream consumed by a cache, search index, and data warehouse.
+> **Editable diagram:** [How CDC keeps a cache, search index, and data warehouse synchronized through one ordered change stream](assets/cdc-sync-ecosystem.drawio).
 
 ## Implementing Change Data Capture
 
