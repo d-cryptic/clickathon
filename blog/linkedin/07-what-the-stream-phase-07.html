@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="linkedin-schedule" content="2026-10-14 17:30 Asia/Kolkata">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>What the Stream? Phase 07</title>
+  <link rel="stylesheet" href="article.css">
+</head>
+<body>
+<article>
+  <h1>What the Stream? Phase 07</h1>
+  <p class="subtitle">What Can You Do with a Stream?</p>
+
+  <h2>Processing a Stream</h2>
+
+  <p>Once we have a stream, the next question is simple: <strong>what can we do with it?</strong></p>
+
+  <ol>
+    <li>A stream consumer can update a database, search index, or cache. Other consumers may independently read the same stream for different purposes.</li>
+    <li>If a human is the ultimate consumer, the result can trigger an email, push notification, or another alerting mechanism.</li>
+    <li>A processing pipeline can generate one or more derived streams from one or more input streams.</li>
+  </ol>
+
+  <p>The code that performs a continuous transformation is often called an <strong>operator</strong> or a <strong>job</strong>. Operators read input records and emit derived records. Sinks may append, upsert, retract, or delete depending on the result model.</p>
+
+  <figure>
+    <img src="../assets/linkedin/phase07-stream-processing-pipeline.gif" alt="Animated stream-processing pipeline producing derived events, alerts, metrics, databases, notifications, and dashboards">
+    <figcaption>Input streams pass through operators and become several independently useful outputs.</figcaption>
+  </figure>
+
+  <h2>Uses of Stream Processing</h2>
+
+  <p>Stream processing is widely used for monitoring and timely decisions. A fraud system can alert when credit-card activity is suspicious. A warehouse can detect a faulty machine. A trading system can examine price changes and react to a condition.</p>
+
+  <p>These applications may require pattern matching, correlation, aggregation, and managed state.</p>
+
+  <h2>Complex Event Processing</h2>
+
+  <p>Regular expressions search for patterns in text. <strong>Complex Event Processing, or CEP, searches for patterns in a sequence of events.</strong></p>
+
+  <p>Patterns may be described with a declarative query language or a graphical interface. The processing engine maintains state as events arrive. When the expected pattern is matched, it emits a complex event containing the details of the match.</p>
+
+  <p>CEP commonly stores standing queries and evaluates incoming events against them. A conventional database usually stores data and evaluates a submitted query. CEP input may still be retained for replay, recovery, or audit; it is not required to be transient.</p>
+
+  <h2>Stream Analytics</h2>
+
+  <p>Stream analytics focuses on aggregates and statistical metrics: event rates, rolling averages, current values compared with previous values, and alerts based on those comparisons.</p>
+
+  <p>These metrics may be computed over <strong>time windows, count windows, sliding windows, or session windows</strong>. Averaging can reduce short-term fluctuations and expose a broader trend.</p>
+
+  <p>Exact computation is not always necessary or affordable. Approximate structures such as HyperLogLog, Count-Min Sketch, and t-digest can reduce state size. Bloom filters serve a more specific purpose: approximate membership testing.</p>
+
+  <p>Apache Flink is one open-source stream-processing framework designed for stateful processing and analytics.</p>
+
+  <h2>Maintaining Materialized Views</h2>
+
+  <p>A materialized view is an alternative representation of a dataset that is kept current as changes arrive. In event sourcing, application state is itself a materialized view derived from the event log.</p>
+
+  <p><strong>A materialized view is accumulated state, not one giant window beginning when the application started.</strong> It can be bootstrapped from a snapshot and then maintained from subsequent changes.</p>
+
+  <p>Log compaction can retain the latest value for each key. It is a retention mechanism, not an approximation technique. Kafka Streams is a processing library that can maintain local state stores backed by compacted changelog topics.</p>
+
+  <h2>Search on Streams</h2>
+
+  <p>Sometimes an application needs complex search criteria such as full-text search. A real-estate website may need to notify users when a newly listed property matches their saved requirements.</p>
+
+  <p>A conventional search engine indexes documents and runs queries against that index. In reverse search, <strong>queries are indexed and each new document is matched against those standing queries.</strong> At larger scale, both documents and queries may be indexed.</p>
+
+  <h2>Messaging, Streaming, and Request-Like Processing</h2>
+
+  <p>Message-passing and streaming systems overlap. Either may support durable or ephemeral delivery and one or many consumers. Stream processors are distinguished mainly by continuous transformations and managed state.</p>
+
+  <p>Distributed stream-processing frameworks such as Apache Storm can also support request-like topologies and result aggregation. Queries can be interleaved with input events, aggregated, and returned to a caller.</p>
+
+  <blockquote>A stream is not valuable because it moves data. It is valuable because it lets many independent computations react to the same sequence of facts.</blockquote>
+</article>
+</body>
+</html>

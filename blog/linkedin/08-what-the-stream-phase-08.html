@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="linkedin-schedule" content="2026-10-16 17:30 Asia/Kolkata">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>What the Stream? Phase 08</title>
+  <link rel="stylesheet" href="article.css">
+</head>
+<body>
+<article>
+  <h1>What the Stream? Phase 08</h1>
+  <p class="subtitle">Time, Watermarks, and Windows in Stream Processing</p>
+
+  <h2>Reasoning About Time</h2>
+
+  <p>Analytical stream processors work extensively with time windows, but a window is not as straightforward as it first appears.</p>
+
+  <p>Modern stream processors commonly support several time domains:</p>
+
+  <ul>
+    <li><strong>Event time:</strong> when the event occurred according to a timestamp carried by the event.</li>
+    <li><strong>Ingestion time:</strong> when the streaming system first received the event.</li>
+    <li><strong>Processing time:</strong> when an operator processed the event according to its local clock.</li>
+  </ul>
+
+  <p>The important choice is the time domain, not the display time zone of the machine running a subsystem.</p>
+
+  <h2>Event Time Versus Processing Time</h2>
+
+  <p>Reprocessing, bug recovery, network failures, and consumer restarts can all delay processing. If we use processing time for a metric, operational delay can look like a real change in user behavior.</p>
+
+  <p>Imagine a processor measuring requests per minute. Requests continue to arrive at a steady rate, but the processor restarts. A processing-time chart may show a dip while the processor was unavailable and then a burst when it catches up. The event-time chart can place those requests back into the minutes in which they actually occurred.</p>
+
+  <figure>
+    <img src="../assets/linkedin/phase08-event-vs-processing-time.gif" alt="Animated comparison of steady event time and processing time distorted by a processor restart">
+    <figcaption>A processing failure can distort processing-time metrics even when real event traffic remains steady.</figcaption>
+  </figure>
+
+  <p>Ordering is a separate concern. If request B depends on request A, a causal identifier, sequence number, or per-key ordering mechanism is needed. A timestamp alone does not guarantee causal delivery.</p>
+
+  <h2>Knowing When a Window Is Ready</h2>
+
+  <p>For an event-time window, the question is whether event-time progress is far enough that a result can be emitted while still defining what happens when earlier events arrive later.</p>
+
+  <p>Events that arrive after the relevant window has produced a result are usually called <strong>late events</strong>. We need an explicit policy:</p>
+
+  <ol>
+    <li>Drop the late event and monitor the rate of dropped data.</li>
+    <li>Update the previous result and publish a correction.</li>
+    <li>Delay the initial result by allowing a configured lateness period.</li>
+  </ol>
+
+  <p>A <strong>watermark</strong> estimates that event time has advanced past a timestamp. Events earlier than the watermark are late, but they may still arrive. A watermark is progress information, not a promise that the past is complete.</p>
+
+  <figure>
+    <img src="../assets/linkedin/phase08-watermark-late-events.gif" alt="Animated late event moving behind a watermark toward drop or correction policies">
+    <figcaption>The watermark advances, but the application still needs a policy for late data.</figcaption>
+  </figure>
+
+  <h2>Whose Clock Are We Using?</h2>
+
+  <p>Timestamping becomes harder when events are buffered at several points. A mobile application may record events regularly while offline and upload them later.</p>
+
+  <p>The device clock describes the user-facing event time, but it may be incorrect. The server clock is trustworthy for receipt time, but it does not describe when the offline action occurred.</p>
+
+  <p>It can help to record three timestamps:</p>
+
+  <ol>
+    <li><strong>Device event time:</strong> when the device says the event occurred.</li>
+    <li><strong>Device send time:</strong> when the device attempted to send it.</li>
+    <li><strong>Server receipt time:</strong> when the server received it.</li>
+  </ol>
+
+  <p>These timestamps can estimate clock offset and transport delay, but they cannot reveal one perfectly “true” occurrence time when both device-clock error and network delay are unknown.</p>
+
+  <h2>Types of Windows</h2>
+
+  <p><strong>Tumbling windows</strong> have a fixed size and do not overlap. Events are usually assigned to half-open boundaries such as <code>[10:03:00, 10:04:00)</code>.</p>
+
+  <p><strong>Hopping windows</strong> have a fixed size and a fixed hop. They overlap when the hop is smaller than the size.</p>
+
+  <p><strong>Sliding windows</strong> cover a fixed interval relative to each evaluation point or event and advance continuously or at a configured slide.</p>
+
+  <p><strong>Session windows</strong> group events for the same key and close after that key has been inactive for a configured gap.</p>
+
+  <figure>
+    <img src="../assets/linkedin/phase08-window-types.gif" alt="Animated comparison of tumbling, hopping, sliding, and session windows">
+    <figcaption>The window type determines how the same event timeline is grouped for computation.</figcaption>
+  </figure>
+
+  <blockquote>Time semantics are part of the product definition. A correct computation begins by deciding which clock, which window, and which late-data policy represent the business question.</blockquote>
+</article>
+</body>
+</html>

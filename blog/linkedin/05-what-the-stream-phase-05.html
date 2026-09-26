@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="linkedin-schedule" content="2026-10-07 17:30 Asia/Kolkata">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>What the Stream? Phase 05</title>
+  <link rel="stylesheet" href="article.css">
+</head>
+<body>
+<article>
+  <h1>What the Stream? Phase 05</h1>
+  <p class="subtitle">Event Sourcing, Commands, and Immutable Events</p>
+
+  <h2>Event Sourcing</h2>
+
+  <p><strong>Event sourcing stores changes to application state as a durable log of domain events.</strong> This is different from Change Data Capture. With CDC, changes to a mutable source database are captured from its transaction log or an equivalent change feed. The feed preserves the ordering guarantees provided by that source, often transaction order or per-partition order.</p>
+
+  <p>In event sourcing, the events themselves are the authoritative facts. The logical event history is append-only: published events are not modified in place, and corrections are represented by later events. Physical retention, redaction, or deletion may still be required by the system or by regulation.</p>
+
+  <p><strong>Events record accepted domain facts, and application state is derived from those events.</strong> A database or durable log with the required ordering, retention, and concurrency guarantees can serve as the event store; EventStoreDB is one example.</p>
+
+  <h2>Deriving Current State from the Event Log</h2>
+
+  <p>An end user is generally interested in the current state of the application rather than every change that brought it there. We therefore need a deterministic process that reads the event log and derives the current state. If we replay the same accepted events in the same order, we should reach the same state.</p>
+
+  <p>An event-sourced log can reconstruct current state by replay. A CDC feed can do this only when it includes an initial snapshot or complete retained history, including deletion information.</p>
+
+  <p>In a compacted CDC topic, the latest value for each key—and any tombstone representing deletion—can be retained while older versions are removed. Event-sourced events have a different role. They represent facts in the domain, and their historical meaning can remain important even after the current state changes.</p>
+
+  <p>Snapshots can reduce replay cost. We can load a snapshot and replay only the events that occurred after it. <strong>A snapshot improves recovery speed without automatically removing the historical event log.</strong> Whether old events must be retained indefinitely is a system and compliance decision.</p>
+
+  <h2>Commands and Events</h2>
+
+  <p>It is very important to distinguish a <strong>command</strong> from an <strong>event</strong>.</p>
+
+  <p>A command represents intent. When a user asks to create an account, reserve a seat, or transfer money, the request may be rejected after checking business invariants. If the command is accepted, the command handler produces one or more events representing facts that occurred.</p>
+
+  <p>For example, a username may need to be unique before an account can be created. Once validation passes, the accepted command can emit an <strong>AccountCreated</strong> event. The command does not become the event; it causes the event to be recorded.</p>
+
+  <p>Once an event is recorded, it becomes a fact. In an online flight booking system, a cancellation does not erase the fact that a reservation was made earlier. The cancellation becomes another event.</p>
+
+  <p>Business invariants that decide whether a command is accepted must be checked before recording its events. Consumers may still reject, quarantine, or retry malformed and unsupported events.</p>
+
+  <figure>
+    <img src="../assets/linkedin/phase05-event-state.gif" alt="Animated flow from a command through validation into an event log and a current-state projection">
+    <figcaption>Commands express intent. Accepted commands emit events. Projections derive current state.</figcaption>
+  </figure>
+
+  <h2>State, Streams, and Immutability</h2>
+
+  <p>The principle of immutability is what makes event sourcing and change streams powerful, but application state still changes. Available seats are the result of reservations and cancellations. A bank balance is the result of credits and debits.</p>
+
+  <p>The key is that <strong>state is the result of events applied over time</strong>. Even when an operation is later reversed, the fact that it occurred remains useful for recovery, audit, and analysis.</p>
+
+  <blockquote>Application state is what we get when we integrate an event stream over time. A change stream is what we get when we differentiate state over time.</blockquote>
+
+  <p>The mutable state and the immutable history do not contradict each other. They are two representations of the same system: one answers <strong>“What is true now?”</strong> and the other answers <strong>“What happened?”</strong></p>
+</article>
+</body>
+</html>

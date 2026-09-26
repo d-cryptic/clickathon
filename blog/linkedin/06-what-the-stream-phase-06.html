@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="linkedin-schedule" content="2026-10-09 17:30 Asia/Kolkata">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>What the Stream? Phase 06</title>
+  <link rel="stylesheet" href="article.css">
+</head>
+<body>
+<article>
+  <h1>What the Stream? Phase 06</h1>
+  <p class="subtitle">Immutable Events, CQRS, and Concurrency</p>
+
+  <h2>Why Immutable Events Are Useful</h2>
+
+  <p>Immutability in data systems is not a new idea. Accountants have used append-only financial ledgers for a long time. An incorrect transaction is not silently removed; a correction transaction is added so the history remains available for audit.</p>
+
+  <p>The same principle is useful outside finance. In a conventional shopping-cart database, the current item row may be updated or deleted. An event log can retain the earlier add and remove actions. That history may help us understand customer behavior, recover from bugs, or build a new analytical model later.</p>
+
+  <p><strong>An immutable event log makes it easier to understand what happened and to rebuild what exists now.</strong></p>
+
+  <h2>Several Views from the Same Event Log</h2>
+
+  <p>By separating an immutable event log from mutable state, we can derive different read-oriented representations from the same sequence of facts.</p>
+
+  <p>A search view can be optimized for text lookup. An account view can be optimized for balances and recent transactions. An analytics view can organize the same events around behavior and trends. If requirements change, a new projection can be created by replaying the event history.</p>
+
+  <p>This can simplify the write model, but it does not remove design work. <strong>Event schemas, schema evolution, partitioning, and projection access patterns still require deliberate decisions.</strong></p>
+
+  <p><strong>Command Query Responsibility Segregation, or CQRS, separates the command model used for writes from the query model used for reads.</strong> Multiple read projections are common, but CQRS does not require event sourcing, and event sourcing does not automatically require many read views.</p>
+
+  <p>Denormalization also remains relevant. Read projections are often intentionally denormalized so that application queries are simple and fast.</p>
+
+  <figure>
+    <img src="../assets/linkedin/phase06-event-log-projections.gif" alt="Animated immutable event log feeding account, search, and analytics projections">
+    <figcaption>One event history can feed several purpose-built read views.</figcaption>
+  </figure>
+
+  <h2>Concurrency and Read-View Consistency</h2>
+
+  <p>CDC consumers and event-sourced projections are commonly updated asynchronously. A write may be safely recorded in the event log before it becomes visible in a read view. The user can temporarily see stale data.</p>
+
+  <p>There are several ways to handle this:</p>
+
+  <ul>
+    <li><strong>Atomic update:</strong> update the log and view in one transaction when both share a transactional boundary.</li>
+    <li><strong>Projection version:</strong> wait until the read view reaches the version produced by the user’s command.</li>
+    <li><strong>Read from the write model:</strong> use the authoritative write state for an immediate read-your-writes response.</li>
+    <li><strong>Explicit eventual consistency:</strong> show the user that the view is still updating.</li>
+  </ul>
+
+  <p>Self-contained events can reduce external lookups, but they do not remove concurrency concerns. Concurrent commands, ordering, stale projections, and conflicting updates still exist.</p>
+
+  <p>Co-partitioning an event log and state can provide deterministic ordering for a key and may enable atomic processing when the platform supports transactions. It does not make arbitrary cross-key actions atomic or remove every source of nondeterminism.</p>
+
+  <h2>Immutability and Deletion</h2>
+
+  <p>Storage is affordable enough that many applications retain long histories, but retention is not only a technical choice. Regulations may require deletion of <strong>personally identifiable information</strong>.</p>
+
+  <p>Deletion must be handled across live stores, indexes, caches, replicas, and backups. Simply making information difficult to retrieve may not satisfy an erasure obligation.</p>
+
+  <p>Event-sourced systems often reduce this risk by keeping sensitive data outside immutable events, storing references instead of raw values, or encrypting sensitive fields so that destroying a key can make the data unreadable where legally appropriate.</p>
+
+  <blockquote>Immutability is a powerful system property, but it is not permission to ignore data lifecycle and privacy requirements.</blockquote>
+</article>
+</body>
+</html>

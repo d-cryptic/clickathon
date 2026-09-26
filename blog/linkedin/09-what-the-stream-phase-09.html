@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="linkedin-schedule" content="2026-10-21 17:30 Asia/Kolkata">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>What the Stream? Phase 09</title>
+  <link rel="stylesheet" href="article.css">
+</head>
+<body>
+<article>
+  <h1>What the Stream? Phase 09</h1>
+  <p class="subtitle">Stream Joins and Time Dependence</p>
+
+  <h2>Why Stream Joins Are Different</h2>
+
+  <p>Streams are unbounded, and a matching event may appear at any time. A stream join therefore needs to answer two questions that a bounded database query can often avoid:</p>
+
+  <ol>
+    <li><strong>How much state should be retained while waiting for a match?</strong></li>
+    <li><strong>Which version of changing reference data should be used?</strong></li>
+  </ol>
+
+  <h2>Stream–Stream Join</h2>
+
+  <p>Consider search ranking. One stream contains search-result impressions, and another contains clicks. We need to connect a click with the result impression that produced it.</p>
+
+  <p>A session ID alone may contain several searches and create incorrect many-to-many matches. The click should carry a unique <strong>query or result-impression identifier</strong>.</p>
+
+  <p>In a distributed application, a click may be processed before its matching search event because of network delay or retries. The processor maintains bounded state for both streams, indexed by the impression identifier. Whenever an event arrives, it stores the event and checks whether the other side has already arrived.</p>
+
+  <figure>
+    <img src="../assets/linkedin/phase09-stream-stream-join.gif" alt="Animated search and click streams joining by impression identifier inside window state">
+    <figcaption>Two event streams meet in bounded state even when their records arrive out of order.</figcaption>
+  </figure>
+
+  <p>The window bounds how long unmatched events remain in state. It also defines when an unmatched search or click is considered complete enough to emit.</p>
+
+  <h2>Stream–Table Join</h2>
+
+  <p>Suppose a stream contains user activity with a user ID, and the output needs profile information for that user. Each activity event can be enriched by looking up the profile table.</p>
+
+  <p>A remote database lookup for every event may be slow and may overload the database. A common alternative is a local state store. The stream processor keeps a local profile view in memory or on disk and updates it through the profile database’s CDC stream.</p>
+
+  <figure>
+    <img src="../assets/linkedin/phase09-stream-table-enrichment.gif" alt="Animated activity stream enriched through a local profile store maintained by CDC">
+    <figcaption>CDC keeps a local table current so activity enrichment remains fast.</figcaption>
+  </figure>
+
+  <p>A stream–table join may use an external lookup, although local replicated state is common. The key semantic choice is whether enrichment uses the <strong>latest profile at processing time</strong> or the <strong>profile version valid at the event’s timestamp</strong>.</p>
+
+  <h2>Continuously Maintained Table–Table Join</h2>
+
+  <p>Consider a social home timeline. A user sees posts from the accounts that the user follows. Reading every followed account at request time can be expensive, so the system can maintain a precomputed timeline.</p>
+
+  <p>The view reacts to both sides of the relationship:</p>
+
+  <ul>
+    <li>When user B publishes a post, it is added to the timelines of users who follow B.</li>
+    <li>When B deletes a post, it is removed from those timelines.</li>
+    <li>When user A follows B, recent posts from B are added to A’s timeline.</li>
+    <li>When A unfollows B, B’s posts are removed from A’s timeline.</li>
+  </ul>
+
+  <p>Because both posts and follow relationships change, the materialized view consumes changelogs for both tables. Conceptually, it is a continuously maintained table–table join.</p>
+
+  <figure>
+    <img src="../assets/linkedin/phase09-table-table-materialized-view.gif" alt="Animated tweet and follow changelogs maintaining user home timelines">
+    <figcaption>A follows B, so B’s posts enter A’s home timeline—not the other way around.</figcaption>
+  </figure>
+
+  <h2>Time Dependence and Determinism</h2>
+
+  <p>Windowed stream–stream and changelog-based table–table joins require managed state. Stream–table joins may use managed local state or an external lookup.</p>
+
+  <p>Partitions preserve order within a partition, not across every input. We therefore need explicit semantics for changing data. Should an activity event join with the current profile, or with the profile that was valid when the activity occurred?</p>
+
+  <p>Deterministic recovery requires source offsets, consistent state snapshots, and versioned reference data when historical enrichment is required. Replaying the same recorded input can reproduce the same output when all state transitions and external dependencies are deterministic.</p>
+
+  <blockquote>A stream join is not only a relationship between records. It is a relationship between records at a defined point in time.</blockquote>
+</article>
+</body>
+</html>

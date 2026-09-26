@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="linkedin-schedule" content="2026-10-23 17:30 Asia/Kolkata">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>What the Stream? Phase 10</title>
+  <link rel="stylesheet" href="article.css">
+</head>
+<body>
+<article>
+  <h1>What the Stream? Phase 10</h1>
+  <p class="subtitle">Fault Tolerance in Stream Processing</p>
+
+  <h2>Why Fault Tolerance Is Different for Streams</h2>
+
+  <p>Streams are unbounded and continuously growing. We cannot wait until a streaming task finishes before making all of its output visible, because the task may be designed to run forever.</p>
+
+  <p>Fault tolerance therefore depends on coordinated progress: <strong>input positions, operator state, and output effects must agree on what has been completed.</strong></p>
+
+  <h2>Microbatching and Checkpointing</h2>
+
+  <p>One approach is to break execution into small batches and process each batch as a unit. Classic Spark Streaming and Spark Structured Streaming support configurable microbatch intervals or triggers. One second is a possible configuration, not a fixed rule.</p>
+
+  <p>Microbatching is an execution model. Event-time windows are a separate concept. Tumbling, hopping, sliding, and session windows may span one or more microbatches while state carries information across executions.</p>
+
+  <p>Apache Flink uses a continuous processing model with checkpoint barriers. A completed checkpoint captures operator state and source positions consistently. After failure, Flink restores that state and reprocesses the input that followed the checkpoint.</p>
+
+  <p>Transactional sinks can abort output that was staged but not committed. Nontransactional sinks may observe duplicates after replay.</p>
+
+  <figure>
+    <img src="../assets/linkedin/phase10-checkpoint-recovery.gif" alt="Animated replayable source, stateful operator, checkpoint, crash, and restore flow">
+    <figcaption>A checkpoint coordinates source offsets and operator state before recovery begins.</figcaption>
+  </figure>
+
+  <p><strong>Checkpointing or microbatching can support exactly-once state semantics when combined with replayable sources and consistent snapshots.</strong> End-to-end exactly-once effects also require transactional or idempotent sinks.</p>
+
+  <h2>Atomic Commit</h2>
+
+  <p>For each checkpoint or transaction, output can be staged and committed only after the corresponding state and input positions are durably completed.</p>
+
+  <p>A common approach records an atomic commit decision through a transaction coordinator or a sink-specific protocol. The input offset, state update, and output must not advance independently.</p>
+
+  <p>Irreversible effects such as emails and push notifications need special handling. They generally cannot be rolled back. An idempotency key, deduplication store, or transactional outbox can prevent a recovery from sending the same effect twice.</p>
+
+  <h2>Idempotence</h2>
+
+  <p>An operation is <strong>idempotent</strong> when repeating the same operation has no additional effect.</p>
+
+  <p>Setting a key to the same value more than once is idempotent. Incrementing a counter twice is not: a retry changes the result again.</p>
+
+  <figure>
+    <img src="../assets/linkedin/phase10-idempotence-retries.gif" alt="Animated comparison of retried idempotent key assignment and retried counter increment">
+    <figcaption>Repeating a set operation keeps one result; repeating an increment creates another effect.</figcaption>
+  </figure>
+
+  <p>An operation that is not naturally idempotent can often be deduplicated with metadata. Kafka offsets increase within each partition. A sink can store the partition and offset—or another event ID—atomically with the resulting update and ignore a retry it has already applied.</p>
+
+  <p>Idempotence is not the same as deterministic replay, concurrency control, or input ordering. These are separate requirements that may all matter when rebuilding equivalent state.</p>
+
+  <h2>Rebuilding State After a Failure</h2>
+
+  <p>Any operation that maintains state, including a windowed count or a join, must be able to recover that state consistently.</p>
+
+  <p>There are three common paths:</p>
+
+  <ol>
+    <li><strong>Durable snapshot:</strong> restore a checkpoint containing operator state and source offsets.</li>
+    <li><strong>Changelog topic:</strong> rebuild a local state store from its compacted sequence of updates.</li>
+    <li><strong>Input replay:</strong> recompute state from retained source events when the required history is reasonably small.</li>
+  </ol>
+
+  <figure>
+    <img src="../assets/linkedin/phase10-state-recovery-options.gif" alt="Animated snapshot, changelog, and input replay paths feeding a recovered streaming state">
+    <figcaption>Snapshots, changelogs, and bounded replay can all restore state when coordinated with source positions.</figcaption>
+  </figure>
+
+  <p>Periodic copying alone does not prevent loss or duplication. Recovery must restore a state version consistent with the source offsets and then replay the later input.</p>
+
+  <p>Flink uses durable snapshots of operator state. Kafka Streams backs local state stores with changelog topics, commonly using log compaction. For a short aggregation window, replaying the source events may be fast enough to rebuild state directly.</p>
+
+  <blockquote>Exactly-once is not one switch. It is a contract across replayable input, consistent state, and controlled output effects.</blockquote>
+</article>
+</body>
+</html>
