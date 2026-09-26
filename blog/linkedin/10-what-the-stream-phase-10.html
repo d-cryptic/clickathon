@@ -54,7 +54,7 @@
     <figcaption>Repeating a set operation keeps one result; repeating an increment creates another effect.</figcaption>
   </figure>
 
-  <p>An operation that is not naturally idempotent can often be deduplicated with metadata. Kafka offsets increase within each partition. A sink can store the partition and offset—or another event ID—atomically with the resulting update and ignore a retry it has already applied.</p>
+  <p>An operation that is not naturally idempotent can often be deduplicated with metadata. Kafka offsets increase within each partition. A sink can store the topic, partition, and offset—or another globally unique event ID—atomically with the resulting update and ignore a retry it has already applied.</p>
 
   <p>Idempotence is not the same as deterministic replay, concurrency control, or input ordering. These are separate requirements that may all matter when rebuilding equivalent state.</p>
 

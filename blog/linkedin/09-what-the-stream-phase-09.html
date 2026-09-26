@@ -34,7 +34,7 @@
     <figcaption>Two event streams meet in bounded state even when their records arrive out of order.</figcaption>
   </figure>
 
-  <p>The window bounds how long unmatched events remain in state. It also defines when an unmatched search or click is considered complete enough to emit.</p>
+  <p>The window bounds how long unmatched events remain in state. For outer joins, window closure determines when unmatched records may be emitted; inner joins do not emit unmatched records.</p>
 
   <h2>Stream–Table Join</h2>
 

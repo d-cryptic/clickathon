@@ -433,7 +433,7 @@ def phase10_idempotence(phase: float) -> Image.Image:
     flow_dots(draw, (235, 350), (280, 308), (phase + 0.5) % 1.0, "#62C7B5", 2)
     flow_dots(draw, (700, 240), (745, 282), phase, "#E89186", 2)
     flow_dots(draw, (700, 350), (745, 308), (phase + 0.5) % 1.0, "#E89186", 2)
-    text(draw, (480, 495), "Partition + offset or an event ID can deduplicate sink retries.", 11, MUTED, True)
+    text(draw, (480, 495), "Topic + partition + offset, or a global event ID, can deduplicate retries.", 11, MUTED, True)
     return finish(image)
 
 

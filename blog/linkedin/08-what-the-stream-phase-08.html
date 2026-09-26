@@ -48,7 +48,7 @@
   <ol>
     <li>Drop the late event and monitor the rate of dropped data.</li>
     <li>Update the previous result and publish a correction.</li>
-    <li>Delay the initial result by allowing a configured lateness period.</li>
+    <li>Delay the initial result with a watermark strategy that allows configured out-of-orderness or a grace period. Allowed lateness typically keeps window state available for later corrections.</li>
   </ol>
 
   <p>A <strong>watermark</strong> estimates that event time has advanced past a timestamp. Events earlier than the watermark are late, but they may still arrive. A watermark is progress information, not a promise that the past is complete.</p>
