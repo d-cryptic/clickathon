@@ -1,0 +1,106 @@
+WHAT THE STREAM? PHASE 05
+Schedule: Wednesday, 7 October 2026 at 5:30 PM IST
+
+Intro:
+Every application has two stories: what is true now, and what happened to make it true.
+
+Phase 05 explores the difference between commands and events, why accepted events become durable facts, and how current state can be rebuilt from an immutable history. If you have ever wondered whether a command “becomes” an event, this article makes that boundary clear.
+
+Article title:
+What the Stream? Phase 05
+
+Article content:
+05-what-the-stream-phase-05.txt
+
+Hashtags:
+#EventSourcing #ApacheKafka #EventDrivenArchitecture #DistributedSystems #SoftwareArchitecture
+
+
+WHAT THE STREAM? PHASE 06
+Schedule: Friday, 9 October 2026 at 5:30 PM IST
+
+Intro:
+One event history can answer many completely different questions.
+
+Phase 06 looks at immutable events, CQRS, and the read views we build for search, analytics, and application queries. It also covers the part architecture diagrams often hide: projection lag, concurrency, and the real obligations behind deleting sensitive data.
+
+Article title:
+What the Stream? Phase 06
+
+Article content:
+06-what-the-stream-phase-06.txt
+
+Hashtags:
+#CQRS #EventSourcing #DataArchitecture #EventDrivenArchitecture #DistributedSystems
+
+
+WHAT THE STREAM? PHASE 07
+Schedule: Wednesday, 14 October 2026 at 5:30 PM IST
+
+Intro:
+A stream is not valuable merely because it moves data. Its value comes from everything that can react to that data.
+
+Phase 07 follows an event through operators, derived streams, alerts, metrics, materialized views, and reverse search. It connects CEP, stream analytics, and stateful processing without treating them as interchangeable ideas.
+
+Article title:
+What the Stream? Phase 07
+
+Article content:
+07-what-the-stream-phase-07.txt
+
+Hashtags:
+#StreamProcessing #ApacheFlink #ApacheKafka #RealTimeAnalytics #ComplexEventProcessing
+
+
+WHAT THE STREAM? PHASE 08
+Schedule: Friday, 16 October 2026 at 5:30 PM IST
+
+Intro:
+The hardest part of stream processing is often not the event. It is deciding what time the event belongs to.
+
+Phase 08 explores event time, processing time, watermarks, late data, and the four window types that shape real-time metrics. A processor restart should not look like your users disappeared—and a watermark should never be mistaken for a guarantee.
+
+Article title:
+What the Stream? Phase 08
+
+Article content:
+08-what-the-stream-phase-08.txt
+
+Hashtags:
+#EventTime #Watermarks #StreamProcessing #ApacheFlink #DataEngineering
+
+
+WHAT THE STREAM? PHASE 09
+Schedule: Wednesday, 21 October 2026 at 5:30 PM IST
+
+Intro:
+A database join works on data that is already there. A stream join may still be waiting for the other side to arrive.
+
+Phase 09 breaks down stream–stream, stream–table, and continuously maintained table–table joins. It covers out-of-order events, enrichment through CDC, materialized timelines, and the time semantics that decide which version of changing data should be joined.
+
+Article title:
+What the Stream? Phase 09
+
+Article content:
+09-what-the-stream-phase-09.txt
+
+Hashtags:
+#StreamJoins #KafkaStreams #ApacheFlink #DataEngineering #DistributedSystems
+
+
+WHAT THE STREAM? PHASE 10
+Schedule: Friday, 23 October 2026 at 5:30 PM IST
+
+Intro:
+“Exactly once” sounds like one feature switch. In practice, it is a contract across input, state, and every visible side effect.
+
+Phase 10 closes this series with microbatching, checkpoints, atomic commits, idempotence, and state recovery. It explains why replayable input is only one piece of fault tolerance—and why a push notification cannot simply be rolled back after a crash.
+
+Article title:
+What the Stream? Phase 10
+
+Article content:
+10-what-the-stream-phase-10.txt
+
+Hashtags:
+#FaultTolerance #ExactlyOnce #KafkaStreams #ApacheFlink #DistributedSystems

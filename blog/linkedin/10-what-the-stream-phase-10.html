@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="linkedin-schedule" content="2026-10-23 17:30 Asia/Kolkata">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>What the Stream? Phase 10</title>
+  <link rel="stylesheet" href="article.css">
+</head>
+<body>
+<article>
+  <h1>What the Stream? Phase 10</h1>
+  <p class="subtitle">Fault Tolerance in Stream Processing</p>
+
+  <h2>Fault Tolerance</h2>
+
+  <p>The issue of fault tolerance is not straight forward in case of streams. As streams are <strong>infinite and ever growing</strong>, waiting until a task is finished before making it output visible is not an option here.</p>
+
+  <h2>Microbatching and Checkpointing</h2>
+
+  <p>One solution for fault tolerance is to break the stream into small batches and treat them like a mini batch process, called as <strong>microbatching</strong>.</p>
+
+  <p>It is used in spark streaming , the batch size is around 1 sec, which brings performance overhead with requiring more attention in scheduling and coordination, whereas longer batches could result in more delays before result is made available to the user.</p>
+
+  <p>Microbatching also provides the feature of tumbling window, where some information is needed from previous batch, can be obtained by a maintained state, carried over from one microbatch to another.</p>
+
+  <p>Another approach used in Apache Flink, is to periodically generates <strong>rolling checkpoints</strong> which are stored in a durable storage, and in case of a crash the processor can continue from the most recent checkpoint and by discarding any output generated between last checkpoint and the crash.</p>
+
+  <p>The checkpoint is triggered by barriers in message streams, similar to boundaries between microbatches, but without forcing a particular window size.</p>
+
+  <p>Checkpointing and microbatching in stream processing provides the exactly one-semantics. But as soon as the output leaves the stream processor, and goes to the target system (like cache, databases) this exactly one semantics is no longer guaranteed. Restarting a failed task can have side-effects also.</p>
+
+  <figure>
+    <img src="../assets/linkedin/phase10-checkpoint-recovery.gif" alt="Animated replayable source, stateful operator, checkpoint, crash, and restore flow">
+    <figcaption>Microbatch boundaries compared with checkpoint barriers, followed by recovery from a durable checkpoint.</figcaption>
+  </figure>
+
+  <h2>Atomic Commit</h2>
+
+  <p>To make the system follow exactly-once processing even in the presence of faults, the side-effects and outputs of processing take effect only after the processing is done successfully.</p>
+
+  <p>Those effects not only include downstream systems like cache, push notifications but also acknowledgements around input messages like offset change for the consumer.</p>
+
+  <p>For this, all the changes need to happened atomically and should not go out of sync. The approach relies on writing the transaction commit as a single object to a fault-tolerant datastore, since a single-object write can be made atomic fairly easily.</p>
+
+  <h2>Idempotence</h2>
+
+  <p>With the goal of exactly-once processing, all the partial output of the failed tasks should be discarded, one way to achieve this is via distributed transactions, but another way we can rely on is <strong>Idempotence</strong>.</p>
+
+  <p>An Idempotent operation is one that you can perform multiple times, and it has the same effect as if you performed it only once.</p>
+
+  <p>For example, setting a key in a key-value pair is an idempotent operation, if the key is updated to same value (identical) again and again there is going to no change visible , whereas incrementing a counter is not an idempotent as performing the increment again means the value is incremented twice.</p>
+
+  <figure>
+    <img src="../assets/linkedin/phase10-idempotence-retries.gif" alt="Animated comparison of retried idempotent key assignment and retried counter increment">
+    <figcaption>Retried writes showing an idempotent key assignment and a duplicated counter increment.</figcaption>
+  </figure>
+
+  <p>Even if an operation is not naturally idempotent it can be made by using some metadata.</p>
+
+  <p>For example, consuming messages from kafka can be made idempotent by using an offset which is monotonically increases with each write. By this you can avoid performing the same update again by using the offset to get the last write done, the state handling in Storm's Trident is based on similar idea.</p>
+
+  <p>Idempotence implies that the operation is deterministic, no other node can concurrently update the same value and restarting a failed task must replay the same messages in the same order.</p>
+
+  <h2>Rebuilding State After a Failure</h2>
+
+  <p>Any stream that requires state (windowed aggregations like counters) must ensure that the state can be recovered after failure.</p>
+
+  <p>One option is to keep the state in a durable data storage, can be replicated to rebuild the state. This approach can be slow with the application requiring to query each message, to solve this the state could be stored locally over the disk, can be synced periodically. By this way, replication can be done without data loss,=.</p>
+
+  <p>Flink use snapshots of operator state using durable storage like HDFS, whereas, Kafka Streams replicate state changes by sending them to a dedicated kafka topic with log compaction.</p>
+
+  <p>In some cases the replication might not be needed via state, where it can be rebuilt by replaying input streams. For example, if the state consists of aggregations over a fairly short window, it may be fast enough to simply replay the input events corresponding to that window.</p>
+
+  <figure>
+    <img src="../assets/linkedin/phase10-state-recovery-options.gif" alt="Animated snapshot, changelog, and input replay paths feeding a recovered streaming state">
+    <figcaption>Recovering operator state through a durable snapshot, a compacted state topic, or input replay.</figcaption>
+  </figure>
+</article>
+</body>
+</html>

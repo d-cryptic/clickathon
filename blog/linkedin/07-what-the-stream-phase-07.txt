@@ -1,0 +1,63 @@
+What the Stream? Phase 07
+
+What Can You Do with a Stream?
+
+Processing a Stream
+
+Once we have a stream, the next question is simple: 𝐰𝐡𝐚𝐭 𝐜𝐚𝐧 𝐰𝐞 𝐝𝐨 𝐰𝐢𝐭𝐡 𝐢𝐭?
+
+• A stream consumer can update a database, search index, or cache. Other consumers may independently read the same stream for different purposes.
+
+• If a human is the ultimate consumer, the result can trigger an email, push notification, or another alerting mechanism.
+
+• A processing pipeline can generate one or more derived streams from one or more input streams.
+
+The code that performs a continuous transformation is often called an 𝐨𝐩𝐞𝐫𝐚𝐭𝐨𝐫 or a 𝐣𝐨𝐛 . Operators read input records and emit derived records. Sinks may append, upsert, retract, or delete depending on the result model.
+
+Input streams pass through operators and become several independently useful outputs.
+
+Uses of Stream Processing
+
+Stream processing is widely used for monitoring and timely decisions. A fraud system can alert when credit-card activity is suspicious. A warehouse can detect a faulty machine. A trading system can examine price changes and react to a condition.
+
+These applications may require pattern matching, correlation, aggregation, and managed state.
+
+Complex Event Processing
+
+Regular expressions search for patterns in text. 𝐂𝐨𝐦𝐩𝐥𝐞𝐱 𝐄𝐯𝐞𝐧𝐭 𝐏𝐫𝐨𝐜𝐞𝐬𝐬𝐢𝐧𝐠, 𝐨𝐫 𝐂𝐄𝐏, 𝐬𝐞𝐚𝐫𝐜𝐡𝐞𝐬 𝐟𝐨𝐫 𝐩𝐚𝐭𝐭𝐞𝐫𝐧𝐬 𝐢𝐧 𝐚 𝐬𝐞𝐪𝐮𝐞𝐧𝐜𝐞 𝐨𝐟 𝐞𝐯𝐞𝐧𝐭𝐬.
+
+Patterns may be described with a declarative query language or a graphical interface. The processing engine maintains state as events arrive. When the expected pattern is matched, it emits a complex event containing the details of the match.
+
+CEP commonly stores standing queries and evaluates incoming events against them. A conventional database usually stores data and evaluates a submitted query. CEP input may still be retained for replay, recovery, or audit; it is not required to be transient.
+
+Stream Analytics
+
+Stream analytics focuses on aggregates and statistical metrics: event rates, rolling averages, current values compared with previous values, and alerts based on those comparisons.
+
+These metrics may be computed over 𝐭𝐢𝐦𝐞 𝐰𝐢𝐧𝐝𝐨𝐰𝐬, 𝐜𝐨𝐮𝐧𝐭 𝐰𝐢𝐧𝐝𝐨𝐰𝐬, 𝐬𝐥𝐢𝐝𝐢𝐧𝐠 𝐰𝐢𝐧𝐝𝐨𝐰𝐬, 𝐨𝐫 𝐬𝐞𝐬𝐬𝐢𝐨𝐧 𝐰𝐢𝐧𝐝𝐨𝐰𝐬 . Averaging can reduce short-term fluctuations and expose a broader trend.
+
+Exact computation is not always necessary or affordable. Approximate structures such as HyperLogLog, Count-Min Sketch, and t-digest can reduce state size. Bloom filters serve a more specific purpose: approximate membership testing.
+
+Apache Flink is one open-source stream-processing framework designed for stateful processing and analytics.
+
+Maintaining Materialized Views
+
+A materialized view is an alternative representation of a dataset that is kept current as changes arrive. In event sourcing, application state is itself a materialized view derived from the event log.
+
+𝐀 𝐦𝐚𝐭𝐞𝐫𝐢𝐚𝐥𝐢𝐳𝐞𝐝 𝐯𝐢𝐞𝐰 𝐢𝐬 𝐚𝐜𝐜𝐮𝐦𝐮𝐥𝐚𝐭𝐞𝐝 𝐬𝐭𝐚𝐭𝐞, 𝐧𝐨𝐭 𝐨𝐧𝐞 𝐠𝐢𝐚𝐧𝐭 𝐰𝐢𝐧𝐝𝐨𝐰 𝐛𝐞𝐠𝐢𝐧𝐧𝐢𝐧𝐠 𝐰𝐡𝐞𝐧 𝐭𝐡𝐞 𝐚𝐩𝐩𝐥𝐢𝐜𝐚𝐭𝐢𝐨𝐧 𝐬𝐭𝐚𝐫𝐭𝐞𝐝. It can be bootstrapped from a snapshot and then maintained from subsequent changes.
+
+Log compaction can retain the latest value for each key. It is a retention mechanism, not an approximation technique. Kafka Streams is a processing library that can maintain local state stores backed by compacted changelog topics.
+
+Search on Streams
+
+Sometimes an application needs complex search criteria such as full-text search. A real-estate website may need to notify users when a newly listed property matches their saved requirements.
+
+A conventional search engine indexes documents and runs queries against that index. In reverse search, 𝐪𝐮𝐞𝐫𝐢𝐞𝐬 𝐚𝐫𝐞 𝐢𝐧𝐝𝐞𝐱𝐞𝐝 𝐚𝐧𝐝 𝐞𝐚𝐜𝐡 𝐧𝐞𝐰 𝐝𝐨𝐜𝐮𝐦𝐞𝐧𝐭 𝐢𝐬 𝐦𝐚𝐭𝐜𝐡𝐞𝐝 𝐚𝐠𝐚𝐢𝐧𝐬𝐭 𝐭𝐡𝐨𝐬𝐞 𝐬𝐭𝐚𝐧𝐝𝐢𝐧𝐠 𝐪𝐮𝐞𝐫𝐢𝐞𝐬. At larger scale, both documents and queries may be indexed.
+
+Messaging, Streaming, and Request-Like Processing
+
+Message-passing and streaming systems overlap. Either may support durable or ephemeral delivery and one or many consumers. Stream processors are distinguished mainly by continuous transformations and managed state.
+
+Distributed stream-processing frameworks such as Apache Storm can also support request-like topologies and result aggregation. Queries can be interleaved with input events, aggregated, and returned to a caller.
+
+A stream is not valuable because it moves data. It is valuable because it lets many independent computations react to the same sequence of facts.

@@ -1,0 +1,53 @@
+What the Stream? Phase 06
+
+Immutable Events, CQRS, and Concurrency
+
+Why Immutable Events Are Useful
+
+Immutability in data systems is not a new idea. Accountants have used append-only financial ledgers for a long time. An incorrect transaction is not silently removed; a correction transaction is added so the history remains available for audit.
+
+The same principle is useful outside finance. In a conventional shopping-cart database, the current item row may be updated or deleted. An event log can retain the earlier add and remove actions. That history may help us understand customer behavior, recover from bugs, or build a new analytical model later.
+
+𝐀𝐧 𝐢𝐦𝐦𝐮𝐭𝐚𝐛𝐥𝐞 𝐞𝐯𝐞𝐧𝐭 𝐥𝐨𝐠 𝐦𝐚𝐤𝐞𝐬 𝐢𝐭 𝐞𝐚𝐬𝐢𝐞𝐫 𝐭𝐨 𝐮𝐧𝐝𝐞𝐫𝐬𝐭𝐚𝐧𝐝 𝐰𝐡𝐚𝐭 𝐡𝐚𝐩𝐩𝐞𝐧𝐞𝐝 𝐚𝐧𝐝 𝐭𝐨 𝐫𝐞𝐛𝐮𝐢𝐥𝐝 𝐰𝐡𝐚𝐭 𝐞𝐱𝐢𝐬𝐭𝐬 𝐧𝐨𝐰.
+
+Several Views from the Same Event Log
+
+By separating an immutable event log from mutable state, we can derive different read-oriented representations from the same sequence of facts.
+
+A search view can be optimized for text lookup. An account view can be optimized for balances and recent transactions. An analytics view can organize the same events around behavior and trends. If requirements change, a new projection can be created by replaying the event history.
+
+This can simplify the write model, but it does not remove design work. 𝐄𝐯𝐞𝐧𝐭 𝐬𝐜𝐡𝐞𝐦𝐚𝐬, 𝐬𝐜𝐡𝐞𝐦𝐚 𝐞𝐯𝐨𝐥𝐮𝐭𝐢𝐨𝐧, 𝐩𝐚𝐫𝐭𝐢𝐭𝐢𝐨𝐧𝐢𝐧𝐠, 𝐚𝐧𝐝 𝐩𝐫𝐨𝐣𝐞𝐜𝐭𝐢𝐨𝐧 𝐚𝐜𝐜𝐞𝐬𝐬 𝐩𝐚𝐭𝐭𝐞𝐫𝐧𝐬 𝐬𝐭𝐢𝐥𝐥 𝐫𝐞𝐪𝐮𝐢𝐫𝐞 𝐝𝐞𝐥𝐢𝐛𝐞𝐫𝐚𝐭𝐞 𝐝𝐞𝐜𝐢𝐬𝐢𝐨𝐧𝐬.
+
+𝐂𝐨𝐦𝐦𝐚𝐧𝐝 𝐐𝐮𝐞𝐫𝐲 𝐑𝐞𝐬𝐩𝐨𝐧𝐬𝐢𝐛𝐢𝐥𝐢𝐭𝐲 𝐒𝐞𝐠𝐫𝐞𝐠𝐚𝐭𝐢𝐨𝐧, 𝐨𝐫 𝐂𝐐𝐑𝐒, 𝐬𝐞𝐩𝐚𝐫𝐚𝐭𝐞𝐬 𝐭𝐡𝐞 𝐜𝐨𝐦𝐦𝐚𝐧𝐝 𝐦𝐨𝐝𝐞𝐥 𝐮𝐬𝐞𝐝 𝐟𝐨𝐫 𝐰𝐫𝐢𝐭𝐞𝐬 𝐟𝐫𝐨𝐦 𝐭𝐡𝐞 𝐪𝐮𝐞𝐫𝐲 𝐦𝐨𝐝𝐞𝐥 𝐮𝐬𝐞𝐝 𝐟𝐨𝐫 𝐫𝐞𝐚𝐝𝐬. Multiple read projections are common, but CQRS does not require event sourcing, and event sourcing does not automatically require many read views.
+
+Denormalization also remains relevant. Read projections are often intentionally denormalized so that application queries are simple and fast.
+
+One event history can feed several purpose-built read views.
+
+Concurrency and Read-View Consistency
+
+CDC consumers and event-sourced projections are commonly updated asynchronously. A write may be safely recorded in the event log before it becomes visible in a read view. The user can temporarily see stale data.
+
+There are several ways to handle this:
+
+• 𝐀𝐭𝐨𝐦𝐢𝐜 𝐮𝐩𝐝𝐚𝐭𝐞: update the log and view in one transaction when both share a transactional boundary.
+
+• 𝐏𝐫𝐨𝐣𝐞𝐜𝐭𝐢𝐨𝐧 𝐯𝐞𝐫𝐬𝐢𝐨𝐧: wait until the read view reaches the version produced by the user’s command.
+
+• 𝐑𝐞𝐚𝐝 𝐟𝐫𝐨𝐦 𝐭𝐡𝐞 𝐰𝐫𝐢𝐭𝐞 𝐦𝐨𝐝𝐞𝐥: use the authoritative write state for an immediate read-your-writes response.
+
+• 𝐄𝐱𝐩𝐥𝐢𝐜𝐢𝐭 𝐞𝐯𝐞𝐧𝐭𝐮𝐚𝐥 𝐜𝐨𝐧𝐬𝐢𝐬𝐭𝐞𝐧𝐜𝐲: show the user that the view is still updating.
+
+Self-contained events can reduce external lookups, but they do not remove concurrency concerns. Concurrent commands, ordering, stale projections, and conflicting updates still exist.
+
+Co-partitioning an event log and state can provide deterministic ordering for a key and may enable atomic processing when the platform supports transactions. It does not make arbitrary cross-key actions atomic or remove every source of nondeterminism.
+
+Immutability and Deletion
+
+Storage is affordable enough that many applications retain long histories, but retention is not only a technical choice. Regulations may require deletion of 𝐩𝐞𝐫𝐬𝐨𝐧𝐚𝐥𝐥𝐲 𝐢𝐝𝐞𝐧𝐭𝐢𝐟𝐢𝐚𝐛𝐥𝐞 𝐢𝐧𝐟𝐨𝐫𝐦𝐚𝐭𝐢𝐨𝐧 .
+
+Deletion must be handled across live stores, indexes, caches, replicas, and backups. Simply making information difficult to retrieve may not satisfy an erasure obligation.
+
+Event-sourced systems often reduce this risk by keeping sensitive data outside immutable events, storing references instead of raw values, or encrypting sensitive fields so that destroying a key can make the data unreadable where legally appropriate.
+
+Immutability is a powerful system property, but it is not permission to ignore data lifecycle and privacy requirements.
