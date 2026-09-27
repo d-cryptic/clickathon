@@ -10,7 +10,7 @@ Article title:
 What the Stream? Phase 05
 
 Article content:
-05-what-the-stream-phase-05.html
+05-what-the-stream-phase-05.txt
 
 Hashtags:
 #EventSourcing #ApacheKafka #EventDrivenArchitecture #DistributedSystems #SoftwareArchitecture
@@ -28,7 +28,7 @@ Article title:
 What the Stream? Phase 06
 
 Article content:
-06-what-the-stream-phase-06.html
+06-what-the-stream-phase-06.txt
 
 Hashtags:
 #CQRS #EventSourcing #DataArchitecture #EventDrivenArchitecture #DistributedSystems
@@ -46,7 +46,7 @@ Article title:
 What the Stream? Phase 07
 
 Article content:
-07-what-the-stream-phase-07.html
+07-what-the-stream-phase-07.txt
 
 Hashtags:
 #StreamProcessing #ApacheFlink #ApacheKafka #RealTimeAnalytics #ComplexEventProcessing
@@ -64,7 +64,7 @@ Article title:
 What the Stream? Phase 08
 
 Article content:
-08-what-the-stream-phase-08.html
+08-what-the-stream-phase-08.txt
 
 Hashtags:
 #EventTime #Watermarks #StreamProcessing #ApacheFlink #DataEngineering
@@ -82,7 +82,7 @@ Article title:
 What the Stream? Phase 09
 
 Article content:
-09-what-the-stream-phase-09.html
+09-what-the-stream-phase-09.txt
 
 Hashtags:
 #StreamJoins #KafkaStreams #ApacheFlink #DataEngineering #DistributedSystems
@@ -100,7 +100,7 @@ Article title:
 What the Stream? Phase 10
 
 Article content:
-10-what-the-stream-phase-10.html
+10-what-the-stream-phase-10.txt
 
 Hashtags:
 #FaultTolerance #ExactlyOnce #KafkaStreams #ApacheFlink #DistributedSystems

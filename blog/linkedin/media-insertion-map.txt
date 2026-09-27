@@ -1,0 +1,43 @@
+MEDIA INSERTION MAP — DO NOT COPY THIS FILE INTO LINKEDIN
+
+Phase 05
+After the "Commands and Events" section:
+../assets/linkedin/phase05-event-state.gif
+
+Phase 06
+After the "Deriving Several Views from the Same Event Log" section:
+../assets/linkedin/phase06-event-log-projections.gif
+
+Phase 07
+After the opening "Processing a Stream" section:
+../assets/linkedin/phase07-stream-processing-pipeline.gif
+
+Phase 08
+After "Event Time Versus Processing Time":
+../assets/linkedin/phase08-event-vs-processing-time.gif
+
+After "Knowing When a Window Is Ready":
+../assets/linkedin/phase08-watermark-late-events.gif
+
+After "Types of Windows":
+../assets/linkedin/phase08-window-types.gif
+
+Phase 09
+After "Stream-Stream Join (Window Join)":
+../assets/linkedin/phase09-stream-stream-join.gif
+
+After "Stream-Table Join (Stream Enrichment)":
+../assets/linkedin/phase09-stream-table-enrichment.gif
+
+After "Table-Table Join (Materialized View Maintenance)":
+../assets/linkedin/phase09-table-table-materialized-view.gif
+
+Phase 10
+After "Microbatching and Checkpointing":
+../assets/linkedin/phase10-checkpoint-recovery.gif
+
+After "Idempotence":
+../assets/linkedin/phase10-idempotence-retries.gif
+
+After "Rebuilding State After a Failure":
+../assets/linkedin/phase10-state-recovery-options.gif
